@@ -39,6 +39,7 @@ import {
   descriptorsMatchDefaults,
   findEffortDescriptor,
   modelSubtitle,
+  stripProviderPrefix,
   pickProviderDefaultModel,
   providerStatusLabel,
 } from "./ModelPickerContent.logic";
@@ -575,7 +576,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           const jumpLabel = modelJumpLabelByKey.get(key);
           return {
             id: key,
-            label: getDisplayModelName(model, isLocked ? undefined : { preferShortName: true }),
+            label: showProviderInSubtitle
+              ? getDisplayModelName(model, isLocked ? undefined : { preferShortName: true })
+              : stripProviderPrefix(
+                  getDisplayModelName(model, isLocked ? undefined : { preferShortName: true }),
+                  getProviderRowLabel(model.instanceDisplayName, model.subProvider),
+                ),
             sublabel: modelSubtitle({
               slug: model.slug,
               isUnavailable: model.isUnavailable === true,
@@ -982,7 +988,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         role="group"
         aria-label="Model and reasoning"
         data-model-picker-content="true"
-        className="@container/picker relative flex w-[min(34rem,calc(100vw-0.75rem))] flex-col [--wheel-item:2.75rem]"
+        className="@container/picker relative flex w-[min(40rem,calc(100vw-0.75rem))] flex-col [--wheel-item:2.75rem]"
         onKeyDown={handleRootKeyDown}
       >
         <div className="flex h-11 items-center justify-between gap-2 px-3">

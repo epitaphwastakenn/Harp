@@ -19,6 +19,13 @@ export function modelTier(slug: string): string | null {
   return modelTiers.find(([pattern]) => pattern.test(slug))?.[1] ?? null;
 }
 
+export function stripProviderPrefix(name: string, providerLabel: string): string {
+  const prefix = `${providerLabel} `;
+  return name.length > prefix.length && name.toLowerCase().startsWith(prefix.toLowerCase())
+    ? name.slice(prefix.length)
+    : name;
+}
+
 export function modelSubtitle(input: {
   readonly slug: string;
   readonly isUnavailable: boolean;

@@ -6,6 +6,7 @@ import {
   descriptorsMatchDefaults,
   findEffortDescriptor,
   modelSubtitle,
+  stripProviderPrefix,
   pickProviderDefaultModel,
   providerStatusLabel,
 } from "./ModelPickerContent.logic";
@@ -87,6 +88,14 @@ describe("modelSubtitle", () => {
     expect(modelSubtitle({ ...subtitleBase, isUnavailable: true, showProvider: true })).toBe(
       "Unavailable",
     );
+  });
+});
+
+describe("stripProviderPrefix", () => {
+  it("drops the provider name the provider wheel already shows", () => {
+    expect(stripProviderPrefix("Claude Sonnet 5.5", "Claude")).toBe("Sonnet 5.5");
+    expect(stripProviderPrefix("gpt-6-astra", "Codex")).toBe("gpt-6-astra");
+    expect(stripProviderPrefix("Claude", "Claude")).toBe("Claude");
   });
 });
 
