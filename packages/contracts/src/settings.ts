@@ -362,6 +362,11 @@ export const SidebarHeaderArtColor = Schema.Union([
 export type SidebarHeaderArtColor = typeof SidebarHeaderArtColor.Type;
 export const DEFAULT_SIDEBAR_HEADER_ART_COLOR: SidebarHeaderArtColor = "theme";
 
+export const REASONING_SLIDER_STYLES = ["liquid", "comet", "classic"] as const;
+export const ReasoningSliderStyle = Schema.Literals(REASONING_SLIDER_STYLES);
+export type ReasoningSliderStyle = typeof ReasoningSliderStyle.Type;
+export const DEFAULT_REASONING_SLIDER_STYLE: ReasoningSliderStyle = "liquid";
+
 /** 2.17.14 stored the art as an on/off switch, `sidebarHeaderArt`; an explicit style wins. */
 function migrateLegacySidebarHeaderArt(input: unknown): unknown {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
@@ -602,6 +607,9 @@ const ClientSettingsStruct = Schema.Struct({
   ),
   sidebarHeaderArtColor: SidebarHeaderArtColor.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_HEADER_ART_COLOR)),
+  ),
+  reasoningSliderStyle: ReasoningSliderStyle.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_REASONING_SLIDER_STYLE)),
   ),
   cornerRadius: CornerRadius.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_CORNER_RADIUS)),
@@ -2025,6 +2033,7 @@ export const ClientSettingsPatch = Schema.Struct({
   glassAppEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarHeaderArtStyle: Schema.optionalKey(SidebarHeaderArtStyle),
   sidebarHeaderArtColor: Schema.optionalKey(SidebarHeaderArtColor),
+  reasoningSliderStyle: Schema.optionalKey(ReasoningSliderStyle),
   cornerRadius: Schema.optionalKey(CornerRadius),
   smoothCorners: Schema.optionalKey(Schema.Boolean),
   floatingPanels: Schema.optionalKey(Schema.Boolean),
