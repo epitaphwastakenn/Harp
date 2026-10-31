@@ -577,6 +577,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             id: key,
             label: getDisplayModelName(model, isLocked ? undefined : { preferShortName: true }),
             sublabel: modelSubtitle({
+              slug: model.slug,
               isUnavailable: model.isUnavailable === true,
               isLegacy: model.isLegacy === true,
               isNew: model.badge === "new",

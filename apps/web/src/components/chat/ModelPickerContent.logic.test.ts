@@ -40,6 +40,7 @@ const withSelections = (selections: Array<{ id: string; value: string | boolean 
   getProviderOptionDescriptors({ caps, selections });
 
 const subtitleBase = {
+  slug: "custom-model",
   isUnavailable: false,
   isLegacy: false,
   isNew: false,
@@ -68,6 +69,18 @@ describe("modelSubtitle", () => {
     expect(modelSubtitle({ ...subtitleBase, isNew: true, isLegacy: true })).toBe("New");
     expect(modelSubtitle({ ...subtitleBase, isLegacy: true, isDefault: true })).toBe("Legacy");
     expect(modelSubtitle({ ...subtitleBase, isDefault: true })).toBe("Default");
+  });
+
+  it("names the tier of known model families, but legacy wins", () => {
+    expect(modelSubtitle({ ...subtitleBase, slug: "claude-haiku-5-5" })).toBe("Fast");
+    expect(modelSubtitle({ ...subtitleBase, slug: "claude-sonnet-5-5", isNew: true })).toBe(
+      "Balanced",
+    );
+    expect(modelSubtitle({ ...subtitleBase, slug: "claude-opus-5-5" })).toBe("Smart");
+    expect(modelSubtitle({ ...subtitleBase, slug: "claude-fable-5-1" })).toBe("Frontier");
+    expect(modelSubtitle({ ...subtitleBase, slug: "claude-opus-4-8", isLegacy: true })).toBe(
+      "Legacy",
+    );
   });
 
   it("puts an unavailable model above everything else", () => {

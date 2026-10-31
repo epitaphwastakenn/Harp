@@ -8,7 +8,19 @@ import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 
+const modelTiers: ReadonlyArray<readonly [RegExp, string]> = [
+  [/haiku|mini|nano|flash|lite/i, "Fast"],
+  [/sonnet/i, "Balanced"],
+  [/opus/i, "Smart"],
+  [/fable/i, "Frontier"],
+];
+
+export function modelTier(slug: string): string | null {
+  return modelTiers.find(([pattern]) => pattern.test(slug))?.[1] ?? null;
+}
+
 export function modelSubtitle(input: {
+  readonly slug: string;
   readonly isUnavailable: boolean;
   readonly isLegacy: boolean;
   readonly isNew: boolean;
@@ -20,8 +32,10 @@ export function modelSubtitle(input: {
   if (input.isUnavailable) return "Unavailable";
   if (input.showProvider) return input.providerLabel;
   if (input.subProvider) return input.subProvider;
+  if (input.isLegacy && !input.isNew) return "Legacy";
+  const tier = modelTier(input.slug);
+  if (tier) return tier;
   if (input.isNew) return "New";
-  if (input.isLegacy) return "Legacy";
   if (input.isDefault) return "Default";
   return null;
 }
