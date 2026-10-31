@@ -19,12 +19,17 @@ import { ProjectToolkit } from "./tools.ts";
 
 function projectFailure(error: Project.ProjectServiceError) {
   if (error._tag === "ProjectOperationError") return unavailable();
+  if (error._tag === "ProjectIconFetchError") {
+    return new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message });
+  }
   const message =
     error._tag === "ProjectNotFoundError"
       ? "The project was not found."
       : error._tag === "ProjectConflictError"
         ? "The workspace is already registered to a project."
-        : "The project is not empty; force=true is required to delete it.";
+        : error._tag === "ProjectNotEmptyError"
+          ? "The project is not empty; force=true is required to delete it."
+          : error.message;
   return new OrchestratorMcpFailure({ code: "invalid_request", message });
 }
 

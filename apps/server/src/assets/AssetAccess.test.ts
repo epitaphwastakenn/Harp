@@ -28,6 +28,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as ProjectIconResolver from "../project/ProjectIconResolver.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { assetFileResponse } from "../http.ts";
@@ -130,6 +131,7 @@ const layerTest = Layer.mergeAll(
   ),
   NativeAppIconResolver.layer.pipe(Layer.provide(layerConfig)),
   ServerSecretStore.layer.pipe(Layer.provide(layerConfig)),
+  Layer.mock(ProjectIconResolver.ProjectIconResolver)({}),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
@@ -244,6 +246,102 @@ describe("AssetAccess", () => {
         mimeType: "image/png",
         bytes: Buffer.from(screenshotPng),
       });
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("serves a project icon from its stored file and keeps one URL while it is fresh", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const iconPath = path.join(config.attachmentsDir, "project-icons", "383310974.png");
+      yield* fs.makeDirectory(path.dirname(iconPath), { recursive: true });
+      yield* fs.writeFile(iconPath, screenshotPng);
+      const requested: Array<number> = [];
+      const resolver = ProjectIconResolver.ProjectIconResolver.of({
+        resolveGameUrl: () => Effect.die("not used by asset access"),
+        ensureGameIcon: (universeId) =>
+          Effect.sync(() => requested.push(universeId)).pipe(Effect.as(iconPath)),
+      });
+
+      yield* Effect.gen(function* () {
+        const resource = { _tag: "project-icon", universeId: 383310974 } as const;
+        const first = yield* issueAssetUrl({ resource });
+        expect(first.relativeUrl).toMatch(/\/383310974\.png$/);
+        yield* TestClock.adjust("5 minutes");
+        expect(yield* issueAssetUrl({ resource })).toEqual(first);
+
+        const suffix = first.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separator = suffix.indexOf("/");
+        expect(
+          yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1)),
+        ).toEqual({ kind: "file", path: iconPath });
+        expect(requested).toEqual([383310974, 383310974, 383310974]);
+      }).pipe(Effect.provideService(ProjectIconResolver.ProjectIconResolver, resolver));
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("reports a project icon Roblox cannot supply instead of issuing a URL", () =>
+    Effect.gen(function* () {
+      const resource = { _tag: "project-icon", universeId: 383310974 } as const;
+      const missing = yield* issueAssetUrl({ resource }).pipe(
+        Effect.provideService(
+          ProjectIconResolver.ProjectIconResolver,
+          ProjectIconResolver.ProjectIconResolver.of({
+            resolveGameUrl: () => Effect.die("not used by asset access"),
+            ensureGameIcon: () =>
+              Effect.fail(new ProjectIconResolver.ProjectIconGameNotFoundError({})),
+          }),
+        ),
+        Effect.flip,
+      );
+      expect(missing._tag).toBe("AssetWorkspaceAssetNotFoundError");
+      expect(missing.message).toBe("Project icon was not found.");
+
+      const offline = yield* issueAssetUrl({ resource }).pipe(
+        Effect.provideService(
+          ProjectIconResolver.ProjectIconResolver,
+          ProjectIconResolver.ProjectIconResolver.of({
+            resolveGameUrl: () => Effect.die("not used by asset access"),
+            ensureGameIcon: () =>
+              Effect.fail(new ProjectIconResolver.ProjectIconFetchError({ cause: "offline" })),
+          }),
+        ),
+        Effect.flip,
+      );
+      expect(offline._tag).toBe("AssetWorkspaceAssetInspectionError");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("answers 404 for a signed project icon whose file cannot be restored", () =>
+    Effect.gen(function* () {
+      const issued = yield* issueAssetUrl({
+        resource: { _tag: "project-icon", universeId: 383310974 },
+      }).pipe(
+        Effect.provideService(
+          ProjectIconResolver.ProjectIconResolver,
+          ProjectIconResolver.ProjectIconResolver.of({
+            resolveGameUrl: () => Effect.die("not used by asset access"),
+            ensureGameIcon: () => Effect.succeed("/unused/383310974.png"),
+          }),
+        ),
+      );
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      const gone = yield* resolveAsset(
+        suffix.slice(0, separator),
+        suffix.slice(separator + 1),
+      ).pipe(
+        Effect.provideService(
+          ProjectIconResolver.ProjectIconResolver,
+          ProjectIconResolver.ProjectIconResolver.of({
+            resolveGameUrl: () => Effect.die("not used by asset access"),
+            ensureGameIcon: () =>
+              Effect.fail(new ProjectIconResolver.ProjectIconFetchError({ cause: "offline" })),
+          }),
+        ),
+      );
+      expect(gone).toBeNull();
     }).pipe(Effect.provide(layerTest)),
   );
 

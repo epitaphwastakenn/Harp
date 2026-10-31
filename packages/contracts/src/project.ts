@@ -92,6 +92,16 @@ const ProjectMonogramIcon = Schema.Struct({
   text: ProjectMonogramText,
   color: ProjectIconColor,
 });
+export const ProjectRobloxGameIcon = Schema.Struct({
+  kind: Schema.Literal("roblox-game"),
+  placeId: PositiveInt,
+  universeId: PositiveInt,
+});
+export type ProjectRobloxGameIcon = typeof ProjectRobloxGameIcon.Type;
+const ProjectRobloxGameUrl = Schema.Struct({
+  kind: Schema.Literal("roblox-game-url"),
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)),
+});
 export const ProjectFaviconPath = TrimmedNonEmptyString.check(
   Schema.isMaxLength(1024),
   Schema.isPattern(/\.(?:avif|gif|icns|ico|jpe?g|png|svg|webp)$/i),
@@ -102,8 +112,12 @@ export const ProjectIconOverride = Schema.Union([
   ProjectLucideIcon,
   ProjectEmojiIcon,
   ProjectMonogramIcon,
+  ProjectRobloxGameIcon,
 ]);
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
+
+export const ProjectIconInput = Schema.Union([ProjectIconOverride, ProjectRobloxGameUrl]);
+export type ProjectIconInput = typeof ProjectIconInput.Type;
 
 const ProjectLucideIconWithLegacyMonogram = Schema.Struct({
   ...ProjectLucideIcon.fields,
@@ -114,6 +128,7 @@ const projectIconMembers = [
   ProjectLucideIconWithLegacyMonogram,
   ProjectEmojiIcon,
   ProjectMonogramIcon,
+  ProjectRobloxGameIcon,
 ] as const;
 type ProjectIconMember = (typeof projectIconMembers)[number]["Type"];
 
@@ -196,7 +211,7 @@ export const ProjectUpdatePayload = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   autoPull: Schema.optional(Schema.Boolean),
-  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconInput)),
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),

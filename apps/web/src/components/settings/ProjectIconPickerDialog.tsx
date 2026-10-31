@@ -5,6 +5,7 @@ import {
   ProjectMonogramText,
   type ProjectIconColor,
   type ProjectIconOverride,
+  type ProjectRobloxGameIcon,
 } from "@t3tools/contracts";
 import { createElement, useState } from "react";
 import {
@@ -52,7 +53,7 @@ export function ProjectIconPickerDialog({
   onOpenChange,
   onSelect,
 }: {
-  readonly current: ProjectIconOverride | null;
+  readonly current: Exclude<ProjectIconOverride, ProjectRobloxGameIcon> | null;
   readonly projectName: string;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -79,13 +80,13 @@ function ProjectIconPickerBody({
   onClose,
   onSelect,
 }: {
-  readonly current: ProjectIconOverride | null;
+  readonly current: Exclude<ProjectIconOverride, ProjectRobloxGameIcon> | null;
   readonly projectName: string;
   readonly onClose: () => void;
   readonly onSelect: (icon: ProjectIconOverride) => void;
 }) {
   const automatic = deriveProjectIdentity(projectName);
-  const [mode, setMode] = useState<ProjectIconOverride["kind"]>(current?.kind ?? "lucide");
+  const [mode, setMode] = useState<"lucide" | "emoji" | "monogram">(current?.kind ?? "lucide");
   const [iconName, setIconName] = useState<string>(
     current?.kind === "lucide" ? current.name : DEFAULT_ICON,
   );

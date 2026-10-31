@@ -17,7 +17,7 @@ import {
   type OrchestrationV2StudioExcludedPlace,
   type PlanId,
   type ProjectId,
-  type ProjectIconOverride,
+  type ProjectIconInput,
   type ProjectScript,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -58,7 +58,7 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly autoPull?: boolean;
-  readonly projectIcon?: ProjectIconOverride | null;
+  readonly projectIcon?: ProjectIconInput | null;
   readonly faviconPath?: string | null;
   readonly defaultThreadEnvMode?: ThreadEnvMode | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;

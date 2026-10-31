@@ -32,6 +32,17 @@ export type DraftActionMenuId =
   | "project-settings"
   | "discard";
 
+export type ProjectActionMenuId = "change-icon" | "project-settings";
+
+export function buildProjectActionMenuItems(options: {
+  readonly canOperate: boolean;
+}): ReadonlyArray<ContextMenuItem<ProjectActionMenuId>> {
+  return [
+    { id: "change-icon", label: "Change icon…", disabled: !options.canOperate },
+    { id: "project-settings", label: "Project settings", icon: "settings" },
+  ];
+}
+
 export function buildDraftActionMenuItems(options: {
   readonly hasPath: boolean;
   readonly hasBranch: boolean;

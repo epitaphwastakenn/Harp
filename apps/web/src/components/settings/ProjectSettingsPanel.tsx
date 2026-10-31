@@ -518,7 +518,9 @@ function ProjectDetail({
                   ? `${projectIcon.text} · ${projectIcon.color}`
                   : projectIcon?.kind === "emoji"
                     ? projectIcon.emoji
-                    : (faviconPath ?? "Automatic")
+                    : projectIcon?.kind === "roblox-game"
+                      ? `Roblox game ${projectIcon.placeId}`
+                      : (faviconPath ?? "Automatic")
             }
             resetAction={
               group.memberProjects.some(
@@ -611,7 +613,7 @@ function ProjectDetail({
       {iconPickerOpen && canEditGroup ? (
         <Suspense fallback={null}>
           <ProjectIconPickerDialog
-            current={projectIcon}
+            current={projectIcon?.kind === "roblox-game" ? null : projectIcon}
             projectName={representative.title}
             open
             onOpenChange={setIconPickerOpen}

@@ -139,6 +139,12 @@ Harp detect an icon again.
 
 Choose **Monogram** in the icon picker to set one or two letters or numbers and a color.
 
+For a quicker pick, right-click a project in the sidebar and choose **Change icon…**. Choose one of
+the game icons, or paste a Roblox game page link such as
+`https://www.roblox.com/games/123456789/Name` to use that game's icon. **Use letters** goes back to
+the default. The host needs to reach Roblox the first time it fetches a game's icon; after that the
+icon is kept and shown on every connected client.
+
 When no image is found, web and desktop show a two-character monogram with a color
 from the icon palette, derived from the saved project name. For example, `Nebula` becomes `NA`,
 `Silver Orchard` becomes `SO`, and `M7 Forge` becomes `M7`.

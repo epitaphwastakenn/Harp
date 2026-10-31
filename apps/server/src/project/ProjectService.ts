@@ -33,6 +33,7 @@ import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecuto
 import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
+import * as ProjectIconResolver from "./ProjectIconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export interface ProjectCreateInput extends ProjectCreatePayload {
@@ -109,7 +110,8 @@ export type ProjectServiceError =
   | ProjectNotFoundError
   | ProjectConflictError
   | ProjectNotEmptyError
-  | ProjectOperationError;
+  | ProjectOperationError
+  | ProjectIconResolver.ProjectIconError;
 
 export class ProjectService extends Context.Service<
   ProjectService,
@@ -144,6 +146,7 @@ export class ProjectService extends Context.Service<
 export const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
+  const iconResolver = yield* ProjectIconResolver.ProjectIconResolver;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const threadProjections = yield* ProjectionStore.ProjectionStoreV2;
   const eventSink = yield* EventSink.EventSinkV2;
@@ -359,6 +362,10 @@ export const make = Effect.gen(function* () {
               projectId: input.projectId,
               workspaceRoot: input.workspaceRoot,
             });
+      const projectIcon =
+        input.projectIcon?.kind === "roblox-game-url"
+          ? yield* iconResolver.resolveGameUrl(input.projectIcon.url)
+          : input.projectIcon;
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,
@@ -369,7 +376,7 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultModelSelection: input.defaultModelSelection }),
         ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
-        ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
+        ...(projectIcon === undefined ? {} : { projectIcon }),
         ...(input.faviconPath === undefined ? {} : { faviconPath: input.faviconPath }),
         ...(input.defaultThreadEnvMode === undefined
           ? {}

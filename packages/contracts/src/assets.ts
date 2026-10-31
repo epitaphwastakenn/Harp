@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, ThreadId, TrimmedNonEmptyString, TurnItemId } from "./baseSchemas.ts";
+import {
+  NonNegativeInt,
+  PositiveInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+  TurnItemId,
+} from "./baseSchemas.ts";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -51,6 +57,9 @@ export const AssetResource = Schema.Union([
   }),
   Schema.TaggedStruct("native-app-icon", {
     app: ToolActivityNativeAppReference,
+  }),
+  Schema.TaggedStruct("project-icon", {
+    universeId: PositiveInt,
   }),
   // Media a change request body points at on its host. A private repository serves these only
   // to a request that carries a credential, which the client has none of, so the server fetches
@@ -223,7 +232,9 @@ export class AssetWorkspaceAssetNotFoundError extends Schema.TaggedError<AssetWo
       ? "Media file was not found."
       : this.resource._tag === "tool-output-image"
         ? "Tool output image was not found."
-        : "Workspace asset was not found.";
+        : this.resource._tag === "project-icon"
+          ? "Project icon was not found."
+          : "Workspace asset was not found.";
   }
 }
 

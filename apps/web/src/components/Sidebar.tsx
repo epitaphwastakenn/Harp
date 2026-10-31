@@ -74,6 +74,8 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useReducer,
@@ -163,6 +165,7 @@ import { cn } from "~/lib/utils";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
+  buildProjectActionMenuItems,
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
@@ -254,6 +257,10 @@ import {
   SidebarSectionHeader,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
+
+const ProjectIconDialog = lazy(() =>
+  import("./sidebar/ProjectIconDialog").then((module) => ({ default: module.ProjectIconDialog })),
+);
 
 function sameSidebarProviderEntries(
   left: ReadonlyMap<string, SidebarProviderEntry>,
@@ -816,6 +823,7 @@ function SidebarProjectFolderHeader(props: {
   readonly onTogglePinned: () => void;
   readonly onCreateThread: () => void;
   readonly onReorder: (draggedFolderKey: string, targetFolderKey: string) => void;
+  readonly onContextMenu: (position: { x: number; y: number }) => void;
 }) {
   const [dropTarget, setDropTarget] = useState(false);
   return (
@@ -840,7 +848,13 @@ function SidebarProjectFolderHeader(props: {
         props.onReorder(draggedFolderKey, props.folderKey);
       }}
     >
-      <div className="group/sidebar-folder relative flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-row-hover">
+      <div
+        className="group/sidebar-folder relative flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-row-hover"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          props.onContextMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
         <button
           type="button"
           aria-expanded={props.expanded}
@@ -1289,6 +1303,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       suppressNextScopeChangeRef.current = true;
       dispatchProjectScopeMenu({ type: "project-settings-opened" });
       openProjectSettings(projectGroup);
+    },
+  );
+  const [iconDialogProjectKey, setIconDialogProjectKey] = useState<string | null>(null);
+  const iconDialogGroup =
+    projectGroups.find((projectGroup) => projectGroup.projectKey === iconDialogProjectKey) ?? null;
+  const handleProjectContextMenu = useStableCallback(
+    (projectGroup: SidebarProjectSnapshot, position: { x: number; y: number }) => {
+      void (async () => {
+        const clicked = await showThreadMenu(
+          buildProjectActionMenuItems({
+            canOperate: projectGroup.memberProjects.every((member) =>
+              readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
+            ),
+          }),
+          position,
+        );
+        if (clicked === "change-icon") setIconDialogProjectKey(projectGroup.projectKey);
+        if (clicked === "project-settings") openProjectSettings(projectGroup);
+      })();
     },
   );
 
@@ -3348,6 +3381,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               onTogglePinned={() => setProjectPinned(folderKey, !pinned)}
                               onCreateThread={() => createThreadInFolder(group)}
                               onReorder={reorderFolders}
+                              onContextMenu={(position) =>
+                                handleProjectContextMenu(group, position)
+                              }
                             />,
                           );
                         }
@@ -3555,6 +3591,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           onClose={() => closeThreadMenu(null)}
           onSelect={closeThreadMenu}
         />
+      ) : null}
+      {iconDialogGroup ? (
+        <Suspense fallback={null}>
+          <ProjectIconDialog
+            key={iconDialogGroup.projectKey}
+            group={iconDialogGroup}
+            onClose={() => setIconDialogProjectKey(null)}
+          />
+        </Suspense>
       ) : null}
       {deleteConfirmDialog}
     </>

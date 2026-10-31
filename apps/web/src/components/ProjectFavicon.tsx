@@ -1,4 +1,5 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
@@ -7,6 +8,7 @@ import { FolderCodeIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { createElement, lazy, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { useAssetUrlState } from "../assets/assetUrls";
 import { projectFaviconUrlAtom } from "../state/assets";
 import { deriveProjectIdentity } from "../projectIdentity";
 import { projectIconColorClassName } from "../projectIconColors";
@@ -83,6 +85,18 @@ export function ProjectFavicon(input: {
   }
   const FallbackIcon = input.fallbackIcon ?? FolderCodeIcon;
 
+  if (project.projectIcon?.kind === "roblox-game") {
+    return (
+      <RobloxGameProjectIcon
+        environmentId={project.environmentId}
+        universeId={project.projectIcon.universeId}
+        projectName={project.title}
+        className={input.className}
+        fallbackIcon={FallbackIcon}
+      />
+    );
+  }
+
   if (!src || isProjectFaviconFallbackUrl(src)) {
     return (
       <ProjectFaviconFallback
@@ -106,6 +120,36 @@ export function ProjectFavicon(input: {
       className={input.className}
       fallbackIcon={FallbackIcon}
       fallbackProjectName={project.title}
+    />
+  );
+}
+
+function RobloxGameProjectIcon({
+  environmentId,
+  universeId,
+  projectName,
+  className,
+  fallbackIcon,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly universeId: number;
+  readonly projectName: string;
+  readonly className?: string | undefined;
+  readonly fallbackIcon: ComponentType<{ className?: string }>;
+}) {
+  const asset = useAssetUrlState(environmentId, { _tag: "project-icon", universeId });
+  if (asset._tag !== "Success") {
+    return (
+      <ProjectFaviconFallback className={className} icon={fallbackIcon} projectName={projectName} />
+    );
+  }
+  return (
+    <ProjectFaviconImage
+      key={`roblox-game:${environmentId}:${universeId}`}
+      src={asset.url}
+      className={className}
+      fallbackIcon={fallbackIcon}
+      fallbackProjectName={projectName}
     />
   );
 }

@@ -68,6 +68,7 @@ import {
 } from "../orchestration-v2/ToolOutputImageStore.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as ProjectIconResolver from "../project/ProjectIconResolver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
@@ -167,6 +168,12 @@ const AssetClaimsSchema = Schema.Union([
     version: Schema.Literal(1),
     kind: Schema.Literal("native-app-icon"),
     app: ToolActivityNativeAppReference,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("project-icon"),
+    universeId: Schema.Number,
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -852,6 +859,27 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = "native-app-icon.png";
       break;
     }
+    case "project-icon": {
+      const iconResolver = yield* ProjectIconResolver.ProjectIconResolver;
+      yield* iconResolver.ensureGameIcon(input.resource.universeId).pipe(
+        Effect.catchTags({
+          ProjectIconGameNotFoundError: () =>
+            Effect.fail(new AssetWorkspaceAssetNotFoundError({ resource: input.resource })),
+          ProjectIconFetchError: (cause) =>
+            Effect.fail(
+              new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+            ),
+        }),
+      );
+      claims = {
+        version: 1,
+        kind: "project-icon",
+        universeId: input.resource.universeId,
+        expiresAt,
+      };
+      fileName = `${input.resource.universeId}.png`;
+      break;
+    }
     case SOURCE_CONTROL_MEDIA_ASSET: {
       const media = sourceControlDefinitions.mediaUrl(input.resource.url);
       if (media === null) {
@@ -879,7 +907,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         }),
     ),
   );
-  if (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") {
+  if (
+    claims.kind === "project-favicon" ||
+    claims.kind === "project-favicon-external" ||
+    claims.kind === "project-icon"
+  ) {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
       (Math.floor(issuedAt / PROJECT_FAVICON_TOKEN_BUCKET_MS) + 2) *
@@ -994,6 +1026,17 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       Effect.orElseSucceed(() => null),
     );
     return image ? ({ kind: "bytes", ...image } satisfies ResolvedAsset) : null;
+  }
+
+  if (claims.kind === "project-icon") {
+    const iconResolver = yield* ProjectIconResolver.ProjectIconResolver;
+    const iconPath = yield* iconResolver.ensureGameIcon(claims.universeId).pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to read project icon.", { universeId: claims.universeId, cause }),
+      ),
+      Effect.orElseSucceed(() => null),
+    );
+    return iconPath ? ({ kind: "file", path: iconPath } satisfies ResolvedAsset) : null;
   }
 
   if (claims.kind === "native-app-icon") {

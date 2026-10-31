@@ -31,6 +31,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
+import * as ProjectIconResolver from "./ProjectIconResolver.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 
@@ -56,6 +57,21 @@ const layerMetadata = Layer.merge(
   Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
     invalidate: () => Effect.void,
     resolvePath: (workspaceRoot) => Effect.succeed(`${workspaceRoot}/favicon.svg`),
+  }),
+);
+
+const robloxGameIcon = { kind: "roblox-game", placeId: 920587237, universeId: 383310974 } as const;
+
+const layerIconResolver = Layer.succeed(
+  ProjectIconResolver.ProjectIconResolver,
+  ProjectIconResolver.ProjectIconResolver.of({
+    resolveGameUrl: (url) =>
+      ProjectIconResolver.parseRobloxPlaceId(url) === null
+        ? Effect.fail(new ProjectIconResolver.ProjectIconUrlInvalidError())
+        : url.includes(String(robloxGameIcon.placeId))
+          ? Effect.succeed(robloxGameIcon)
+          : Effect.fail(new ProjectIconResolver.ProjectIconGameNotFoundError({})),
+    ensureGameIcon: () => Effect.die("not used by the project service"),
   }),
 );
 
@@ -95,6 +111,7 @@ const layerTestFor = (
   >,
 ) =>
   RuntimeLayer.layerProjectService.pipe(
+    Layer.provideMerge(layerIconResolver),
     Layer.provideMerge(ProjectEnrichmentService.layer),
     Layer.provideMerge(layerWorkspacePaths),
     Layer.provideMerge(projectMetadataLayer),
@@ -115,6 +132,7 @@ const layerProjectServiceDependencies = Layer.mergeAll(
   ThreadCommandExecutor.layer,
 ).pipe(
   Layer.provideMerge(LegacyV1ThreadImporter.layer.pipe(Layer.provide(RuntimeLayer.layerEventSink))),
+  Layer.provideMerge(layerIconResolver),
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(layerWorkspacePaths),
   Layer.provideMerge(layerMetadata),
@@ -242,6 +260,87 @@ it.layer(layerTest)("ProjectService", (it) => {
         changes.map((change) => change.event_type),
         ["project.created", "project.meta-updated", "project.meta-updated", "project.deleted"],
       );
+    }),
+  );
+
+  it.effect("turns a roblox game link into the stored game icon", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const projectId = ProjectId.make("project:roblox-icon");
+      yield* service.create({
+        commandId: CommandId.make("command:roblox-icon:create"),
+        projectId,
+        title: "Obby",
+        workspaceRoot: "/work/roblox-icon",
+      });
+
+      const linked = yield* service.update({
+        commandId: CommandId.make("command:roblox-icon:link"),
+        projectId,
+        projectIcon: {
+          kind: "roblox-game-url",
+          url: "https://www.roblox.com/games/920587237/Adopt-Me",
+        },
+      });
+      assert.deepEqual(linked.projectIcon, robloxGameIcon);
+      assert.deepEqual(
+        Option.getOrThrow(yield* service.getById(projectId)).projectIcon,
+        robloxGameIcon,
+      );
+
+      const sql = yield* SqlClient.SqlClient;
+      const stored = yield* sql<{ readonly project_icon_json: string }>`
+        SELECT project_icon_json FROM projection_projects WHERE project_id = ${projectId}
+      `;
+      assert.deepEqual(JSON.parse(stored[0]?.project_icon_json ?? "null"), robloxGameIcon);
+
+      const reset = yield* service.update({
+        commandId: CommandId.make("command:roblox-icon:reset"),
+        projectId,
+        projectIcon: null,
+      });
+      assert.isNull(reset.projectIcon);
+    }),
+  );
+
+  it.effect("keeps the project unchanged when the game link cannot be resolved", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const projectId = ProjectId.make("project:roblox-icon-failure");
+      yield* service.create({
+        commandId: CommandId.make("command:roblox-icon-failure:create"),
+        projectId,
+        title: "Obby",
+        workspaceRoot: "/work/roblox-icon-failure",
+      });
+      const emoji = { kind: "emoji", emoji: "🦊" } as const;
+      yield* service.update({
+        commandId: CommandId.make("command:roblox-icon-failure:emoji"),
+        projectId,
+        projectIcon: emoji,
+      });
+
+      const invalid = yield* service
+        .update({
+          commandId: CommandId.make("command:roblox-icon-failure:invalid"),
+          projectId,
+          title: "Renamed",
+          projectIcon: { kind: "roblox-game-url", url: "https://example.com/games/920587237" },
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(invalid, ProjectIconResolver.ProjectIconUrlInvalidError);
+      const unknown = yield* service
+        .update({
+          commandId: CommandId.make("command:roblox-icon-failure:unknown"),
+          projectId,
+          projectIcon: { kind: "roblox-game-url", url: "https://www.roblox.com/games/1/Nothing" },
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(unknown, ProjectIconResolver.ProjectIconGameNotFoundError);
+
+      const project = Option.getOrThrow(yield* service.getById(projectId));
+      assert.equal(project.title, "Obby");
+      assert.deepEqual(project.projectIcon, emoji);
     }),
   );
 

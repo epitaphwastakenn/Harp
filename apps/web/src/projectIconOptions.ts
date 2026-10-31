@@ -28,6 +28,36 @@ const POPULAR_PROJECT_ICONS: ReadonlyArray<string> = [
   "layers-3",
 ];
 
+export const gameProjectIcons: ReadonlyArray<{
+  readonly name: string;
+  readonly label: string;
+}> = [
+  { name: "gamepad-2", label: "Gamepad" },
+  { name: "joystick", label: "Joystick" },
+  { name: "sword", label: "Sword" },
+  { name: "swords", label: "Swords" },
+  { name: "shield", label: "Shield" },
+  { name: "castle", label: "Castle" },
+  { name: "crown", label: "Crown" },
+  { name: "skull", label: "Skull" },
+  { name: "ghost", label: "Ghost" },
+  { name: "bomb", label: "Bomb" },
+  { name: "wand-sparkles", label: "Wand" },
+  { name: "flame", label: "Flame" },
+  { name: "rocket", label: "Rocket" },
+  { name: "car", label: "Car" },
+  { name: "plane", label: "Plane" },
+  { name: "sailboat", label: "Sailboat" },
+  { name: "map", label: "Map" },
+  { name: "mountain", label: "Mountain" },
+  { name: "tree-pine", label: "Tree" },
+  { name: "gem", label: "Gem" },
+  { name: "coins", label: "Coins" },
+  { name: "trophy", label: "Trophy" },
+  { name: "dices", label: "Dice" },
+  { name: "puzzle", label: "Puzzle" },
+];
+
 export const PROJECT_EMOJIS: ReadonlyArray<{ readonly emoji: string; readonly label: string }> = [
   { emoji: "💻", label: "Computer" },
   { emoji: "🛠️", label: "Tools" },

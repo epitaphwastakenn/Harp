@@ -142,6 +142,8 @@ effectIt.effect("project favicon paths accept only supported image files", () =>
 );
 
 const decodeStoredIcon = Schema.decodeUnknownEffect(StoredProjectIcon);
+const decodeStoredIconSync = Schema.decodeUnknownSync(StoredProjectIcon);
+const encodeStoredIcon = Schema.encodeEffect(StoredProjectIcon);
 const decodeReceivedIcon = Schema.decodeUnknownEffect(ReceivedProjectIcon);
 const decodeProjectShell = Schema.decodeUnknownEffect(OrchestrationProjectShell);
 
@@ -177,3 +179,67 @@ effectIt.effect("an icon kind from a newer server shows the default icon", () =>
     assert.strictEqual(broken._tag, "Failure");
   }),
 );
+
+const shellRecord = {
+  id: "project-1",
+  title: "Project",
+  workspaceRoot: "/tmp/project",
+  defaultModelSelection: null,
+  scripts: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+describe("roblox game project icon", () => {
+  const robloxGame = { kind: "roblox-game", placeId: 920587237, universeId: 383310974 } as const;
+
+  effectIt.effect("a record saved before icons existed decodes with no icon", () =>
+    Effect.gen(function* () {
+      const shell = yield* decodeProjectShell(shellRecord);
+      assert.isUndefined(shell.projectIcon);
+      const cleared = yield* decodeProjectShell({ ...shellRecord, projectIcon: null });
+      assert.isNull(cleared.projectIcon);
+    }),
+  );
+
+  effectIt.effect("a record with a roblox game icon decodes and round-trips", () =>
+    Effect.gen(function* () {
+      const shell = yield* decodeProjectShell({ ...shellRecord, projectIcon: robloxGame });
+      assert.deepEqual(shell.projectIcon, robloxGame);
+      assert.deepEqual(yield* decodeStoredIcon(robloxGame), robloxGame);
+      assert.deepEqual(yield* decodeReceivedIcon(robloxGame), robloxGame);
+      assert.deepEqual(yield* encodeStoredIcon(robloxGame), robloxGame);
+    }),
+  );
+
+  effectIt.effect("rejects ids that are not positive integers", () =>
+    Effect.gen(function* () {
+      for (const broken of [
+        { ...robloxGame, placeId: 0 },
+        { ...robloxGame, universeId: -1 },
+        { ...robloxGame, placeId: 1.5 },
+        { kind: "roblox-game", placeId: 1 },
+      ]) {
+        assert.strictEqual((yield* Effect.exit(decodeReceivedIcon(broken)))._tag, "Failure");
+        assert.strictEqual((yield* Effect.exit(decodeStoredIcon(broken)))._tag, "Failure");
+      }
+    }),
+  );
+
+  it("accepts a game link in an update but never stores one", () => {
+    expect(
+      decodeProjectUpdatePayload({
+        projectIcon: {
+          kind: "roblox-game-url",
+          url: "https://www.roblox.com/games/920587237/Name",
+        },
+      }).projectIcon,
+    ).toEqual({ kind: "roblox-game-url", url: "https://www.roblox.com/games/920587237/Name" });
+    expect(decodeProjectUpdatePayload({ projectIcon: robloxGame }).projectIcon).toEqual(robloxGame);
+    expect(decodeProjectUpdatePayload({ projectIcon: null }).projectIcon).toBeNull();
+    expect(() =>
+      decodeProjectUpdatePayload({ projectIcon: { kind: "roblox-game-url" } }),
+    ).toThrow();
+    expect(() => decodeStoredIconSync({ kind: "roblox-game-url", url: "https://x" })).toThrow();
+  });
+});
