@@ -27,8 +27,7 @@ import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
-import sealIceFloeSceneUrl from "../../assets/scenes/seal-ice-floe.webp";
-import { HarpMascot } from "../mascot/HarpMascot";
+import { SealIceFloeScene } from "./SealIceFloeScene";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Combobox,
@@ -325,18 +324,7 @@ export function DraftHeroHeadline({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
-      <img
-        src={sealIceFloeSceneUrl}
-        alt=""
-        aria-hidden="true"
-        decoding="async"
-        draggable={false}
-        className="pointer-events-none mb-2 hidden aspect-video w-[min(30rem,80%)] select-none [mask-image:radial-gradient(ellipse_at_center,black_42%,transparent_72%)] dark:block max-sm:hidden! [@media(max-height:720px)]:hidden!"
-      />
-      <HarpMascot
-        scene="resting"
-        className="mb-4 h-20 w-auto dark:hidden max-sm:hidden [@media(max-height:720px)]:hidden"
-      />
+      <SealIceFloeScene className="pointer-events-none mb-3 h-40 w-auto select-none max-sm:hidden [@media(max-height:720px)]:hidden" />
       {hasResolvedProject && !isScratchDraft ? (
         <DraftHeroProjectHeading projectName={activeProjectDisplayName ?? "Choose a project"}>
           {projectSelector}

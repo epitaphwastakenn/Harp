@@ -28,10 +28,10 @@ function OptionSwitchRow(props: {
   const { descriptor } = props;
   const Icon = optionIcons[descriptor.id] ?? SlidersHorizontalIcon;
   return (
-    <label className="flex min-w-0 cursor-pointer items-center gap-2.5">
-      <Icon className="size-4 shrink-0 text-icon-muted" aria-hidden="true" />
+    <label className="flex min-w-0 cursor-pointer items-center gap-3 px-1">
+      <Icon className="size-5 shrink-0 text-icon-muted" aria-hidden="true" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium leading-tight text-foreground">
+        <span className="block truncate text-sm font-semibold leading-snug text-foreground">
           {descriptor.label}
         </span>
         {descriptor.description ? (
@@ -50,7 +50,6 @@ function OptionSwitchRow(props: {
         ) : null}
       </span>
       <Switch
-        size="sm"
         checked={descriptor.currentValue === true}
         onCheckedChange={() => props.onToggle(descriptor)}
       />
@@ -107,7 +106,7 @@ export function ModelPickerOptions(props: {
   return (
     <div
       data-model-picker-traits="true"
-      className="flex min-h-25 flex-col justify-center gap-3 border-t border-border/50 px-3 py-3"
+      className="mx-4 flex min-h-20 flex-col justify-center gap-3 border-t border-border/50 py-3.5"
     >
       {props.compactEffort ? (
         <div className="hidden @max-[31rem]/picker:block">
@@ -115,7 +114,7 @@ export function ModelPickerOptions(props: {
         </div>
       ) : null}
       {props.booleans.length > 0 ? (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 @max-[31rem]/picker:grid-cols-1">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 @max-[31rem]/picker:grid-cols-1 [&>*+*]:border-l [&>*+*]:border-border/50 [&>*+*]:ps-6 @max-[31rem]/picker:[&>*+*]:border-l-0 @max-[31rem]/picker:[&>*+*]:ps-1">
           {props.booleans.map((descriptor) => (
             <OptionSwitchRow
               key={descriptor.id}

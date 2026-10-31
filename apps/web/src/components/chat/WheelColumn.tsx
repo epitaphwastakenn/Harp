@@ -184,10 +184,14 @@ export function WheelColumn(props: {
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 z-0 rounded-lg border border-border/50 bg-foreground/[0.03] group-has-[:focus-visible]/wheel:border-ring/70"
-      />
-      <div className="relative z-20 flex h-7 items-center justify-center px-2">
-        {headerSlot ?? <span className="truncate text-xs text-muted-foreground">{label}</span>}
+        className="pointer-events-none absolute inset-x-0 top-(--wheel-head) bottom-0 z-0 overflow-hidden rounded-xl border border-foreground/8 bg-foreground/[0.035] group-has-[:focus-visible]/wheel:border-ring/70"
+      >
+        <div className="absolute inset-0 bg-linear-to-b from-black/10 via-transparent to-black/10 dark:from-black/30 dark:to-black/30" />
+      </div>
+      <div className="relative z-20 flex h-(--wheel-head) items-center justify-center px-2">
+        {headerSlot ?? (
+          <span className="truncate text-xs font-medium text-muted-foreground">{label}</span>
+        )}
       </div>
       <div
         role="listbox"
@@ -209,7 +213,7 @@ export function WheelColumn(props: {
       >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-1 top-[calc(50%-var(--wheel-item)/2)] z-0 hidden h-(--wheel-item) rounded-lg border border-brand/30 bg-brand/15 @max-[31rem]/picker:block"
+          className="pointer-events-none absolute inset-x-1 top-[calc(50%-var(--wheel-item)/2)] z-0 hidden h-(--wheel-item) rounded-xl border border-brand/70 bg-linear-to-b from-brand/60 to-brand/40 @max-[31rem]/picker:block"
         />
         {items.slice(range.start, range.end).map((item, offset) => {
           const index = range.start + offset;
@@ -232,7 +236,9 @@ export function WheelColumn(props: {
                 !pose.interactive && "pointer-events-none",
                 disabled ? "cursor-not-allowed" : "cursor-pointer",
                 !isCentered && !disabled && "hover:bg-row-hover",
-                isCentered ? "text-foreground" : "text-secondary-label hover:text-foreground",
+                isCentered
+                  ? "font-semibold text-foreground dark:text-white"
+                  : "text-foreground/80 hover:text-foreground",
               )}
               style={{
                 transform: wheelPoseTransform(pose),
@@ -251,12 +257,21 @@ export function WheelColumn(props: {
             >
               {item.icon ? <span className="flex shrink-0 items-center">{item.icon}</span> : null}
               <span className="min-w-0 text-center">
-                <span className="block truncate text-sm leading-tight">{item.label}</span>
+                <span
+                  className={cn(
+                    "block truncate leading-tight",
+                    isCentered ? "text-base" : "text-sm",
+                  )}
+                >
+                  {item.label}
+                </span>
                 {item.sublabel ? (
                   <span
                     className={cn(
                       "block truncate text-xs leading-tight",
-                      isCentered ? "text-secondary-label" : "text-muted-foreground",
+                      isCentered
+                        ? "font-normal text-foreground/75 dark:text-white/75"
+                        : "text-muted-foreground",
                     )}
                   >
                     {item.sublabel}

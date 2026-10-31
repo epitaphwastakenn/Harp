@@ -1,0 +1,57 @@
+[data-seal-scene] {
+  --seal-fur-top: color-mix(in oklab, white 94%, var(--brand-accent));
+  --seal-fur-left: color-mix(in oklab, #dcd8e6 92%, var(--brand-accent));
+  --seal-fur-right: color-mix(in oklab, #b5afc6 90%, var(--brand-accent));
+  --seal-ice-top: color-mix(in oklab, #e9f1ff 88%, var(--brand-accent));
+  --seal-ice-left: color-mix(in oklab, #a8bde8 86%, var(--brand-accent));
+  --seal-ice-right: color-mix(in oklab, #7d93c8 84%, var(--brand-accent));
+  --seal-blush: color-mix(in oklab, #f2a7c0 70%, var(--brand-accent));
+  --seal-ink: #1d1828;
+}
+
+[data-seal-scene] path {
+  fill: var(--seal-paint);
+  stroke: var(--seal-paint);
+  stroke-width: 0.35;
+  stroke-linejoin: round;
+}
+
+[data-seal-scene] [data-glow] {
+  stop-color: var(--brand-accent);
+}
+
+[data-seal-scene] [data-material="fur"][data-face="top"] {
+  --seal-paint: var(--seal-fur-top);
+}
+
+[data-seal-scene] [data-material="fur"][data-face="left"] {
+  --seal-paint: var(--seal-fur-left);
+}
+
+[data-seal-scene] [data-material="fur"][data-face="right"] {
+  --seal-paint: var(--seal-fur-right);
+}
+
+[data-seal-scene] [data-material="ice"][data-face="top"] {
+  --seal-paint: var(--seal-ice-top);
+}
+
+[data-seal-scene] [data-material="ice"][data-face="left"] {
+  --seal-paint: var(--seal-ice-left);
+}
+
+[data-seal-scene] [data-material="ice"][data-face="right"] {
+  --seal-paint: var(--seal-ice-right);
+}
+
+[data-seal-scene] :is([data-material="eye"], [data-material="nose"]) {
+  --seal-paint: var(--seal-ink);
+}
+
+[data-seal-scene] [data-material="shine"] {
+  --seal-paint: white;
+}
+
+[data-seal-scene] [data-material="blush"] {
+  --seal-paint: var(--seal-blush);
+}

@@ -988,11 +988,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         role="group"
         aria-label="Model and reasoning"
         data-model-picker-content="true"
-        className="@container/picker relative flex w-[min(40rem,calc(100vw-0.75rem))] flex-col [--wheel-item:2.75rem]"
+        className="@container/picker relative flex w-[min(44rem,calc(100vw-0.75rem))] flex-col [--wheel-head:2rem] [--wheel-item:3.5rem]"
         onKeyDown={handleRootKeyDown}
       >
-        <div className="flex h-11 items-center justify-between gap-2 px-3">
-          <h2 className="text-sm font-medium text-foreground">
+        <div className="flex h-13 items-center justify-between gap-2 px-4">
+          <h2 className="text-base font-semibold text-foreground">
             {isBasic ? "Model" : "Model & reasoning"}
           </h2>
           {isBasic ? null : (
@@ -1005,16 +1005,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             </InlineButton>
           )}
         </div>
-        <div className="px-3 pb-3">
+        <div className="px-4 pb-4">
           <div
             className={cn(
-              "relative isolate grid grid-cols-3 gap-1.5 @max-[31rem]/picker:grid-cols-2",
+              "relative isolate grid grid-cols-3 gap-2 @max-[31rem]/picker:grid-cols-2",
               isBasic && "grid-cols-2",
             )}
           >
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-[calc(1.75rem+var(--wheel-item)*2)] z-10 h-(--wheel-item) rounded-lg border border-brand/30 bg-brand/15 @max-[31rem]/picker:hidden"
+              className="pointer-events-none absolute -inset-x-1 top-[calc(var(--wheel-head)+var(--wheel-item)*2)] z-10 h-(--wheel-item) rounded-xl border border-brand/70 bg-linear-to-b from-brand/60 to-brand/40 shadow-lg shadow-brand/25 @max-[31rem]/picker:hidden"
             />
             <WheelColumn
               label="Provider"
@@ -1094,7 +1094,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelect={handleSelectOptionChange}
           />
         )}
-        <div className="flex min-h-9 items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 text-xs text-muted-foreground">
+        <div className="flex min-h-9 items-center justify-between gap-3 border-t border-border/50 px-4 py-1.5 text-xs text-muted-foreground">
           <span className="min-w-0 truncate">{hint}</span>
           {isBasic ? (
             <Button size="xs" onClick={activateCurrent}>

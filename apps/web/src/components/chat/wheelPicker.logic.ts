@@ -117,7 +117,7 @@ export function wheelPose(distance: number): WheelPose {
   const clamped = Math.max(-wheelRenderRadius, Math.min(wheelRenderRadius, distance));
   const magnitude = Math.abs(clamped);
   const angle = clamped * stepRadians;
-  const opacity = Math.max(0, 1 - 0.1633 * magnitude - 0.0567 * magnitude * magnitude);
+  const opacity = Math.max(0, 1 - (magnitude / 3) ** 1.6);
   return {
     y: roundPose(drumRadius * Math.sin(angle)),
     z: roundPose(drumRadius * (Math.cos(angle) - 1)),
