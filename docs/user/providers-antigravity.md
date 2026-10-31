@@ -69,7 +69,7 @@ Leave the field blank to use the managed runtime, or a compatible executable on
 
 The model list comes from your Antigravity account and can differ from other
 Antigravity apps. A model that Antigravity offers at several reasoning levels
-appears once; pick the level on the reasoning wheel in the model picker. A
+appears once; pick the level with the reasoning slider in the model picker. A
 resumed thread keeps its selected model. If access to that model ends, select
 another available model before continuing.
 

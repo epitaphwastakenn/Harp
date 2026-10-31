@@ -36,13 +36,10 @@ To change effort one step without opening the picker, bind
 Both are unbound by default. Increase wraps from the highest level to the
 lowest, and decrease wraps from the lowest level to the highest.
 
-The model picker has three wheels: provider, model and reasoning effort. It opens on the
-model wheel. Up and Down move one item, Home and End jump to the ends, and typing a few
-letters jumps to a matching item. Left and Right, or Tab, move between wheels, and the
-number keys pick a reasoning level. Press `/` to search every model. Enter or Esc closes
-the picker; choices apply as you move. `mod+shift+up` and `mod+shift+down` switch
-providers directly and clear the search. These provider shortcuts can also be changed in
-Settings.
+In the model picker, press Left in an empty search field or Shift+Tab to reach
+the provider list. Use Up/Down to move and Enter to choose. Right returns to
+model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
+search. These provider shortcuts can also be changed in Settings.
 
 These shortcuts run inside the focused web or desktop client. `mod` uses Command
 on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and

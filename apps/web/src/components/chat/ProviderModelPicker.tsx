@@ -112,7 +112,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
-  const initialFocusRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const size = props.size ?? "sm";
 
   const activeEntry =
@@ -303,8 +303,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverPopup
         {...(props.isComposerOwned ? composerFloatingLayerProps : {})}
         ref={lockBackgroundScroll}
-        initialFocus={initialFocusRef}
-        side={props.isComposerOwned ? "top" : "bottom"}
+        initialFocus={searchInputRef}
         align={props.isComposerOwned ? "end" : "start"}
         sideOffset={8}
         className="before:hidden"
@@ -313,7 +312,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         touchBackdrop
       >
         <ModelPickerContent
-          initialFocusRef={initialFocusRef}
+          searchInputRef={searchInputRef}
           environmentId={props.environmentId}
           activeInstanceId={activeInstanceId}
           model={props.model}

@@ -636,11 +636,6 @@ html[data-ui-motion="off"]
     var(--app-scrollbar-width) 100%;
 }
 
-@utility wheel-fade {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-  mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-}
-
 /* Stage-channel art needs a mask and pseudo-element gradient, so keep the
    behavior composable without tying it to the global components layer. */
 @utility sidebar-stage-backdrop {
