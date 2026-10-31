@@ -71,7 +71,7 @@ export function ReasoningSliderSettings() {
         </ToggleGroup>
       }
     >
-      <div className="mt-3 mb-1 max-w-sm rounded-xl bg-popover px-3.5 py-3 shadow-lg shadow-black/30">
+      <div className="mt-3 mb-1 max-w-sm overflow-hidden rounded-xl bg-popover px-3.5 py-3 shadow-lg shadow-black/30">
         <ReasoningEffortSlider
           descriptor={previewDescriptor}
           selectedValue={previewValue}

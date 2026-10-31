@@ -1169,7 +1169,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     : undefined
                 }
                 data-model-picker-traits="true"
-                className="absolute inset-x-2 bottom-2 z-10 space-y-3.5 rounded-xl bg-popover px-3.5 py-3 shadow-xl shadow-black/40"
+                className="absolute inset-x-2 bottom-2 z-10 space-y-3.5 overflow-hidden rounded-xl bg-popover px-3.5 py-3 shadow-xl shadow-black/40"
               >
                 {traitsVisibility.selectDescriptors.map((descriptor) => {
                   const selectedValue = getDescriptorStringValue(descriptor) ?? "";
