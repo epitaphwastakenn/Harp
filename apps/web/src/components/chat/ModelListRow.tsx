@@ -107,7 +107,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
+        {props.jumpLabel ? (
+          <span className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-data-highlighted:opacity-100">
+            <Kbd>{props.jumpLabel}</Kbd>
+          </span>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -139,7 +143,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
             {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
           </TooltipPopup>
         </Tooltip>
-        {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+        {props.isSelected ? (
+          <CheckIcon className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
+        ) : null}
       </div>
     </ComboboxItem>
   );

@@ -104,13 +104,26 @@ function ComboboxInput({
   );
 }
 
-function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) {
+function ComboboxSearchInput({
+  variant = "line",
+  ...props
+}: React.ComponentProps<typeof ComboboxInput> & { variant?: "line" | "filled" }) {
   return (
-    <div className="min-w-0 shrink-0 px-3 pt-2.5">
-      <div className="relative -translate-y-px border-b border-border/50 pb-1.5 transition-colors focus-within:border-ring">
+    <div className={cn("min-w-0 shrink-0", variant === "filled" ? "px-2 pt-2" : "px-3 pt-2.5")}>
+      <div
+        className={cn(
+          "relative transition-colors",
+          variant === "filled"
+            ? "rounded-lg bg-foreground/5 px-2.5 py-1 focus-within:bg-foreground/8"
+            : "-translate-y-px border-b border-border/50 pb-1.5 focus-within:border-ring",
+        )}
+      >
         <SearchIcon
           aria-hidden="true"
-          className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground"
+          className={cn(
+            "pointer-events-none absolute size-4 shrink-0 text-muted-foreground",
+            variant === "filled" ? "top-2.5 left-2.5" : "top-1.5 left-0",
+          )}
         />
         <ComboboxInput
           {...props}
@@ -183,7 +196,7 @@ function ComboboxPopup({
 }
 
 const comboboxItemCardClass =
-  "flex min-h-8 cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 text-base text-foreground outline-none transition-[background-color,border-color,color] duration-150 not-data-disabled:hover:bg-row-hover data-highlighted:bg-row-hover data-selected:bg-row-selected data-selected:text-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 sm:text-sm [&_svg]:pointer-events-none [&_svg]:shrink-0";
+  "flex min-h-8 cursor-pointer items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-base text-foreground outline-none transition-[background-color,box-shadow,color] duration-150 not-data-disabled:hover:bg-foreground/5 data-highlighted:bg-foreground/5 data-selected:bg-foreground/8 data-selected:text-foreground data-selected:shadow-md data-selected:shadow-black/20 data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 sm:text-sm [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 function ComboboxItem({
   className,

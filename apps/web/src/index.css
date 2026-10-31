@@ -2961,9 +2961,9 @@ html.electron-windows .app-backdrop-base {
 /* Harp: smooth corners (Appearance > Corners). A squircle keeps the curve
    continuous where an arc meets the straight edge, so rounded surfaces read as
    soft rather than boxy. Only paints where a border-radius already exists. */
-html[data-smooth-corners="true"] *,
-html[data-smooth-corners="true"] ::before,
-html[data-smooth-corners="true"] ::after {
+html[data-smooth-corners="true"] :not(.rounded-full),
+html[data-smooth-corners="true"] :not(.rounded-full)::before,
+html[data-smooth-corners="true"] :not(.rounded-full)::after {
   corner-shape: squircle;
 }
 

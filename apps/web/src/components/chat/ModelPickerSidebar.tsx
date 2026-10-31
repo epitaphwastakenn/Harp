@@ -30,7 +30,8 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
 const SELECTION_CLASS =
   "pointer-events-none absolute inset-x-0 top-0 motion-reduce:transition-none";
 const SELECTION_TRANSITION_CLASS = "transition-[translate,height] duration-300 ease-drawer";
-const SELECTION_TILE_CLASS = "absolute inset-y-0 left-1 right-1 rounded-lg bg-row-selected";
+const SELECTION_TILE_CLASS =
+  "absolute inset-y-0 left-1 right-1 rounded-lg bg-foreground/10 shadow-md shadow-black/30";
 const RAIL_BUTTON_CLASS =
   "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,scale] duration-150 hover:bg-row-hover hover:text-foreground focus-visible:bg-row-hover focus-visible:outline-none active:scale-94 motion-reduce:active:scale-100";
 const PICKER_TOOLTIP_SIDE = "left" as const;
@@ -80,7 +81,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
   return (
     <Toolbar.Root
-      className="w-12 shrink-0 overflow-hidden border-e border-border"
+      className="w-12 shrink-0 overflow-hidden bg-black/10 dark:bg-black/20"
       data-model-picker-sidebar="true"
       aria-label="Providers"
       orientation="vertical"
@@ -134,7 +135,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   </TooltipPopup>
                 </Tooltip>
               </div>
-              <div className="border-b border-border/50 my-0.5" aria-hidden="true" />
+              <div className="my-1" aria-hidden="true" />
             </>
           ) : null}
 

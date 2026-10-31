@@ -121,12 +121,15 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
 
   return (
     <div
-      className={cn("w-full space-y-1 py-0.5", className)}
+      className={cn("w-full space-y-1", className)}
       data-dragging={dragging ? "true" : undefined}
     >
-      <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span key={current?.id} className="text-xs font-medium text-foreground">
+      <div className="flex items-center justify-between gap-2 px-0.5">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span
+          key={current?.id}
+          className="rounded-full bg-brand/15 px-2 py-0.5 text-xs font-semibold text-brand"
+        >
           {current?.label}
         </span>
       </div>
@@ -149,13 +152,16 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
         onPointerLeave={() => setHoverIndex(null)}
         onKeyDown={onKeyDown}
         className={cn(
-          "group relative flex h-8 w-full cursor-pointer touch-none select-none items-center rounded-full px-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          "group relative flex h-9 w-full cursor-pointer touch-none select-none items-center rounded-full px-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
           disabled && "cursor-not-allowed opacity-50",
         )}
       >
-        <div className="relative h-1 w-full rounded-full bg-muted">
+        <div className="relative h-2 w-full rounded-full bg-foreground/10 shadow-inner">
           <div
-            className="absolute inset-y-0 start-0 rounded-full bg-primary"
+            className={cn(
+              "absolute inset-y-0 start-0 rounded-full bg-linear-to-r from-brand/5 via-brand/60 to-brand shadow-md shadow-brand/40",
+              !dragging && "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+            )}
             style={{ width: `${percent}%` }}
           />
           <div className="pointer-events-none absolute inset-0 flex items-center justify-between">
@@ -163,24 +169,46 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
               <span
                 key={option.id}
                 className={cn(
-                  "size-1 rounded-full",
-                  index <= activeIndex ? "bg-primary-foreground/60" : "bg-foreground/25",
-                  index === previewIndex && "bg-foreground/60",
+                  "size-1.5 rounded-full transition-colors duration-200",
+                  index < activeIndex && "bg-white/80",
+                  index === activeIndex && "bg-transparent",
+                  index > activeIndex &&
+                    (index === previewIndex ? "bg-foreground/55" : "bg-foreground/25"),
                 )}
               />
             ))}
           </div>
           <span
-            className="pointer-events-none absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-background"
+            className={cn(
+              "pointer-events-none absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand bg-white shadow-lg shadow-brand/50 ring-4 ring-brand/20",
+              dragging
+                ? "scale-110"
+                : "transition-[left,scale] duration-200 ease-out motion-reduce:transition-none",
+            )}
             style={{ left: `${percent}%` }}
           />
         </div>
       </div>
 
       {options.length > 1 ? (
-        <div className="flex items-center justify-between px-1 text-2xs text-muted-foreground">
-          <span>{options[0]?.label}</span>
-          <span>{options[lastIndex]?.label}</span>
+        <div className="relative mx-3 h-4">
+          {options.map((option, index) => (
+            <span
+              key={option.id}
+              className={cn(
+                "absolute top-0 whitespace-nowrap text-2xs transition-colors duration-200",
+                index === 0
+                  ? "translate-x-0"
+                  : index === lastIndex
+                    ? "-translate-x-full"
+                    : "-translate-x-1/2",
+                index === activeIndex ? "font-semibold text-brand" : "text-muted-foreground",
+              )}
+              style={{ left: `${lastIndex > 0 ? (index / lastIndex) * 100 : 0}%` }}
+            >
+              {option.label}
+            </span>
+          ))}
         </div>
       ) : null}
     </div>

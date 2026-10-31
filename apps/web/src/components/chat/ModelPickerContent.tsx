@@ -1023,13 +1023,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             }
           }}
         >
-          <div
-            className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-hidden",
-              showSidebar && "border-s border-border",
-            )}
-          >
+          <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden")}>
             <ComboboxSearchInput
+              variant="filled"
               ref={searchInputRef}
               placeholder="Search models…"
               value={searchQuery}
@@ -1159,7 +1155,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             {showTraits && traitsVisibility ? (
               <div
                 data-model-picker-traits="true"
-                className="shrink-0 space-y-3 border-t border-border px-3.5 py-3"
+                className="mx-2 mb-2 mt-1 shrink-0 space-y-3.5 rounded-xl bg-foreground/5 px-3.5 py-3 shadow-lg shadow-black/25"
               >
                 {traitsVisibility.selectDescriptors.map((descriptor) => {
                   const selectedValue = getDescriptorStringValue(descriptor) ?? "";
@@ -1208,7 +1204,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 {ultracodeDescriptor ? (
                   <label className="flex items-center justify-between gap-3 px-0.5">
                     <span className="min-w-0">
-                      <span className="block text-xs font-medium text-foreground">
+                      <span className="block text-sm font-medium text-foreground">
                         {ultracodeDescriptor.label}
                       </span>
                       {ultracodeDescriptor.description ? (
