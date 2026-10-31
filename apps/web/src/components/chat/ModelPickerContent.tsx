@@ -65,6 +65,7 @@ import {
   useToggleEnvironmentModelFavorite,
 } from "~/hooks/useSettings";
 import { announce } from "~/lib/announce";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { Switch } from "../ui/switch";
@@ -272,7 +273,9 @@ function ModelPickerList({
   extraData,
   renderItem,
   onContentSizeChange,
+  bottomInset,
 }: {
+  bottomInset: number;
   listRef: RefObject<LegendListRef | null>;
   viewportRef: RefObject<HTMLDivElement | null>;
   itemKeys: ReadonlyArray<string>;
@@ -331,7 +334,8 @@ function ModelPickerList({
       ref={viewportRef}
       className="relative min-h-0 overflow-hidden pr-px"
       style={{
-        height: itemKeys.length === 0 ? 0 : `calc(${contentSize}px + var(--spacing) * 5)`,
+        height:
+          itemKeys.length === 0 ? 0 : `calc(${contentSize + bottomInset}px + var(--spacing) * 5)`,
       }}
     >
       <ComboboxListVirtualized>
@@ -346,6 +350,9 @@ function ModelPickerList({
           recycleItems
           contentContainerClassName="pl-2 pr-px"
           ItemSeparatorComponent={ModelListSeparator}
+          ListFooterComponent={
+            bottomInset > 0 ? <div aria-hidden="true" style={{ height: bottomInset }} /> : null
+          }
           onLayout={updateScrollFades}
           onScroll={updateScrollFades}
           className={cn(
@@ -424,6 +431,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (height) setHeldPickerHeight((held) => held ?? height);
   };
   const [modelListContentSize, setModelListContentSize] = useState(0);
+  const [traitsHeight, setTraitsHeight] = useState(0);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
   const activeEntry = props.instanceEntries.find(
@@ -1023,7 +1031,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             }
           }}
         >
-          <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden")}>
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <ComboboxSearchInput
               variant="filled"
               ref={searchInputRef}
@@ -1087,6 +1095,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             />
 
             <ModelPickerList
+              bottomInset={showTraits && traitsVisibility ? traitsHeight : 0}
               listRef={modelListRef}
               viewportRef={modelListViewportRef}
               onContentSizeChange={setModelListContentSize}
@@ -1154,8 +1163,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             />
             {showTraits && traitsVisibility ? (
               <div
+                ref={(node) =>
+                  node
+                    ? observeResize(node, () => setTraitsHeight(node.offsetHeight + 8))
+                    : undefined
+                }
                 data-model-picker-traits="true"
-                className="mx-2 mb-2 mt-1 shrink-0 space-y-3.5 rounded-xl bg-foreground/5 px-3.5 py-3 shadow-lg shadow-black/25"
+                className="absolute inset-x-2 bottom-2 z-10 space-y-3.5 rounded-xl bg-popover px-3.5 py-3 shadow-xl shadow-black/40"
               >
                 {traitsVisibility.selectDescriptors.map((descriptor) => {
                   const selectedValue = getDescriptorStringValue(descriptor) ?? "";
