@@ -104,6 +104,7 @@ const inlineButtonVariants = cva(
       tone: {
         default: "text-foreground",
         muted: "text-muted-foreground hover:text-foreground",
+        brand: "text-brand",
         destructive: "text-destructive-foreground hover:text-destructive",
         picker:
           "gap-1 text-foreground underline-offset-4 hover:underline data-popup-open:underline",
