@@ -1,12 +1,12 @@
 import type { ServerProvider } from "@t3tools/contracts";
 import { composerUsage, formatResetsIn } from "@t3tools/shared/usageLimits";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUpRightIcon, TimerIcon } from "lucide-react";
+import { ArrowUpRightIcon } from "lucide-react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { UsageBar, usageTone } from "../ui/usage-ring";
+import { UsageBar, UsageRing } from "../ui/usage-ring";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 function capitalize(text: string): string {
@@ -26,7 +26,6 @@ export function ComposerUsageMeter(props: {
   const navigate = useNavigate();
   const usage = composerUsage(props.provider, props.model, now);
   if (usage === null) return null;
-  const peakTone = usageTone(usage.peakPercent);
   const title = usage.group ? `Usage · ${usage.group}` : "Usage";
 
   return (
@@ -44,16 +43,7 @@ export function ComposerUsageMeter(props: {
             data-composer-usage-meter
             data-resting-controls-fixed
           >
-            <TimerIcon
-              aria-hidden="true"
-              className={
-                peakTone === "error"
-                  ? "text-error-foreground"
-                  : peakTone === "warning"
-                    ? "text-warning-foreground"
-                    : undefined
-              }
-            />
+            <UsageRing percent={usage.peakPercent} size="sm" />
           </Button>
         }
       />

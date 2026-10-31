@@ -61,7 +61,6 @@ export function SidebarThreadHeader({
       aria-label="New thread"
       disabled={newThreadDisabled}
       onClick={onNewThread}
-      variant="outline"
     >
       <SquarePenIcon />
       <span className="min-w-0 flex-1">New thread</span>
@@ -84,7 +83,7 @@ export function SidebarThreadHeader({
       )}
       <div
         ref={searchFieldRef}
-        className="flex h-8 min-w-0 items-center gap-1 rounded-lg px-2 text-sm font-medium text-sidebar-muted-foreground ring-1 ring-inset ring-sidebar-border hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-within:bg-sidebar-row-hover focus-within:text-sidebar-foreground focus-within:ring-ring/70"
+        className="flex h-8 min-w-0 items-center gap-1 rounded-lg px-2 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-within:bg-sidebar-row-hover focus-within:text-sidebar-foreground"
       >
         <SearchIcon className="mr-1 size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput

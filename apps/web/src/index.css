@@ -2939,6 +2939,15 @@ html[data-glass-app="true"] [data-slot="sidebar-inset"] .bg-background {
   background-color: transparent;
 }
 
+/* The thread details card follows the panels' glass instead of the heavier menu glass. */
+html[data-glass-sidebar="true"] [data-thread-details-card] {
+  background: color-mix(
+    in srgb,
+    var(--popover) var(--panel-glass-opacity, var(--glass-opacity)),
+    transparent
+  ) !important;
+}
+
 /* Where there is no native acrylic and no image, the glass sits on the plain
    theme color instead of the empty page. */
 .app-backdrop-base {
