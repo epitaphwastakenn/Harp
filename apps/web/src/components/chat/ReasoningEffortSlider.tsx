@@ -14,6 +14,7 @@ export interface ReasoningEffortSliderProps {
   onSelect: (optionId: string) => void;
   className?: string;
   sliderStyle?: ReasoningSliderStyle;
+  numberKeys?: boolean;
 }
 
 const variants = {
@@ -29,6 +30,7 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
   onSelect,
   className,
   sliderStyle,
+  numberKeys = true,
 }: ReasoningEffortSliderProps) {
   const settingsStyle = useClientSettings((settings) => settings.reasoningSliderStyle);
   const Variant = variants[sliderStyle ?? settingsStyle];
@@ -51,7 +53,7 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
 
   // Number keys pick a level while the picker is open, as in Harp 1.x.
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || !numberKeys) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -63,7 +65,7 @@ export const ReasoningEffortSlider = memo(function ReasoningEffortSlider({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [commit, disabled, options.length]);
+  }, [commit, disabled, numberKeys, options.length]);
 
   const current = options[activeIndex] ?? options[0];
   const label = descriptor.label || "Effort level";

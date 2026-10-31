@@ -322,6 +322,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
+    id: "reasoning-slider-style",
+    title: "Reasoning slider",
+    to: "/settings/appearance",
+    searchTerms: ["effort thinking level slider model picker liquid comet classic style"],
+  },
+  {
     id: "scrollbar-size",
     title: "Scrollbar size",
     to: "/settings/appearance",

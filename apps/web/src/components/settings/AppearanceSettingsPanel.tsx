@@ -34,6 +34,7 @@ import { BackgroundSettingsSection } from "./BackgroundSettings";
 import { CornerSettingsSection } from "./CornerSettings";
 import { AppearancePresetsSection } from "./AppearancePresetSettings";
 import { SidebarHeaderArtSettings } from "./SidebarHeaderArtSettings";
+import { ReasoningSliderSettings } from "./ReasoningSliderSettings";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -287,6 +288,8 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+
+        <ReasoningSliderSettings />
 
         <SettingsRow
           {...searchableSetting("math-rendering")}
