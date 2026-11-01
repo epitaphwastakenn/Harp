@@ -88,6 +88,9 @@ Use native Parts or CSG for simple collision and blockout geometry. Use a separa
 
 These rules apply when you model a prop yourself (for example in Blender through a Blender MCP) rather than reuse or generate one.
 
+For making several models in one style from a reference, and for modeling rules that keep a set
+on style, see `modeling-sealcode.md`.
+
 - **House style:** before the first job, inspect the meshes already in the
   place: their sizes, `Material`, `Color` and `TextureID`, and how their edges
   are finished (sharp, one-segment bevel, chipped). Match them: a new prop
