@@ -362,7 +362,7 @@ export const SidebarHeaderArtColor = Schema.Union([
 export type SidebarHeaderArtColor = typeof SidebarHeaderArtColor.Type;
 export const DEFAULT_SIDEBAR_HEADER_ART_COLOR: SidebarHeaderArtColor = "theme";
 
-export const REASONING_SLIDER_STYLES = ["liquid", "comet", "classic"] as const;
+export const REASONING_SLIDER_STYLES = ["liquid", "comet", "aurora", "ripple", "classic"] as const;
 export const ReasoningSliderStyle = Schema.Literals(REASONING_SLIDER_STYLES);
 export type ReasoningSliderStyle = typeof ReasoningSliderStyle.Type;
 export const DEFAULT_REASONING_SLIDER_STYLE: ReasoningSliderStyle = "liquid";

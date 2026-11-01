@@ -15,6 +15,8 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 const styleLabels: Record<ReasoningSliderStyle, string> = {
   liquid: "Liquid",
   comet: "Comet",
+  aurora: "Aurora",
+  ripple: "Ripple",
   classic: "Classic",
 };
 
@@ -71,7 +73,7 @@ export function ReasoningSliderSettings() {
         </ToggleGroup>
       }
     >
-      <div className="mt-3 mb-1 max-w-sm overflow-hidden rounded-xl bg-popover px-3.5 py-3 shadow-lg shadow-black/30">
+      <div className="mx-auto mt-3 mb-1 max-w-sm overflow-hidden rounded-xl bg-popover px-3.5 py-3 shadow-lg shadow-black/30">
         <ReasoningEffortSlider
           descriptor={previewDescriptor}
           selectedValue={previewValue}

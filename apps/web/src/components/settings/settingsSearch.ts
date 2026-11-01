@@ -325,7 +325,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "reasoning-slider-style",
     title: "Reasoning slider",
     to: "/settings/appearance",
-    searchTerms: ["effort thinking level slider model picker liquid comet classic style"],
+    searchTerms: [
+      "effort thinking level slider model picker liquid comet aurora ripple classic style",
+    ],
   },
   {
     id: "scrollbar-size",

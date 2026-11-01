@@ -3,9 +3,11 @@ import { type ProviderOptionDescriptor, type ReasoningSliderStyle } from "@t3too
 
 import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { AuroraEffortSlider } from "./effortSliders/AuroraEffortSlider";
 import { ClassicEffortSlider } from "./effortSliders/ClassicEffortSlider";
 import { CometEffortSlider } from "./effortSliders/CometEffortSlider";
 import { LiquidEffortSlider } from "./effortSliders/LiquidEffortSlider";
+import { RippleEffortSlider } from "./effortSliders/RippleEffortSlider";
 
 export interface ReasoningEffortSliderProps {
   descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>;
@@ -20,6 +22,8 @@ export interface ReasoningEffortSliderProps {
 const variants = {
   liquid: LiquidEffortSlider,
   comet: CometEffortSlider,
+  aurora: AuroraEffortSlider,
+  ripple: RippleEffortSlider,
   classic: ClassicEffortSlider,
 };
 
