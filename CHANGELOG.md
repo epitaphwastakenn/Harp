@@ -10,6 +10,22 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.17 · 2026-10-31
+
+> A cleaner model picker with five reasoning slider styles, project icons from your Roblox games, and a seal on the new-chat screen.
+
+### New
+
+- **Reasoning slider styles** — The reasoning slider in the model picker now comes in Liquid, Comet, Aurora, Ripple and Classic. Liquid is the default. Each style plays a short effect when you change the level and stays still otherwise. Pick one in Settings → Appearance → Interface → Reasoning slider, which has a live preview.
+- **Project icons from Roblox games** — Right-click a project in the sidebar and choose Change icon… to pick one of the game icons, or paste a Roblox game link to use that game's icon. Harp keeps the icon, so it only fetches it once.
+- **Seal on the new-chat screen** — A small voxel seal on an ice floe sits above the new-chat headline, tinted by your theme's colours.
+
+### Improved
+
+- **Model picker** — Cleaner rows with fewer lines, depth from shadows instead of borders, and a filled search box. The reasoning and Ultracode card stays pinned to the bottom of the picker over the model list, which scrolls behind it.
+- **Usage ring** — The composer's usage meter is a ring again instead of a timer.
+- **Sidebar and thread details** — New thread and Search no longer have an outline, and the thread details card uses the glass look when glass is on.
+
 ## 2.17.16 · 2026-10-31
 
 > Harp gets one consistent look everywhere, a screenshot gallery after each turn, per-thread Studio controls, and Ultracode with any effort.
@@ -24,6 +40,8 @@ each version's section as that release's notes. Newest version first:
 
 - **One look everywhere** — The old and new designs are merged into one. The sidebar, the Working and Worked for rows, the composer and the new-thread screen, the model picker, Settings, dialogs, menus, toasts and side panels now share the same colours, corners, glass and controls. The Beta page and its "New design" switch are gone.
 - **Roblox VFX skill** — Agents building visual effects now prototype several variants side by side for you to pick from, measure animations before timing effects, and follow tested recipes for trails, tracers, projectiles and textures.
+
+## 2.17.15 · 2026-10-28
 
 > See your words while you dictate, take Claude's guess at your next prompt with Tab, and give the sidebar header art a style and color of your own.
 
