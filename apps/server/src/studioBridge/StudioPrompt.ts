@@ -337,15 +337,28 @@ const make = Effect.gen(function* () {
         return yield* failure(404, "thread_not_found", "That thread is gone.");
       }
       const state = promptStateOf(shell);
-      const message = shell.latestVisibleMessage;
+      const runId = shell.activeRunId ?? shell.latestRunId;
+      const messages =
+        runId === null
+          ? []
+          : (yield* threads
+              .getThreadRecords(shell.id, ["messages"], {
+                messageRoles: ["assistant"],
+                messageRunIds: [runId],
+              })
+              .pipe(Effect.mapError(internal("Could not read the reply")))).messages;
+      const latest = messages
+        .filter((message) => message.text.trim().length > 0)
+        .toSorted(
+          (left, right) =>
+            DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt),
+        )
+        .at(-1);
       return {
         threadId: shell.id,
         title: shell.title,
         state,
-        reply:
-          message !== null && message.role === "assistant"
-            ? shorten(message.text.trim(), maxReplyChars)
-            : null,
+        reply: latest === undefined ? null : shorten(latest.text.trim(), maxReplyChars),
         error: state === "failed" ? (shell.lastError ?? null) : null,
       };
     },

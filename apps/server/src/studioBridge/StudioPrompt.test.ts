@@ -3,9 +3,9 @@ import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
-  MessageId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type OrchestrationProjectShell,
   type OrchestrationV2ServerCommand,
@@ -82,12 +82,14 @@ const project = (id: string, workspaceRoot: string): OrchestrationProjectShell =
 
 interface Harness {
   readonly shells: Map<string, OrchestrationV2ThreadShell>;
+  readonly replies: Array<{ readonly runId: string; readonly text: string; readonly at: number }>;
   readonly dispatched: OrchestrationV2ServerCommand[];
   readonly sent: ThreadManagement.ThreadManagementSendInput[];
 }
 
 const makeHarness = (initial: ReadonlyArray<OrchestrationV2ThreadShell>): Harness => ({
   shells: new Map(initial.map((entry) => [entry.id, entry])),
+  replies: [],
   dispatched: [],
   sent: [],
 });
@@ -102,6 +104,12 @@ const layerFor = (harness: Harness) => {
         archivedThreads: [],
       }),
     getThreadShell: (threadId) => Effect.succeed(harness.shells.get(threadId) ?? null),
+    getThreadRecords: (_threadId, _fields, filter) =>
+      Effect.succeed({
+        messages: harness.replies
+          .filter((reply) => filter?.messageRunIds?.includes(RunId.make(reply.runId)) ?? true)
+          .map((reply) => ({ role: "assistant", text: reply.text, createdAt: at(reply.at) })),
+      } as never),
     dispatch: (command) =>
       Effect.sync(() => {
         harness.dispatched.push(command);
@@ -298,16 +306,13 @@ describe("StudioPrompt", () => {
 
   it.effect("reports the thread's state and the agent's latest reply", () => {
     const harness = makeHarness([
-      shell("done", {
-        status: "completed",
-        latestVisibleMessage: {
-          id: MessageId.make("m1"),
-          role: "assistant",
-          text: "The tower now breaks apart when the boss dies.",
-          updatedAt: at(5),
-        },
-      }),
+      shell("done", { status: "completed", latestRunId: RunId.make("run-1") }),
     ]);
+    harness.replies.push(
+      { runId: "run-1", text: "Looking at the tower now.", at: 2 },
+      { runId: "run-1", text: "The tower now breaks apart when the boss dies.", at: 5 },
+      { runId: "run-0", text: "An older turn.", at: 9 },
+    );
     return Effect.gen(function* () {
       const prompts = yield* StudioPrompt.StudioPrompt;
       const sessionToken = yield* connect;

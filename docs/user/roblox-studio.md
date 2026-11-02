@@ -19,13 +19,22 @@ an update. The status in Settings shows the connected places and whether the plu
 
 ## The Studio panel
 
-Open it from the **Harp** button on Studio's Plugins tab. It shows:
+Click the **Harp** button at the bottom left of the Studio viewport (or the **Harp** button on the
+Plugins tab). The panel has Prompt, Studio, Tools and Activity tabs:
 
-- **Connection:** the place, the playtest peers, and buttons to disconnect or retry.
-- **Agent activity:** each action the agent takes, with its result and duration.
-- **Safety:** pause the agent, make the place read-only, or turn off running Luau.
-- **Agent tools:** every tool the agent can use, with its own switch. Search to find one quickly.
-  A tool you switch off is refused, whatever the agent asks.
+- **Prompt:** send a prompt to a Harp thread without leaving Studio. Pick the thread under **Send
+  to**: threads whose agent already worked on this place come first, and **New thread** starts one
+  with the same project and model as the latest thread. The agent's status and latest reply show
+  under the prompt; the full conversation is in Harp.
+- **Attach instances (Prompt tab):** select anything in the Explorer or viewport and click **Attach selection**,
+  or turn on **Pick** and click it. Each attached instance goes with the prompt as a file the agent
+  reads: its path, class, key properties, attributes and tags, the source of a script, or a summary
+  of what a model contains.
+- **Studio:** the connection, the place and its playtest peers, and the safety switches: pause the
+  agent, make the place read-only, or turn off running Luau.
+- **Tools:** every tool the agent can use, with its own switch. Search to find one quickly. A tool
+  you switch off is refused, whatever the agent asks.
+- **Activity:** each action the agent takes in this Studio, with its result and duration.
 
 These switches are enforced in Studio and in Harp.
 
