@@ -328,82 +328,85 @@ const probeClaudeCapabilities = (
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   includeUsage = true,
-) => {
-  const abort = new AbortController();
-  return Effect.gen(function* () {
-    const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-    const executablePath = yield* resolveClaudeSdkExecutablePath(
-      claudeSettings.binaryPath,
-      claudeEnvironment,
-    );
-    const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
-    return yield* Effect.tryPromise(async () => {
-      const q = claudeQuery({
-        // oxlint-disable-next-line require-yield -- never yields, so no prompt reaches the API
-        prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-          await waitForAbortSignal(abort.signal);
-        })(),
-        options: buildClaudeCapabilitiesProbeQueryOptions({
-          executablePath,
-          abortController: abort,
-          environment: claudeEnvironment,
-          cwd,
-          managedMcpConfig,
-        }),
+) =>
+  Effect.suspend(() => {
+    const abort = new AbortController();
+    return Effect.gen(function* () {
+      const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+      const executablePath = yield* resolveClaudeSdkExecutablePath(
+        claudeSettings.binaryPath,
+        claudeEnvironment,
+      );
+      const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
+      return yield* Effect.tryPromise(async () => {
+        const q = claudeQuery({
+          // oxlint-disable-next-line require-yield -- never yields, so no prompt reaches the API
+          prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+            await waitForAbortSignal(abort.signal);
+          })(),
+          options: buildClaudeCapabilitiesProbeQueryOptions({
+            executablePath,
+            abortController: abort,
+            environment: claudeEnvironment,
+            cwd,
+            managedMcpConfig,
+          }),
+        });
+        const init = await q.initializationResult();
+        return { q, init };
       });
-      const init = await q.initializationResult();
-      return { q, init };
-    });
-  }).pipe(
-    Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
-    Effect.flatMap(({ q, init }) =>
-      Effect.gen(function* () {
-        // Usage has its own deadline so a slow optional request cannot discard initialization.
-        // Only the rate limits are read, so skip the local transcript scan that fills
-        // `behaviors`: with a few GB of transcripts it outlasts the deadline.
-        const usageCheckedAt = DateTime.formatIso(yield* DateTime.now);
-        const usageResult = includeUsage
-          ? yield* Effect.tryPromise(() =>
-              q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
-            ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result)
-          : undefined;
-        const usage =
-          usageResult && Result.isSuccess(usageResult)
-            ? {
-                rate_limits_available: usageResult.success.rate_limits_available,
-                rate_limits: usageResult.success.rate_limits,
-              }
+    }).pipe(
+      Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
+      Effect.flatMap(({ q, init }) =>
+        Effect.gen(function* () {
+          // Usage has its own deadline so a slow optional request cannot discard initialization.
+          // Only the rate limits are read, so skip the local transcript scan that fills
+          // `behaviors`: with a few GB of transcripts it outlasts the deadline.
+          const usageCheckedAt = DateTime.formatIso(yield* DateTime.now);
+          const usageResult = includeUsage
+            ? yield* Effect.tryPromise(() =>
+                q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+                  skipBehaviors: true,
+                }),
+              ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result)
             : undefined;
-        const account = init.account as
-          | {
-              readonly email?: string;
-              readonly subscriptionType?: string;
-              readonly tokenSource?: string;
-              readonly apiKeySource?: string;
-              readonly apiProvider?: string;
-            }
-          | undefined;
-        return {
-          email: account?.email,
-          subscriptionType: account?.subscriptionType,
-          tokenSource: account?.tokenSource,
-          apiKeySource: account?.apiKeySource,
-          apiProvider: account?.apiProvider,
-          slashCommands: parseClaudeInitializationCommands(init.commands),
-          ...(usage ? { usage, usageCheckedAt } : {}),
-        } satisfies ClaudeCapabilitiesProbe;
-      }),
-    ),
-    Effect.ensuring(
-      Effect.sync(() => {
-        if (!abort.signal.aborted) abort.abort();
-      }),
-    ),
-    Effect.tapError((error) =>
-      Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
-    ),
-  );
-};
+          const usage =
+            usageResult && Result.isSuccess(usageResult)
+              ? {
+                  rate_limits_available: usageResult.success.rate_limits_available,
+                  rate_limits: usageResult.success.rate_limits,
+                }
+              : undefined;
+          const account = init.account as
+            | {
+                readonly email?: string;
+                readonly subscriptionType?: string;
+                readonly tokenSource?: string;
+                readonly apiKeySource?: string;
+                readonly apiProvider?: string;
+              }
+            | undefined;
+          return {
+            email: account?.email,
+            subscriptionType: account?.subscriptionType,
+            tokenSource: account?.tokenSource,
+            apiKeySource: account?.apiKeySource,
+            apiProvider: account?.apiProvider,
+            slashCommands: parseClaudeInitializationCommands(init.commands),
+            ...(usage ? { usage, usageCheckedAt } : {}),
+          } satisfies ClaudeCapabilitiesProbe;
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (!abort.signal.aborted) abort.abort();
+        }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
+      ),
+    );
+  });
 
 export type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
