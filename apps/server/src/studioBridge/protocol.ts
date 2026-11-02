@@ -24,6 +24,9 @@ export const StudioRoutes = {
   bye: "/studio/v1/bye",
   client: "/studio/v1/client",
   bundle: "/studio/v1/bundle",
+  promptTargets: "/studio/v1/prompt/targets",
+  promptSend: "/studio/v1/prompt/send",
+  promptStatus: "/studio/v1/prompt/status",
   mcp: "/mcp",
 } as const;
 

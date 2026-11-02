@@ -60,7 +60,7 @@ describe("StudioPluginInstaller", () => {
         changed: true,
       });
       const text = yield* fs.readFileString(first.path);
-      for (const module of ["Transport", "Router", "Panel", "Config", "Scripts", "Instances"]) {
+      for (const module of ["Transport", "Router", "Overlay", "Config", "Scripts", "Instances"]) {
         expect(text).toContain(`<string name="Name">${module}</string>`);
       }
       expect((yield* installer.install({ port: 58760, key: "abc" })).changed).toBe(false);

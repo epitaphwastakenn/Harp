@@ -388,6 +388,11 @@ export class StudioBridge extends Context.Service<
     readonly snapshot: Effect.Effect<StudioBridgeSnapshot>;
     /** What the user last had selected in the edit window of each connected place. */
     readonly selections: Effect.Effect<ReadonlyArray<StudioSelection>>;
+    readonly sessionPeer: (sessionToken: string) => Effect.Effect<StudioPeer, StudioSessionUnknown>;
+    /** Threads whose agent called tools on this place, most recent first. */
+    readonly threadsOf: (
+      instanceId: string,
+    ) => Effect.Effect<ReadonlyArray<{ readonly threadId: string; readonly at: number }>>;
     readonly events: Stream.Stream<StudioEvent>;
     /** Studio went away unexpectedly or mid-task, or a playtest printed an error. */
     readonly alerts: Stream.Stream<RobloxStudioAlert>;
@@ -405,6 +410,7 @@ const make = Effect.gen(function* () {
   const aliases = new Map<string, { readonly to: string; at: number }>();
   const activity: StudioActivity[] = [];
   const selections = new Map<string, StudioSelection>();
+  const placeThreads = new Map<string, Map<string, number>>();
   let lifecycle: StudioLifecycle = { state: "stopped", pluginUpdated: false };
   let agentLinked = false;
   let lastToolAt = 0;
@@ -1020,6 +1026,14 @@ const make = Effect.gen(function* () {
       };
       pending.set(id, entry);
       lastToolAt = startedAt;
+      if (input.meta.threadId !== undefined) {
+        const place = resolveAlias(peer.instanceId);
+        const threads = placeThreads.get(place) ?? new Map<string, number>();
+        threads.delete(input.meta.threadId);
+        threads.set(input.meta.threadId, startedAt);
+        if (threads.size > 20) threads.delete(threads.keys().next().value ?? input.meta.threadId);
+        placeThreads.set(place, threads);
+      }
       recordActivity({
         requestId: id,
         tool: input.meta.tool,
@@ -1176,6 +1190,19 @@ const make = Effect.gen(function* () {
         return live === undefined ? [] : [{ ...selection, instanceId: live.peer.instanceId }];
       }),
     ),
+    sessionPeer: (sessionToken) =>
+      Effect.suspend(() => {
+        const session = byToken.get(sessionToken);
+        return session === undefined
+          ? Effect.fail(new StudioSessionUnknown())
+          : Effect.succeed(session.peer);
+      }),
+    threadsOf: (instanceId) =>
+      Effect.sync(() =>
+        [...(placeThreads.get(resolveAlias(instanceId))?.entries() ?? [])]
+          .map(([threadId, at]) => ({ threadId, at }))
+          .toReversed(),
+      ),
     events: Stream.fromPubSub(eventsHub),
     alerts: Stream.fromPubSub(alertsHub),
     changes: Stream.fromPubSub(changesHub),

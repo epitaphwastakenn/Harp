@@ -193,10 +193,11 @@ if role == "server" then
 end
 
 -- Edit window from here on.
-local Panel = require(root.Panel)
+local Overlay = require(root.Overlay)
+local Prompt = require(root.Prompt)
 
 local AUTO_CONNECT = "autoConnect"
-Panel.create(plugin, host.widget(), {
+local overlay = Overlay.create({
 	toggleConnection = function()
 		if Transport.isActive() then
 			Transport.stop()
@@ -216,6 +217,17 @@ Panel.create(plugin, host.widget(), {
 	end,
 	isActive = Transport.isActive,
 })
+sessionHooks.prompt = Prompt.refreshTargets
+
+local widget = host.widget()
+local function widgetOpened()
+	if widget.Enabled then
+		widget.Enabled = false
+		overlay.toggle()
+	end
+end
+Lifetime.connect(widget:GetPropertyChangedSignal("Enabled"), widgetOpened)
+widgetOpened()
 
 -- Say once in Output when the link fails, since the panel starts closed.
 local warnedPhase = nil
@@ -223,7 +235,7 @@ State.onChanged(function()
 	local phase = State.connection.phase
 	if (phase == "refused" or (phase == "retrying" and State.connection.failures == 6)) and warnedPhase ~= phase then
 		warnedPhase = phase
-		warn("[Harp] Studio is not linked to Harp: " .. tostring(State.connection.detail) .. " (open the Harp panel from the Plugins tab for details)")
+		warn("[Harp] Studio is not linked to Harp: " .. tostring(State.connection.detail) .. " (open Harp from the button at the bottom left of the viewport for details)")
 	elseif phase == "connected" and warnedPhase ~= nil then
 		warnedPhase = nil
 		print("[Harp] Studio is linked to Harp.")

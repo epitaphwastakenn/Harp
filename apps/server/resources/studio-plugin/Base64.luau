@@ -42,4 +42,37 @@ function Base64.encode(input: buffer): string
 	return buffer.tostring(out)
 end
 
+local reverse = {}
+for i = 1, 64 do
+	reverse[string.byte(ALPHABET, i)] = i - 1
+end
+
+function Base64.decode(input: string): buffer
+	local clean = string.gsub(input, "[^%w%+/]", "")
+	local length = #clean
+	local out = buffer.create(math.floor(length * 3 / 4))
+	local o = 0
+	local i = 1
+	while i + 3 <= length do
+		local a, b, c, d = string.byte(clean, i, i + 3)
+		local n = bit32.bor(bit32.lshift(reverse[a], 18), bit32.lshift(reverse[b], 12), bit32.lshift(reverse[c], 6), reverse[d])
+		buffer.writeu8(out, o, bit32.extract(n, 16, 8))
+		buffer.writeu8(out, o + 1, bit32.extract(n, 8, 8))
+		buffer.writeu8(out, o + 2, bit32.extract(n, 0, 8))
+		o += 3
+		i += 4
+	end
+	local rest = length - i + 1
+	if rest >= 2 then
+		local a, b = string.byte(clean, i, i + 1)
+		local c = if rest == 3 then reverse[string.byte(clean, i + 2)] else 0
+		local n = bit32.bor(bit32.lshift(reverse[a], 18), bit32.lshift(reverse[b], 12), bit32.lshift(c, 6))
+		buffer.writeu8(out, o, bit32.extract(n, 16, 8))
+		if rest == 3 then
+			buffer.writeu8(out, o + 1, bit32.extract(n, 8, 8))
+		end
+	end
+	return out
+end
+
 return Base64

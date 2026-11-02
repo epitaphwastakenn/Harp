@@ -248,6 +248,23 @@ function Transport.unregisterClient(logicalId: string)
 	post("/studio/v1/client", { sessionToken = sessionToken, action = "unregister", logicalId = logicalId })
 end
 
+function Transport.call(route: string, fields)
+	if sessionToken == nil then
+		return false, nil, "Not linked to Harp yet."
+	end
+	local body = table.clone(fields or {})
+	body.sessionToken = sessionToken
+	local ok, status, decoded, err = post(route, body)
+	if ok and type(decoded) == "table" and decoded.success == true then
+		return true, decoded.result, nil
+	end
+	if status == 404 and type(decoded) == "table" and decoded.error == "session_unknown" then
+		Transport.refreshIdentity()
+	end
+	local message = if type(decoded) == "table" and type(decoded.message) == "string" then decoded.message else explain(err, status)
+	return false, nil, message
+end
+
 function Transport.isActive(): boolean
 	return active
 end

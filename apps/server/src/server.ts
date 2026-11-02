@@ -66,6 +66,7 @@ import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
 import * as StudioBridgeServer from "./studioBridge/StudioBridgeServer.ts";
 import * as StudioPluginInstaller from "./studioBridge/StudioPluginInstaller.ts";
+import * as StudioPrompt from "./studioBridge/StudioPrompt.ts";
 import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as RobloxToolVisibility from "./roblox/RobloxToolVisibility.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
@@ -508,6 +509,7 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 /** Harp's own Studio bridge; it listens only while the Roblox mode is `sealcode`. */
 const layerStudioBridge = StudioBridgeServer.layer.pipe(
   Layer.provideMerge(StudioTools.layer),
+  Layer.provide(StudioPrompt.layer),
   Layer.provide(StudioPluginInstaller.layer),
   Layer.provide(ServerSecretStore.layer),
 );

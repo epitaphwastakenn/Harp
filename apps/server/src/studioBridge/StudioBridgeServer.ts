@@ -13,6 +13,8 @@ import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Schema from "effect/Schema";
+import { StudioPromptSendRequest } from "@t3tools/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
@@ -21,6 +23,7 @@ import { PLUGIN_KEY_HEADER, StudioLimits, StudioRoutes } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 import { handleMcpMessage } from "./studioMcp.ts";
 import * as StudioPluginInstaller from "./StudioPluginInstaller.ts";
+import * as StudioPrompt from "./StudioPrompt.ts";
 import * as StudioTools from "./StudioTools.ts";
 
 const PLUGIN_KEY_SECRET = "studio-bridge-plugin-key";
@@ -48,6 +51,19 @@ const readBody = (request: HttpServerRequest.HttpServerRequest) =>
     ),
     Effect.map((value): Record<string, unknown> => (isRecord(value) ? value : {})),
     Effect.orElseSucceed((): Record<string, unknown> | undefined => undefined),
+  );
+
+const decodeSendRequest = Schema.decodeUnknownEffect(StudioPromptSendRequest);
+
+const promptReply = <A>(effect: Effect.Effect<A, StudioPrompt.StudioPromptError>) =>
+  effect.pipe(
+    Effect.map((result) => json(200, { success: true, result })),
+    Effect.catchTags({
+      StudioPromptError: (error) =>
+        Effect.succeed(
+          json(error.status, { success: false, error: error.code, message: error.message }),
+        ),
+    }),
   );
 
 const text = (value: unknown, fallback = ""): string =>
@@ -219,6 +235,34 @@ const routesFor = (input: {
         ),
       ),
     ),
+    plugin(StudioRoutes.promptTargets, (body) =>
+      Effect.gen(function* () {
+        const prompts = yield* StudioPrompt.StudioPrompt;
+        return yield* promptReply(prompts.targets(text(body.sessionToken)));
+      }),
+    ),
+    plugin(StudioRoutes.promptSend, (body) =>
+      Effect.gen(function* () {
+        const prompts = yield* StudioPrompt.StudioPrompt;
+        const request = yield* decodeSendRequest(body).pipe(Effect.option);
+        if (request._tag === "None") {
+          return json(400, {
+            success: false,
+            error: "invalid_request",
+            message: "The prompt or its attachments are malformed or too large.",
+          });
+        }
+        return yield* promptReply(prompts.send(request.value));
+      }),
+    ),
+    plugin(StudioRoutes.promptStatus, (body) =>
+      Effect.gen(function* () {
+        const prompts = yield* StudioPrompt.StudioPrompt;
+        return yield* promptReply(
+          prompts.status({ sessionToken: text(body.sessionToken), threadId: text(body.threadId) }),
+        );
+      }),
+    ),
     plugin(StudioRoutes.bye, (body) =>
       Effect.gen(function* () {
         const bridge = yield* StudioBridge.StudioBridge;
@@ -263,6 +307,7 @@ const make = Effect.gen(function* () {
   const robloxConfig = yield* RobloxStudioConfig;
   const bridge = yield* StudioBridge.StudioBridge;
   const tools = yield* StudioTools.StudioTools;
+  const prompts = yield* StudioPrompt.StudioPrompt;
   const installer = yield* StudioPluginInstaller.StudioPluginInstaller;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const studio = robloxConfig.environment.studioBridge;
@@ -293,6 +338,7 @@ const make = Effect.gen(function* () {
       ),
       Layer.provide(Layer.succeed(StudioBridge.StudioBridge, bridge)),
       Layer.provide(Layer.succeed(StudioTools.StudioTools, tools)),
+      Layer.provide(Layer.succeed(StudioPrompt.StudioPrompt, prompts)),
       Layer.buildWithScope(scope),
       Effect.exit,
     );
