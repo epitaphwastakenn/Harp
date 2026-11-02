@@ -10,6 +10,24 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.18 · 2026-11-02
+
+> A new Harp panel inside Roblox Studio: send prompts to your agent and attach any instance, without leaving Studio.
+
+### New
+
+- **Harp panel in Studio** — A Harp button now sits at the bottom left of the Studio viewport. It opens a redesigned panel with Prompt, Studio, Tools and Activity tabs, replacing the old plugin window.
+- **Prompt from Studio** — Type a prompt in the panel and send it to a Harp thread. Threads that already worked on this place come first, or start a new one. The agent's status and latest reply show right under the prompt.
+- **Attach instances** — Select anything in the Explorer or the viewport and attach it to your prompt, like a screenshot. The agent gets its path, class, key properties, attributes and tags, a script's source, or a summary of what a model contains.
+
+### Improved
+
+- **3D modeling skill** — For props and creatures made in Blender, alone or as a set from one reference, agents now measure the reference, build a style kit, plan the set for variety, and review every model side by side at the same scale.
+
+### Fixed
+
+- **Claude account status** — The Claude provider no longer gets stuck on "Claude Agent CLI failed while checking account status". Usage limits show again, and the model can be changed.
+
 ## 2.17.17 · 2026-10-31
 
 > A cleaner model picker with five reasoning slider styles, project icons from your Roblox games, and a seal on the new-chat screen.
