@@ -24,6 +24,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   deriveCanInterruptRunningThread,
+  deriveActivePlanState,
   deriveTimelineEntriesFromVisibleTurnItems,
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
   deriveRevertTurnCountByUserMessageId,
@@ -462,7 +463,7 @@ describe("V2 session presentation", () => {
       ...base("item-todo", 4),
       type: "todo_list" as const,
       planId: PlanId.make("plan-visible"),
-      explanation: "Show task updates where the agent wrote them",
+      explanation: "Keep task detail in the Tasks panel",
       steps: [
         { id: "step-1", text: "First", status: "completed" as const },
         { id: "step-2", text: "Second", status: "pending" as const },
@@ -523,7 +524,6 @@ describe("V2 session presentation", () => {
       ["event", requestItem.id],
       ["work", commandItem.id],
       ["event", resultItem.id],
-      ["work", todoItem.id],
       ["work", errorItem.id],
       ["work", threadCreatedItem.id],
     ]);
@@ -543,7 +543,7 @@ describe("V2 session presentation", () => {
       expect(commandEntry.entry.command).toBe(commandItem.input);
       expect(commandEntry.entry.detail).toBeUndefined();
     }
-    const errorEntry = entries[5];
+    const errorEntry = entries[4];
     expect(errorEntry?.kind).toBe("work");
     if (errorEntry?.kind === "work") {
       expect(errorEntry.entry.projectedItem).toBe(visibleTurnItems[5]);
@@ -552,29 +552,15 @@ describe("V2 session presentation", () => {
       expect(errorEntry.entry.tone).toBe("info");
       expect(errorEntry.entry.toolLifecycleStatus).toBe("failed");
     }
-    const threadCreatedEntry = entries[6];
+    const threadCreatedEntry = entries[5];
     expect(threadCreatedEntry?.kind).toBe("work");
     if (threadCreatedEntry?.kind === "work") {
       expect(threadCreatedEntry.entry.projectedItem?.item.type).toBe("thread_created");
     }
-    expect(
-      deriveTimelineEntriesFromVisibleTurnItems({
-        visibleTurnItems: [
-          {
-            ...visibleTurnItems.at(-1)!,
-            item: {
-              ...workspacePreparationItem,
-              deferredWork: { cursor: "work-page", itemCount: 100, lastOrdinal: 107 },
-            },
-          },
-        ],
-        optimisticMessages: [],
-      }).map((entry) => entry.id),
-    ).toEqual([workspacePreparationItem.id]);
   });
 
   it.each(["pending", "running", "completed"] as const)(
-    "shows a %s todo update in the timeline where the agent wrote it",
+    "keeps %s task progress available to the composer and out of the timeline",
     (stepStatus) => {
       const projection = makeThreadProjectionFixture();
       const now = DateTime.makeUnsafe("2026-09-04T00:00:00.000Z");
@@ -627,14 +613,18 @@ describe("V2 session presentation", () => {
           optimisticMessages: [],
           plans,
         }),
-      ).toMatchObject([
-        {
-          kind: "work",
-          entry: {
-            label: stepStatus === "completed" ? "Tasks 1/1" : "Tasks 0/1 · Verify the change",
+      ).toEqual([]);
+      expect(
+        deriveActivePlanState({ ...projection, plans, turnItems: [item] }, runId),
+      ).toMatchObject({
+        runId,
+        steps: [
+          {
+            step: "Verify the change",
+            status: stepStatus === "running" ? "inProgress" : stepStatus,
           },
-        },
-      ]);
+        ],
+      });
     },
   );
 

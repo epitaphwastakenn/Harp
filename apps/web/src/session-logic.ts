@@ -612,17 +612,6 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         toolData: { input: item.input, output: item.output },
       };
     }
-    case "todo_list": {
-      // Each todo update is a quiet row where the agent wrote it; it opens to every step.
-      const done = item.steps.filter((step) => step.status === "completed").length;
-      const current =
-        item.steps.find((step) => step.status === "running") ??
-        item.steps.find((step) => step.status === "pending");
-      return {
-        ...common,
-        label: `Tasks ${done}/${item.steps.length}${current ? ` · ${current.text}` : ""}`,
-      };
-    }
     case "approval_request":
       return {
         ...common,
@@ -700,7 +689,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   for (const row of input.visibleTurnItems) {
     const { item } = row;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
-    if (item.type === "checkpoint") continue;
+    if (item.type === "todo_list" || item.type === "checkpoint") continue;
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
