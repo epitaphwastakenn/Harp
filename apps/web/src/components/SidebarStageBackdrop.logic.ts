@@ -10,9 +10,13 @@ export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
 export function resolveSidebarStageBackdropVariant(
   stageLabel: string,
-  enabled = true,
+  modeOrEnabled: EnvironmentIdentificationMode | boolean = "artwork",
 ): SidebarStageBackdropVariant | null {
-  if (!enabled) return null;
+  const mode =
+    typeof modeOrEnabled === "boolean" ? (modeOrEnabled ? "artwork" : "none") : modeOrEnabled;
+  if (mode === "nightly-artwork") return "nightly";
+  if (mode === "dev-artwork") return "dev";
+  if (mode !== "artwork") return null;
   const normalized = stageLabel.trim().toLowerCase();
   if (normalized === "nightly") return "nightly";
   if (normalized === "dev") return "dev";
@@ -39,7 +43,7 @@ export function resolveSidebarHeaderArtVariant(input: {
 }): SidebarStageBackdropVariant | null {
   const stageVariant = resolveSidebarStageBackdropVariant(
     input.stageLabel,
-    input.environmentIdentificationMode === "artwork",
+    input.environmentIdentificationMode,
   );
   if (stageVariant !== null) return stageVariant;
   if (resolveEnvironmentIdentificationPillLabel(input.stageLabel) !== null) return null;

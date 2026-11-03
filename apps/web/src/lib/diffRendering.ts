@@ -3,17 +3,16 @@ import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 import { READABLE_LIGHT_THEME_NAME } from "./readableSyntaxTheme";
 
+// Light mode uses a darker pierre-light so syntax stays readable on every code surface.
 export const DIFF_THEME_NAMES = {
-  light: "pierre-light",
+  light: READABLE_LIGHT_THEME_NAME,
   dark: "pierre-dark",
-  readableLight: READABLE_LIGHT_THEME_NAME,
 } as const;
 
 export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
 
 export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  if (theme === "dark") return DIFF_THEME_NAMES.dark;
-  return DIFF_THEME_NAMES.readableLight;
+  return DIFF_THEME_NAMES[theme];
 }
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
@@ -35,14 +34,9 @@ export function fnv1a32(
 }
 
 function buildPatchCacheKey(patch: string, scope = "diff-panel"): string {
-  const normalizedPatch = patch.trim();
-  const primary = fnv1a32(normalizedPatch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36);
-  const secondary = fnv1a32(
-    normalizedPatch,
-    SECONDARY_HASH_SEED,
-    SECONDARY_HASH_MULTIPLIER,
-  ).toString(36);
-  return `${scope}:${normalizedPatch.length}:${primary}:${secondary}`;
+  const primary = fnv1a32(patch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36);
+  const secondary = fnv1a32(patch, SECONDARY_HASH_SEED, SECONDARY_HASH_MULTIPLIER).toString(36);
+  return `${scope}:${patch.length}:${primary}:${secondary}`;
 }
 
 export type RenderablePatch =
@@ -165,15 +159,10 @@ export function getRenderablePatch(
   cacheScope = "diff-panel",
   options: RenderablePatchOptions = {},
 ): RenderablePatch | null {
-  if (!patch) return null;
-  const normalizedPatch = patch.trim();
-  if (normalizedPatch.length === 0) return null;
+  if (!patch?.trim()) return null;
 
   try {
-    const parsedPatches = parsePatchFiles(
-      normalizedPatch,
-      buildPatchCacheKey(normalizedPatch, cacheScope),
-    );
+    const parsedPatches = parsePatchFiles(patch, buildPatchCacheKey(patch, cacheScope));
     const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
     const files = sourceFiles.map((file) => {
       const filtered = options.ignoreWhitespace ? hideWhitespaceChanges(file) : file;
@@ -185,13 +174,13 @@ export function getRenderablePatch(
 
     return {
       kind: "raw",
-      text: normalizedPatch,
+      text: patch,
       reason: "Unsupported diff format. Showing raw patch.",
     };
   } catch {
     return {
       kind: "raw",
-      text: normalizedPatch,
+      text: patch,
       reason: "Failed to parse patch. Showing raw patch.",
     };
   }
@@ -349,7 +338,7 @@ export const DIFF_SURFACE_THEME_UNSAFE_CSS = `
 [data-change-icon="deleted"] {
   color: light-dark(var(--diff-deletion-foreground), var(--diffs-deletion-base)) !important;
 }
-/* The page sets --diff-modified-icon under the New design: a muted T3 blue, so the common case stays quiet. */
+/* The page sets --diff-modified-icon to a muted T3 blue, so the common case stays quiet. */
 [data-change-icon="change"],
 [data-change-icon="rename-pure"],
 [data-change-icon="rename-changed"] {

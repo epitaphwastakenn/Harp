@@ -13,7 +13,8 @@ import {
 
 function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   const label = entry.displayName;
-  if (!entry.enabled || entry.status === "disabled") {
+  // An unavailable instance (a driver this build lacks or the policy leaves out) says why instead.
+  if ((!entry.enabled && entry.isAvailable) || entry.status === "disabled") {
     return `${label}: Disabled in settings.`;
   }
   if (entry.status === "ready" && entry.isAvailable) {
@@ -46,7 +47,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
-  newBadgeInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }) {
   const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
     props.onSelectInstance(instanceId);
@@ -148,16 +148,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               (isUnavailable && !unavailableSelectionIsReachable) || isContextDisabled;
             const isSelected = props.selectedInstanceId === entry.instanceId;
             const isHovered = hoveredInstanceId === entry.instanceId;
-            const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false;
             const showInstanceBadge = shouldShowInstanceBadge(entry, props.instanceEntries);
 
             const tooltip = isUnavailable
               ? describeUnavailableInstance(entry)
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
-                : showNewBadge
-                  ? `${entry.displayName} (New)`
-                  : entry.displayName;
+                : entry.displayName;
 
             const button = (
               <Toolbar.Button
@@ -181,13 +178,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 focusableWhenDisabled={!isDisabled}
                 aria-pressed={isSelected}
                 type="button"
-                aria-label={
-                  isUnavailable || isContextDisabled
-                    ? tooltip
-                    : showNewBadge
-                      ? `${entry.displayName}, new`
-                      : entry.displayName
-                }
+                aria-label={isUnavailable || isContextDisabled ? tooltip : entry.displayName}
               >
                 <ProviderInstanceIcon
                   driverKind={entry.driverKind}

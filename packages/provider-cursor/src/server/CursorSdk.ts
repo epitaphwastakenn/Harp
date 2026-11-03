@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { loadCursorSdk } from "./sdk.ts";
+import { loadCursorSdk, loadCursorSqlite } from "./sdk.ts";
 
 // The SDK leaves a shell-error promise unhandled, which would exit the server.
 const CURSOR_SHELL_SPAWN_MARKERS = [
@@ -60,9 +60,8 @@ function onUnhandledRejection(reason: unknown): void {
 export class CursorSdk extends Context.Service<
   CursorSdk,
   {
-    readonly Agent: ReturnType<typeof loadCursorSdk>["Agent"];
-    readonly createAgentPlatform: ReturnType<typeof loadCursorSdk>["createAgentPlatform"];
-    readonly SqliteLocalAgentStore: ReturnType<typeof loadCursorSdk>["SqliteLocalAgentStore"];
+    readonly load: typeof loadCursorSdk;
+    readonly loadSqlite: typeof loadCursorSqlite;
   }
 >()("@t3tools/provider-cursor/server/CursorSdk") {}
 
@@ -77,20 +76,5 @@ export const layer = Layer.effect(
       Effect.sync(() => {
         process.off("unhandledRejection", onUnhandledRejection);
       }),
-  ).pipe(
-    // Reading a member loads the SDK, so building this layer for a disabled provider costs nothing.
-    Effect.as(
-      CursorSdk.of({
-        get Agent() {
-          return loadCursorSdk().Agent;
-        },
-        get createAgentPlatform() {
-          return loadCursorSdk().createAgentPlatform;
-        },
-        get SqliteLocalAgentStore() {
-          return loadCursorSdk().SqliteLocalAgentStore;
-        },
-      }),
-    ),
-  ),
+  ).pipe(Effect.as(CursorSdk.of({ load: loadCursorSdk, loadSqlite: loadCursorSqlite }))),
 );

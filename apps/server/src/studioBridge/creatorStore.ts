@@ -122,45 +122,42 @@ const summarize = (entry: Record<string, unknown>): StoreAssetSummary | undefine
   };
 };
 
-export const searchStore = (input: {
+export const searchStore = Effect.fn("creatorStore.searchStore")(function* (input: {
   readonly type: string | undefined;
   readonly query: string | undefined;
   readonly maxResults: number;
   readonly sortBy: string | undefined;
   readonly includePaid: boolean;
-}) =>
-  Effect.gen(function* () {
-    const { category, extraQuery } = searchCategory(input.type);
-    const query = [input.query?.trim(), extraQuery]
-      .filter((part) => part !== undefined && part !== "")
-      .join(" ");
-    const params = new URLSearchParams({
-      searchCategoryType: category,
-      // Paid items are dropped below, so ask for extra to still fill the page.
-      maxPageSize: String(
-        Math.min(100, input.includePaid ? input.maxResults : input.maxResults * 3),
-      ),
-    });
-    if (query !== "") params.set("query", query);
-    if (input.sortBy) params.set("sortCategory", input.sortBy);
-    const body = yield* fetchJson(`${STORE}/assets:search?${params.toString()}`);
-    const entries =
-      isRecord(body) && Array.isArray(body.creatorStoreAssets) ? body.creatorStoreAssets : [];
-    const all = entries.flatMap((entry) => {
-      const summary = isRecord(entry) ? summarize(entry) : undefined;
-      return summary ? [summary] : [];
-    });
-    const results = (input.includePaid ? all : all.filter((asset) => asset.priceUsd === 0)).slice(
-      0,
-      input.maxResults,
-    );
-    return {
-      category,
-      query,
-      results,
-      droppedPaid: all.length - all.filter((a) => a.priceUsd === 0).length,
-    };
+}) {
+  const { category, extraQuery } = searchCategory(input.type);
+  const query = [input.query?.trim(), extraQuery]
+    .filter((part) => part !== undefined && part !== "")
+    .join(" ");
+  const params = new URLSearchParams({
+    searchCategoryType: category,
+    // Paid items are dropped below, so ask for extra to still fill the page.
+    maxPageSize: String(Math.min(100, input.includePaid ? input.maxResults : input.maxResults * 3)),
   });
+  if (query !== "") params.set("query", query);
+  if (input.sortBy) params.set("sortCategory", input.sortBy);
+  const body = yield* fetchJson(`${STORE}/assets:search?${params.toString()}`);
+  const entries =
+    isRecord(body) && Array.isArray(body.creatorStoreAssets) ? body.creatorStoreAssets : [];
+  const all = entries.flatMap((entry) => {
+    const summary = isRecord(entry) ? summarize(entry) : undefined;
+    return summary ? [summary] : [];
+  });
+  const results = (input.includePaid ? all : all.filter((asset) => asset.priceUsd === 0)).slice(
+    0,
+    input.maxResults,
+  );
+  return {
+    category,
+    query,
+    results,
+    droppedPaid: all.length - all.filter((a) => a.priceUsd === 0).length,
+  };
+});
 
 export const assetDetails = (assetId: number) =>
   fetchJson(`${STORE}/assets/${String(assetId)}`).pipe(
@@ -168,24 +165,26 @@ export const assetDetails = (assetId: number) =>
   );
 
 /** The asset's store thumbnail as PNG bytes, when Roblox has one ready. */
-export const assetThumbnail = (assetId: number, size: "150x150" | "420x420" | "768x432") =>
-  Effect.gen(function* () {
-    const body = yield* fetchJson(
-      `${THUMBNAILS}?assetIds=${String(assetId)}&size=${size}&format=Png&isCircular=false`,
-    );
-    const first = isRecord(body) && Array.isArray(body.data) ? body.data[0] : undefined;
-    if (!isRecord(first) || first.state !== "Completed" || typeof first.imageUrl !== "string") {
-      return undefined;
-    }
-    const imageUrl = first.imageUrl;
-    return yield* Effect.tryPromise({
-      try: async (signal) => {
-        const response = await fetch(imageUrl, {
-          signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
-        });
-        if (!response.ok) throw new Error(`thumbnail HTTP ${String(response.status)}`);
-        return Buffer.from(await response.arrayBuffer());
-      },
-      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-    });
+export const assetThumbnail = Effect.fn("creatorStore.assetThumbnail")(function* (
+  assetId: number,
+  size: "150x150" | "420x420" | "768x432",
+) {
+  const body = yield* fetchJson(
+    `${THUMBNAILS}?assetIds=${String(assetId)}&size=${size}&format=Png&isCircular=false`,
+  );
+  const first = isRecord(body) && Array.isArray(body.data) ? body.data[0] : undefined;
+  if (!isRecord(first) || first.state !== "Completed" || typeof first.imageUrl !== "string") {
+    return undefined;
+  }
+  const imageUrl = first.imageUrl;
+  return yield* Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(imageUrl, {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
+      });
+      if (!response.ok) throw new Error(`thumbnail HTTP ${String(response.status)}`);
+      return Buffer.from(await response.arrayBuffer());
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });
+});

@@ -2,6 +2,8 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
 import { cn } from "~/lib/utils";
 
+import { renderClosingPositioner } from "./closing-positioner";
+
 const PopoverCreateHandle = PopoverPrimitive.createHandle;
 
 const Popover = PopoverPrimitive.Root;
@@ -83,7 +85,7 @@ function PopoverPopup({
         collisionAvoidance={collisionAvoidance}
         collisionPadding={variant === "panel" ? 0 : undefined}
         className={cn(
-          "h-(--positioner-height) w-(--positioner-width) max-w-(--available-width)",
+          "h-(--positioner-height) max-h-(--available-height) w-(--positioner-width) max-w-(--available-width)",
           followContentSize
             ? "transition-none"
             : "transition-transform data-instant:transition-none",
@@ -92,6 +94,7 @@ function PopoverPopup({
             : "z-[130]",
         )}
         data-slot="popover-positioner"
+        render={renderClosingPositioner}
         side={side}
         sideOffset={sideOffset}
       >

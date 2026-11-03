@@ -1,28 +1,24 @@
+import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
+import { visibilityParentKey } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
+import { Navigate, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
-import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
-import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { RouteInset } from "./RouteInset";
-import {
-  finalizePromotedDraftThreadByRef,
-  markPromotedDraftThreadByRef,
-  useBackgroundDraftSubmissionPending,
-  useComposerDraftStore,
-} from "../composerDraftStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import {
   lastOpenThreadRouteMatchesDraft,
   lastOpenThreadRouteMatchesServerThread,
 } from "../lib/chatIndexLanding";
 import { useUiStateStore } from "../uiStateStore";
-import { useThreadRefs, useQuietThreadShell } from "../state/entities";
+import { useAnyEnvironmentHiding, useQuietThreadShell } from "../state/entities";
 import { useEnvironmentShellStatus } from "../state/shell";
-import { useEnvironmentThread } from "../state/threads";
+import { environmentThreadShells, useEnvironmentThread } from "../state/threads";
 import {
   buildThreadRouteParams,
   isThreadRouteSnapshotAuthoritative,
@@ -31,7 +27,9 @@ import {
 } from "../threadRoutes";
 
 /**
- * Render in the shared layout to retain ChatView across route swaps; plain server threads remain unkeyed.
+ * Unkeyed so navigating between server threads reuses one ChatView. Rendered by the `_chat`
+ * layout, since an element only survives a route swap when the same parent renders it. Draft
+ * promotion runs in the draft store; this only follows the redirect it leaves behind.
  * `background` keeps the thread mounted, inert and in place under Settings or Usage.
  */
 export function ThreadRouteView({
@@ -46,52 +44,35 @@ export function ThreadRouteView({
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
   );
-  const threadRefs = useThreadRefs();
-  // Promotion can begin before the server creates the reserved thread.
-  const inferredThreadRef = draftSession
-    ? (threadRefs.find(
-        (ref) =>
-          ref.environmentId === draftSession.environmentId &&
-          ref.threadId === draftSession.threadId,
-      ) ?? null)
-    : null;
-  const serverThreadRef: ScopedThreadRef | null =
-    target.kind === "server" ? target.threadRef : inferredThreadRef;
-  const serverThread = useQuietThreadShell(serverThreadRef);
-  const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(
-    target.kind === "draft" ? serverThreadRef : null,
+  const draftRedirect = useComposerDraftStore((store) =>
+    draftId === null ? null : store.getPromotedDraftRedirect(draftId),
   );
-  const canonicalThreadRef =
-    target.kind === "draft"
-      ? resolveDraftPromotionNavigationTarget({
-          serverThreadRef,
-          serverThread,
-          backgroundSubmissionPending,
-        })
-      : null;
-
+  const serverThreadRef = target.kind === "server" ? target.threadRef : null;
+  const serverThreadShell = useQuietThreadShell(serverThreadRef);
   const shellStatus = useEnvironmentShellStatus(serverThreadRef?.environmentId ?? null);
-  const serverThreadShell = serverThread;
   const bootstrapComplete = isThreadRouteSnapshotAuthoritative(shellStatus);
   const draftThread = useComposerDraftStore((store) =>
     serverThreadRef ? store.getDraftThreadByRef(serverThreadRef) : null,
   );
-  const promotedDraftId = useComposerDraftStore((store) =>
-    target.kind === "server" ? store.getDraftIdByRef(target.threadRef) : null,
+  // Reached from the sidebar before finalize, the thread still has its draft.
+  const serverThreadDraftId = useComposerDraftStore((store) =>
+    serverThreadRef ? store.getDraftIdByRef(serverThreadRef) : null,
   );
-  // Latch the key through promotion because the draft record disappears after the route swap.
-  const [chatViewKey, setChatViewKey] = useState<{ threadKey: string; key: string } | null>(null);
-  const serverThreadKey = target.kind === "server" ? scopedThreadKey(target.threadRef) : null;
-  const nextChatViewKey =
-    serverThreadKey === null
-      ? null
-      : chatViewKey?.threadKey === serverThreadKey
-        ? chatViewKey
-        : promotedDraftId
-          ? { threadKey: serverThreadKey, key: promotedDraftId }
+  // The ChatView that carried a draft keeps its key through the redirect to its thread, and only
+  // until the route leaves that thread, so later visits reuse the shared unkeyed ChatView.
+  const [handoffKey, setHandoffKey] = useState<{ threadKey: string; key: string } | null>(null);
+  const nextHandoffKey =
+    draftId !== null && draftSession === null && draftRedirect
+      ? handoffKey?.key === draftId
+        ? handoffKey
+        : { threadKey: scopedThreadKey(draftRedirect), key: draftId }
+      : serverThreadRef && handoffKey?.threadKey === scopedThreadKey(serverThreadRef)
+        ? handoffKey
+        : serverThreadRef && serverThreadDraftId
+          ? { threadKey: scopedThreadKey(serverThreadRef), key: serverThreadDraftId }
           : null;
-  if (nextChatViewKey !== chatViewKey) {
-    setChatViewKey(nextChatViewKey);
+  if (nextHandoffKey !== handoffKey) {
+    setHandoffKey(nextHandoffKey);
   }
   // Until the shell lists the thread, its own load (HTTP, then the socket)
   // decides whether it exists. Read only then: once listed, ChatView keeps
@@ -104,6 +85,28 @@ export function ThreadRouteView({
     unlistedThreadRef?.environmentId ?? null,
     unlistedThreadRef?.threadId ?? null,
   );
+  const hiddenKeys = useAtomValue(environmentThreadShells.hiddenThreadKeysAtom);
+  const unlistedThread = Option.getOrNull(Option.map(unlistedThreadDetail.data, (p) => p.thread));
+  const unlistedParentKey =
+    unlistedThreadRef === null || unlistedThread === null
+      ? null
+      : visibilityParentKey(unlistedThreadRef.environmentId, unlistedThread);
+  const unlistedParentShell = useQuietThreadShell(
+    unlistedParentKey === null ? null : parseThreadKey(unlistedParentKey),
+  );
+  const hidingAnywhere = useAnyEnvironmentHiding();
+  const draftRedirectShell = useQuietThreadShell(draftRedirect ?? null);
+  const hiddenByTagFilter = serverThreadRef !== null && hiddenKeys.has(threadKey(serverThreadRef));
+  // Cached detail can predate a tag or an archive, so while hiding an off-shell thread opens only
+  // as the child of a loaded, visible parent (lineage never changes); anything else stays closed.
+  const offShellBlocked =
+    hidingAnywhere &&
+    unlistedThreadRef !== null &&
+    !(
+      unlistedParentKey !== null &&
+      unlistedParentShell !== null &&
+      !hiddenKeys.has(unlistedParentKey)
+    );
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadExists: serverThreadShell !== null,
@@ -111,47 +114,8 @@ export function ThreadRouteView({
     unlistedThreadDetail,
     draftThreadExists: draftThread !== null,
   });
-  const serverThreadStarted = threadHasStarted(serverThreadShell);
 
-  useEffect(() => {
-    if (!inferredThreadRef || draftSession?.promotedTo) {
-      return;
-    }
-    markPromotedDraftThreadByRef(inferredThreadRef);
-  }, [draftSession?.promotedTo, inferredThreadRef]);
-
-  useEffect(() => {
-    if (!canonicalThreadRef || background) {
-      return;
-    }
-    let cancelled = false;
-    void waitForDraftHeroTransition().then(() => {
-      if (cancelled) {
-        return;
-      }
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(canonicalThreadRef),
-        replace: true,
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [background, canonicalThreadRef, navigate]);
-
-  useEffect(() => {
-    if (background || target.kind !== "draft" || draftSession || canonicalThreadRef) {
-      return;
-    }
-    // "/" reopens the last thread, so forget a draft that no longer exists first.
-    const uiState = useUiStateStore.getState();
-    if (lastOpenThreadRouteMatchesDraft(uiState.lastOpenThreadRoute, target.draftId)) {
-      uiState.setLastOpenThreadRoute(null);
-    }
-    void navigate({ to: "/", replace: true });
-  }, [background, canonicalThreadRef, draftSession, navigate, target]);
-
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears pending file drops and navigates the router home once a server thread is confirmed missing
   useEffect(() => {
     if (target.kind !== "server" || !bootstrapComplete) {
       return;
@@ -169,21 +133,32 @@ export function ThreadRouteView({
       ) {
         uiState.setLastOpenThreadRoute(null);
       }
-      // "/" always lands somewhere (last thread, a draft, or a scratch thread).
       if (!background) void navigate({ to: "/", replace: true });
     }
   }, [background, bootstrapComplete, navigate, renderState, target]);
 
   useEffect(() => {
-    if (target.kind !== "server" || !serverThreadStarted || !draftThread) {
+    if (background || target.kind !== "draft" || draftSession || draftRedirect) {
       return;
     }
-    finalizePromotedDraftThreadByRef(target.threadRef);
-  }, [draftThread, serverThreadStarted, target]);
+    const uiState = useUiStateStore.getState();
+    if (lastOpenThreadRouteMatchesDraft(uiState.lastOpenThreadRoute, target.draftId)) {
+      uiState.setLastOpenThreadRoute(null);
+    }
+  }, [background, draftRedirect, draftSession, target]);
 
   let view: React.ReactNode = null;
+  let redirect: React.ReactNode = null;
   if (target.kind === "draft") {
-    if (draftSession) {
+    if (
+      draftSession &&
+      hiddenKeys.has(
+        threadKey({ environmentId: draftSession.environmentId, threadId: draftSession.threadId }),
+      )
+    ) {
+      // A draft whose thread is already live and hidden (mid-promotion): never mount it.
+      redirect = <Navigate to="/" replace />;
+    } else if (draftSession) {
       view = (
         <ChatView
           key={target.draftId}
@@ -194,11 +169,47 @@ export function ThreadRouteView({
           forceExpandedMobileComposer
         />
       );
+    } else if (draftRedirect && hiddenKeys.has(threadKey(draftRedirect))) {
+      // Back to a promoted draft whose thread is now hidden: never mount it.
+      redirect = <Navigate to="/" replace />;
+    } else if (draftRedirect && hidingAnywhere && draftRedirectShell === null) {
+      // While hiding, a thread outside the live list is judged by the server route, unmounted here.
+      redirect = (
+        <Navigate
+          to="/$environmentId/$threadId"
+          params={buildThreadRouteParams(draftRedirect)}
+          replace
+        />
+      );
+    } else if (draftRedirect) {
+      // Same slot and key as the server route renders, so the swap keeps this instance.
+      view = (
+        <ChatView
+          key={target.draftId}
+          environmentId={draftRedirect.environmentId}
+          threadId={draftRedirect.threadId}
+          routeKind="server"
+        />
+      );
+      redirect = (
+        <Navigate
+          to="/$environmentId/$threadId"
+          params={buildThreadRouteParams(draftRedirect)}
+          replace
+        />
+      );
+    } else {
+      redirect = <Navigate to="/" replace />;
     }
+  } else if (hiddenByTagFilter) {
+    redirect = <Navigate to="/" replace />;
+  } else if (offShellBlocked) {
+    // Before the shell bootstraps, a listed visible thread can still look off-shell.
+    if (bootstrapComplete && unlistedThread !== null) redirect = <Navigate to="/" replace />;
   } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
     view = (
       <ChatView
-        key={nextChatViewKey?.key}
+        key={nextHandoffKey?.key}
         environmentId={target.threadRef.environmentId}
         threadId={target.threadRef.threadId}
         routeKind="server"
@@ -212,6 +223,7 @@ export function ThreadRouteView({
       inert={background}
     >
       <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>
+      {background ? null : redirect}
     </RouteInset>
   );
 }

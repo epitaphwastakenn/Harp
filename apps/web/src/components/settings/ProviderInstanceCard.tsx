@@ -108,7 +108,7 @@ function makeEnvironmentDraftRow(
   return {
     id: `${index}:${variable.name}`,
     name: variable.name,
-    value: variable.value,
+    value: typeof variable.value === "string" ? variable.value : "",
     sensitive: variable.sensitive,
     ...(variable.valueRedacted !== undefined ? { valueRedacted: variable.valueRedacted } : {}),
   };
@@ -250,7 +250,8 @@ function ProviderEnvironmentFieldRow(props: {
   readonly onRemove: (field: ProviderEnvironmentField) => void;
 }) {
   const inputId = `${props.idPrefix}-environment-${props.field.name}`;
-  const value = props.variable?.valueRedacted ? "" : (props.variable?.value ?? "");
+  const storedValue = props.variable?.value;
+  const value = props.variable?.valueRedacted || typeof storedValue !== "string" ? "" : storedValue;
 
   return (
     <SettingsRow
@@ -1180,7 +1181,6 @@ export function ProviderInstanceCard({
                 displayName={displayName}
                 value={accentColor}
                 onCommit={updateAccentColor}
-                commitDelayMs={120}
               />
               <DraftInput
                 id={`provider-instance-${instanceId}-display-name`}

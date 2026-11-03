@@ -203,17 +203,23 @@ function ComboboxItem({
   children,
   hideIndicator: _hideIndicator = false,
   variant = "default",
+  selectedFill = true,
   ...props
 }: ComboboxPrimitive.Item.Props & {
   hideIndicator?: boolean;
   variant?: "default" | "card";
+  /** Off for rows that mark selection themselves, so a fill only means hover or highlight. */
+  selectedFill?: boolean;
 }) {
   return (
     <ComboboxPrimitive.Item
       className={cn(
         variant === "card"
           ? comboboxItemCardClass
-          : "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-disabled:hover:bg-row-hover data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:bg-row-selected data-selected:text-foreground data-highlighted:bg-row-hover [&[data-highlighted][data-selected]]:bg-row-selected data-disabled:opacity-50 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+          : "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-disabled:hover:bg-row-hover data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:text-foreground data-highlighted:bg-row-hover data-disabled:opacity-50 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        variant !== "card" &&
+          selectedFill &&
+          "data-selected:bg-row-selected [&[data-highlighted][data-selected]]:bg-row-selected",
         className,
       )}
       data-slot="combobox-item"

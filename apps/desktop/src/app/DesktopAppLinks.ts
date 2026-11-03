@@ -55,6 +55,15 @@ export const make = Effect.gen(function* () {
   yield* electronApp.on("second-instance", (_event: unknown, argv: readonly string[]) => {
     handleSecondInstance(argv);
   });
+  // macOS hands a launch link to open-url, which can fire before configure runs.
+  const pendingOpenUrls: Array<string> = [];
+  let handleOpenUrl = (url: string) => {
+    pendingOpenUrls.push(url);
+    return true;
+  };
+  yield* electronApp.on("open-url", (event: { preventDefault: () => void }, url: string) => {
+    if (handleOpenUrl(url)) event.preventDefault();
+  });
 
   return DesktopAppLinks.of({
     configure: Effect.gen(function* () {
@@ -120,15 +129,12 @@ export const make = Effect.gen(function* () {
         void runPromise(webLinks.receive(url));
         return true;
       };
-      yield* electronApp.on("open-url", (event: { preventDefault: () => void }, url: string) => {
-        if (
-          startProviderAuthHandoff(url) ||
-          resumeProviderAuth(url) ||
-          openWebLink(url) ||
-          openAppLink(url)
-        )
-          event.preventDefault();
-      });
+      handleOpenUrl = (url) =>
+        startProviderAuthHandoff(url) ||
+        resumeProviderAuth(url) ||
+        openWebLink(url) ||
+        openAppLink(url);
+      for (const url of pendingOpenUrls.splice(0)) handleOpenUrl(url);
       yield* electronApp.on("open-file", (event: { preventDefault: () => void }, path: string) => {
         if (!DesktopWebLinks.isWebPageFile(path)) return;
         event.preventDefault();

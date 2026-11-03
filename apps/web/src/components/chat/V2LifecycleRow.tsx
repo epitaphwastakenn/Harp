@@ -14,12 +14,16 @@ import {
   resolveHandoffEndpoints,
   type HandoffEndpoints,
   type HandoffTimelineRun,
+  resolveModelSwitchChange,
 } from "@t3tools/client-runtime/handoff";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import {
   ProviderDriverKind,
+  type ModelSelection,
+  type OrchestrationV2ModelSwitch,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2RemoteTaskChild,
   type OrchestrationV2Subagent,
   type ProviderInstanceId,
   type ServerProvider,
@@ -31,18 +35,17 @@ import {
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   BotIcon,
+  CircleStopIcon,
   ArrowRightLeftIcon,
   ArrowRightIcon,
   GitForkIcon,
   MessageSquareIcon,
-  MinusIcon,
-  SquareIcon,
-  XIcon,
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import {
   applyProviderInstanceSettings,
+  brandProviderInstanceEntries,
   deriveProviderInstanceEntries,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
@@ -56,22 +59,7 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { subagentResumedSince } from "./V2LifecycleRow.logic";
 import { Button, InlineButton } from "../ui/button";
 import { StatusDot, type StatusDotTone } from "../ui/status-dot";
-import { TimelineRowTimestamp } from "./TimelineRowParts";
 import { HarpGlyph } from "../HarpMark";
-
-const LIFECYCLE_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
-  "run_interrupt_request",
-  "run_interrupt_result",
-  "compaction",
-  "handoff",
-  "fork",
-  "subagent",
-  "thread_created",
-]);
-
-export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
-  return LIFECYCLE_TYPES.has(item.type);
-}
 
 export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 
@@ -79,54 +67,18 @@ export function V2LifecycleRow(props: {
   readonly item: OrchestrationV2TurnItem;
   readonly environmentId: EnvironmentId;
   readonly resourceSummary?: boolean | undefined;
-  readonly createdAt: string;
-  readonly timestampFormat: TimestampFormat;
   readonly runs: ReadonlyArray<HandoffTimelineRun>;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { item } = props;
-  if (item.type === "run_interrupt_request") {
-    return (
-      <div
-        className="flex justify-end gap-1.5 px-1 py-1 text-xs text-muted-foreground"
-        data-v2-item-type={item.type}
-      >
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 self-center" />
-        <span className="font-medium">Interrupt requested</span>
-        {item.message ? <span className="max-w-[60%] truncate">{item.message}</span> : null}
-        <TimelineRowTimestamp
-          createdAt={props.createdAt}
-          timestampFormat={props.timestampFormat}
-          alwaysVisible
-        />
-      </div>
-    );
-  }
   if (item.type === "run_interrupt_result") {
     return (
       <TimelineSystemDivider
         label="Run interrupted"
         detail={item.message}
-        tone="danger"
-        icon={XIcon}
+        icon={CircleStopIcon}
+        wrapDetail
       />
-    );
-  }
-  if (item.type === "compaction") {
-    const tokenDetail =
-      item.beforeTokenCount === undefined && item.afterTokenCount === undefined
-        ? null
-        : `${item.beforeTokenCount ?? "?"} → ${item.afterTokenCount ?? "?"} tokens`;
-    const label =
-      item.status === "failed"
-        ? "Context compaction failed"
-        : item.status === "cancelled" || item.status === "interrupted"
-          ? "Context compaction stopped"
-          : item.status === "pending" || item.status === "running" || item.status === "waiting"
-            ? "Compacting context"
-            : "Context compacted";
-    return (
-      <TimelineSystemDivider label={label} detail={item.summary ?? tokenDetail} icon={MinusIcon} />
     );
   }
   if (item.type === "handoff") {
@@ -202,6 +154,7 @@ export function V2LifecycleRow(props: {
         startedAt={item.startedAt}
         completedAt={item.completedAt}
         threadId={item.childThreadId}
+        remote={item.remoteChild}
         onOpenThread={props.onOpenThread}
       />
     );
@@ -257,12 +210,16 @@ function SubagentAvatar({
   driver,
   displayName,
   iconUrl,
+  accentColor,
+  showBadge,
   status,
   className,
 }: {
   driver?: ProviderDriverKind | undefined;
   displayName?: string | undefined;
   iconUrl?: string | undefined;
+  accentColor?: string | undefined;
+  showBadge: boolean;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
 }) {
@@ -278,7 +235,10 @@ function SubagentAvatar({
         <ProviderInstanceIcon
           driverKind={driver}
           displayName={displayName ?? driver}
+          accentColor={accentColor}
           acpRegistryIconUrl={iconUrl}
+          showBadge={showBadge}
+          size="compact"
           className="z-auto"
           iconClassName="size-3.5"
         />
@@ -286,7 +246,12 @@ function SubagentAvatar({
         <BotIcon className="size-3.5 text-muted-foreground" />
       )}
       {status ? (
-        <span className="absolute -right-px -bottom-px flex rounded-full ring-2 ring-background">
+        <span
+          className={cn(
+            "absolute flex rounded-full ring-2 ring-background",
+            showBadge ? "-left-px -top-px" : "-right-px -bottom-px",
+          )}
+        >
           <StatusDot size="md" tone={subagentStatusVisual(status).tone} />
         </span>
       ) : null}
@@ -298,25 +263,59 @@ function SubagentAvatar({
 export function EnvironmentSubagentAvatar({
   environmentId,
   providerInstanceId,
+  driver,
+  remote,
   ...props
 }: {
   environmentId: EnvironmentId;
   providerInstanceId: ProviderInstanceId;
   driver?: ProviderDriverKind | undefined;
+  /** A task in a linked environment runs a provider instance there; its driver here is only a label. */
+  remote?: OrchestrationV2RemoteTaskChild | undefined;
   status?: OrchestrationV2TurnItem["status"] | undefined;
 }) {
-  const providersAtom = serverEnvironment.providersValueAtom(environmentId);
+  const providerEnvironmentId = remote?.environmentId ?? environmentId;
+  const providersAtom = serverEnvironment.providersValueAtom(providerEnvironmentId);
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(providerEnvironmentId));
+  const entries = (providers: ReadonlyArray<ServerProvider> | null | undefined) => {
+    const derived = deriveProviderInstanceEntries(providers ?? []);
+    return settings ? brandProviderInstanceEntries(derived, settings) : derived;
+  };
+  const providerDriver = useAtomValue(
+    providersAtom,
+    (providers) =>
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.driver,
+  );
   const displayName = useAtomValue(
     providersAtom,
     (providers) =>
-      providers?.find((provider) => provider.instanceId === providerInstanceId)?.displayName,
+      entries(providers).find((entry) => entry.instanceId === providerInstanceId)?.displayName,
   );
+  const accentColor = useAtomValue(
+    providersAtom,
+    (providers) =>
+      entries(providers).find((entry) => entry.instanceId === providerInstanceId)?.accentColor,
+  );
+  const showBadge = useAtomValue(providersAtom, (providers) => {
+    const all = entries(providers);
+    const entry = all.find((candidate) => candidate.instanceId === providerInstanceId);
+    return entry !== undefined && shouldShowInstanceBadge(entry, all);
+  });
   const iconUrl = useAtomValue(
     providersAtom,
     (providers) =>
       providers?.find((provider) => provider.instanceId === providerInstanceId)?.iconUrl,
   );
-  return <SubagentAvatar {...props} displayName={displayName} iconUrl={iconUrl} />;
+  return (
+    <SubagentAvatar
+      {...props}
+      driver={providerDriver ?? (remote === undefined ? driver : undefined)}
+      displayName={displayName}
+      iconUrl={iconUrl}
+      accentColor={accentColor}
+      showBadge={showBadge}
+    />
+  );
 }
 
 const NOTIFICATION_OUTCOME_STATUS: Record<
@@ -341,17 +340,22 @@ const NOTIFICATION_OUTCOME_LABEL: Record<OrchestrationV2Notification["outcome"],
 export function SubagentNotificationLink(props: {
   readonly parentRef: ScopedThreadRef;
   readonly childThreadId: ThreadId;
+  readonly taskIds?: ReadonlyArray<NodeId> | undefined;
   readonly outcome: OrchestrationV2Notification["outcome"];
   readonly createdAt: string;
   readonly timestampFormat: TimestampFormat;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly fallback: ReactNode;
 }) {
+  // Follow-up tasks share a child conversation; this notice reports a particular task result.
   const agent = useAtomValue(
     environmentThreadDetails.threadAtom(props.parentRef),
     (thread) =>
-      thread?.projection.subagents.find((agent) => agent.childThreadId === props.childThreadId) ??
-      null,
+      thread?.projection.subagents.find((agent) =>
+        props.taskIds === undefined
+          ? agent.childThreadId === props.childThreadId
+          : props.taskIds.includes(agent.id),
+      ) ?? null,
   );
   if (agent === null) return props.fallback;
   const resumed =
@@ -398,6 +402,8 @@ function SubagentTimelineLink(props: {
   readonly startedAt: DateTime.Utc | null;
   readonly completedAt: DateTime.Utc | null;
   readonly threadId: ThreadId | null;
+  /** The thread in a linked environment that runs this task, when it runs there. */
+  readonly remote?: OrchestrationV2RemoteTaskChild | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly event?: {
     readonly status: OrchestrationV2TurnItem["status"] | null;
@@ -409,7 +415,6 @@ function SubagentTimelineLink(props: {
     environmentThreadDetails.threadAtom(props.parentRef),
     (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
   );
-  const threadId = props.threadId;
   const liveStatus = agent?.status ?? props.status;
   const status = props.event ? props.event.status : liveStatus;
   const statusLabel = props.event?.label ?? subagentStatusVisual(liveStatus).label;
@@ -420,6 +425,7 @@ function SubagentTimelineLink(props: {
   const detail =
     rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
   const failed = status === "failed";
+  const { threadId } = props;
   const timing = {
     status: liveStatus,
     startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
@@ -521,6 +527,30 @@ function EnvironmentHandoffRow({
   return <HandoffRow {...props} environmentId={environmentId} providers={providers} />;
 }
 
+/** A same-harness model or effort change. Shows only what changed. */
+export function ModelSwitchRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly modelSwitch: OrchestrationV2ModelSwitch;
+}) {
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ??
+    EMPTY_SERVER_PROVIDERS;
+  const change = resolveModelSwitchChange(props.modelSwitch, providers);
+  if (change === null) return null;
+  const describe = (selection: ModelSelection, effort: string | undefined) => {
+    const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+    const model = provider?.models.find((candidate) => candidate.slug === selection.model);
+    const modelName = model ? getTriggerDisplayModelName(model, provider?.driver) : selection.model;
+    return [change.modelChanged ? modelName : null, effort].filter(Boolean).join(" ");
+  };
+  const { from, to } = props.modelSwitch;
+  return (
+    <TimelineSystemDivider
+      label={`${describe(from, change.effort?.from)} → ${describe(to, change.effort?.to)}`}
+    />
+  );
+}
+
 export function HandoffRow(props: {
   readonly environmentId: EnvironmentId;
   readonly endpoints: HandoffEndpoints;
@@ -581,7 +611,7 @@ function HandoffEndpoint(props: {
       : entry?.models.find((candidate) => candidate.slug === model);
   const label =
     providerModel !== undefined
-      ? getTriggerDisplayModelName(providerModel)
+      ? getTriggerDisplayModelName(providerModel, entry?.driverKind)
       : model !== undefined && model.length > 0
         ? model
         : (entry?.displayName ?? props.instanceId);

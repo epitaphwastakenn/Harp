@@ -231,7 +231,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   );
 }
 
-function NoticeText({
+export function NoticeText({
   children,
   className,
   detailsLabel,

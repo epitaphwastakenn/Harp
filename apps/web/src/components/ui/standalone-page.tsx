@@ -12,11 +12,11 @@ const backdropClassNames = {
 };
 
 export function StandalonePage({
-  tone,
+  tone = "pairing",
   masthead,
   children,
 }: {
-  readonly tone: keyof typeof backdropClassNames;
+  readonly tone?: keyof typeof backdropClassNames;
   readonly masthead?: ReactNode;
   readonly children: ReactNode;
 }) {
@@ -49,16 +49,19 @@ export function StandalonePage({
 
 export function StandalonePageHeader({
   eyebrow,
+  context,
   title,
   description,
 }: {
-  readonly eyebrow: ReactNode;
+  readonly eyebrow?: ReactNode;
+  readonly context?: ReactNode;
   readonly title: ReactNode;
   readonly description: ReactNode;
 }) {
+  const label = eyebrow ?? context;
   return (
     <>
-      <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
+      {label ? <p className="text-xs font-medium text-muted-foreground">{label}</p> : null}
       <h1 className="mt-2 text-2xl font-normal tracking-tight sm:text-3xl">{title}</h1>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </>

@@ -83,19 +83,20 @@ export const layer = Layer.effect(
     // every turn: when it starts, and once more after a server restart or a settings change.
     const studioDelivered = new Map<string, string>();
 
-    const lookupModel = (selection: ModelSelection) =>
-      Effect.gen(function* () {
-        const instance = yield* registry.getInstance(selection.instanceId);
-        if (instance === undefined) return undefined;
-        const snapshot = yield* instance.snapshot.getSnapshot.pipe(Effect.option);
-        return {
-          driverKind: instance.driverKind,
-          capabilities:
-            snapshot._tag === "None"
-              ? undefined
-              : snapshot.value.models.find((model) => model.slug === selection.model)?.capabilities,
-        };
-      });
+    const lookupModel = Effect.fn("SealTurnInputV2.lookupModel")(function* (
+      selection: ModelSelection,
+    ) {
+      const instance = yield* registry.getInstance(selection.instanceId);
+      if (instance === undefined) return undefined;
+      const snapshot = yield* instance.snapshot.getSnapshot.pipe(Effect.option);
+      return {
+        driverKind: instance.driverKind,
+        capabilities:
+          snapshot._tag === "None"
+            ? undefined
+            : snapshot.value.models.find((model) => model.slug === selection.model)?.capabilities,
+      };
+    });
 
     // Unknown capability is not "no vision": drivers that never report it must keep sending images natively.
     const lacksVision = (selection: ModelSelection) =>
@@ -214,7 +215,8 @@ export const layer = Layer.effect(
 export const layerPassthrough = Layer.succeed(
   SealTurnInputV2,
   SealTurnInputV2.of({
-    prepare: (input) =>
+    prepare: Effect.fn("SealTurnInputV2.prepare")((input) =>
       Effect.succeed({ text: input.text, attachments: input.attachments, frame: (text) => text }),
+    ),
   }),
 );

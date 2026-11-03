@@ -30,7 +30,6 @@ import {
   digestFingerprint,
   MCP_TOOL_CACHE_MAX_AGE_MS,
   McpToolCache,
-  type CachedMcpTools,
   type UpstreamTool,
 } from "./McpToolCache.ts";
 
@@ -437,17 +436,18 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const rememberTools = (connection: UpstreamConnection) =>
-    Effect.gen(function* () {
-      if (!startsOnDemand(connection.server)) return;
-      const discoveredAt = yield* Clock.currentTimeMillis;
-      savedTools.set(connection.server.id, {
-        fingerprint: digestFingerprint(connection.fingerprint),
-        discoveredAt,
-        tools: connection.tools,
-      });
-      yield* toolCache.save(savedTools);
+  const rememberTools = Effect.fn("GlobalMcpManager.rememberTools")(function* (
+    connection: UpstreamConnection,
+  ) {
+    if (!startsOnDemand(connection.server)) return;
+    const discoveredAt = yield* Clock.currentTimeMillis;
+    savedTools.set(connection.server.id, {
+      fingerprint: digestFingerprint(connection.fingerprint),
+      discoveredAt,
+      tools: connection.tools,
     });
+    yield* toolCache.save(savedTools);
+  });
 
   const currentStatuses = (): ReadonlyArray<GlobalMcpStatus> =>
     [...statuses.values()].sort((left, right) => left.id.localeCompare(right.id));
@@ -544,90 +544,89 @@ const make = Effect.gen(function* () {
       yield* publishStatuses();
     });
 
-  const reloadUnlocked = (
+  const reloadUnlocked = Effect.fn("GlobalMcpManager.reloadUnlocked")(function* (
     configured: Readonly<Record<string, GlobalMcpServer>>,
     forcedServerId?: string,
-  ) =>
-    Effect.gen(function* () {
-      const configuredIds = new Set(Object.keys(configured));
+  ) {
+    const configuredIds = new Set(Object.keys(configured));
 
-      for (const [id, connection] of connections) {
-        const next = configured[id];
-        if (
-          !next ||
-          !next.enabled ||
-          forcedServerId === id ||
-          serverFingerprint(next) !== connection.fingerprint
-        ) {
-          yield* closeConnection(connection);
-          connections.delete(id);
-        }
+    for (const [id, connection] of connections) {
+      const next = configured[id];
+      if (
+        !next ||
+        !next.enabled ||
+        forcedServerId === id ||
+        serverFingerprint(next) !== connection.fingerprint
+      ) {
+        yield* closeConnection(connection);
+        connections.delete(id);
+      }
+    }
+
+    for (const [id, status] of statuses) {
+      if (!configuredIds.has(id)) statuses.delete(id);
+      else if (!configured[id]?.enabled && status.state !== "disabled") statuses.delete(id);
+    }
+    const forgotten = [...savedTools.keys()].filter((id) => !configuredIds.has(id));
+    if (forgotten.length > 0) {
+      for (const id of forgotten) savedTools.delete(id);
+      yield* toolCache.save(savedTools);
+    }
+
+    for (const server of Object.values(configured).sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )) {
+      if (!server.enabled) {
+        setStatus(server, "disabled", 0);
+        continue;
+      }
+      const existing = connections.get(server.id);
+      if (
+        existing &&
+        forcedServerId !== server.id &&
+        existing.fingerprint === serverFingerprint(server)
+      ) {
+        setStatus(server, "ready", existing.tools.length);
+        continue;
       }
 
-      for (const [id, status] of statuses) {
-        if (!configuredIds.has(id)) statuses.delete(id);
-        else if (!configured[id]?.enabled && status.state !== "disabled") statuses.delete(id);
-      }
-      const forgotten = [...savedTools.keys()].filter((id) => !configuredIds.has(id));
-      if (forgotten.length > 0) {
-        for (const id of forgotten) savedTools.delete(id);
-        yield* toolCache.save(savedTools);
-      }
-
-      for (const server of Object.values(configured).sort((left, right) =>
-        left.id.localeCompare(right.id),
-      )) {
-        if (!server.enabled) {
-          setStatus(server, "disabled", 0);
-          continue;
-        }
-        const existing = connections.get(server.id);
-        if (
-          existing &&
-          forcedServerId !== server.id &&
-          existing.fingerprint === serverFingerprint(server)
-        ) {
-          setStatus(server, "ready", existing.tools.length);
-          continue;
-        }
-
-        // A stdio server whose tools are known stays stopped until something calls one of them.
-        const saved = savedTools.get(server.id);
-        const now = yield* Clock.currentTimeMillis;
-        if (
-          forcedServerId !== server.id &&
-          startsOnDemand(server) &&
-          saved !== undefined &&
-          saved.fingerprint === digestFingerprint(serverFingerprint(server)) &&
-          now - saved.discoveredAt >= 0 &&
-          now - saved.discoveredAt < MCP_TOOL_CACHE_MAX_AGE_MS
-        ) {
-          connections.set(server.id, {
-            fingerprint: serverFingerprint(server),
-            server,
-            client: undefined,
-            tools: saved.tools,
-            output: () => "",
-          });
-          setStatus(server, "ready", saved.tools.length);
-          continue;
-        }
-
-        setStatus(server, "connecting", 0);
-        yield* publishStatuses();
-        const result = yield* Effect.result(connect(server, events));
-        if (Result.isFailure(result)) {
-          setStatus(server, "error", 0, result.failure.cause, result.failure.output);
-          continue;
-        }
-        connections.set(server.id, result.success);
-        setStatus(server, "ready", result.success.tools.length);
-        yield* touch(server.id);
-        yield* rememberTools(result.success);
+      // A stdio server whose tools are known stays stopped until something calls one of them.
+      const saved = savedTools.get(server.id);
+      const now = yield* Clock.currentTimeMillis;
+      if (
+        forcedServerId !== server.id &&
+        startsOnDemand(server) &&
+        saved !== undefined &&
+        saved.fingerprint === digestFingerprint(serverFingerprint(server)) &&
+        now - saved.discoveredAt >= 0 &&
+        now - saved.discoveredAt < MCP_TOOL_CACHE_MAX_AGE_MS
+      ) {
+        connections.set(server.id, {
+          fingerprint: serverFingerprint(server),
+          server,
+          client: undefined,
+          tools: saved.tools,
+          output: () => "",
+        });
+        setStatus(server, "ready", saved.tools.length);
+        continue;
       }
 
-      yield* rebuildCatalog();
-    });
+      setStatus(server, "connecting", 0);
+      yield* publishStatuses();
+      const result = yield* Effect.result(connect(server, events));
+      if (Result.isFailure(result)) {
+        setStatus(server, "error", 0, result.failure.cause, result.failure.output);
+        continue;
+      }
+      connections.set(server.id, result.success);
+      setStatus(server, "ready", result.success.tools.length);
+      yield* touch(server.id);
+      yield* rememberTools(result.success);
+    }
+
+    yield* rebuildCatalog();
+  });
 
   // The Roblox settings' servers join the user's own; a user server with the same id wins.
   const readConfigured = settings.getSettings.pipe(
@@ -717,8 +716,8 @@ const make = Effect.gen(function* () {
       structuredContent: { error: { message: errorMessage(error.cause, error.output) } },
     }) satisfies McpCallResult;
 
-  const callTool: GlobalMcpManager["Service"]["callTool"] = (input) =>
-    Effect.gen(function* () {
+  const callTool: GlobalMcpManager["Service"]["callTool"] = Effect.fn("GlobalMcpManager.callTool")(
+    function* (input) {
       yield* Effect.annotateCurrentSpan({
         "mcp.thread_id": input.scope.thread?.threadId ?? "",
         "mcp.provider_session_id": input.scope.thread?.providerSessionId ?? "",
@@ -788,7 +787,8 @@ const make = Effect.gen(function* () {
           return settled.success as McpCallResult;
         }),
       );
-    });
+    },
+  );
 
   const callServerTool: GlobalMcpManager["Service"]["callServerTool"] = (input) =>
     withCall(
@@ -827,43 +827,45 @@ const make = Effect.gen(function* () {
    * and comes back with backoff, as when a Studio bridge restarts. Reconnect still works at any
    * point, and a configuration that changed meanwhile wins.
    */
-  const recoverClosed = (closed: { readonly id: string; readonly client: Client }) =>
-    Effect.gen(function* () {
-      const lost = yield* reloadSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const connection = connections.get(closed.id);
-          if (connection === undefined || connection.client !== closed.client) return false;
-          connections.delete(closed.id);
-          setStatus(
-            connection.server,
-            "error",
-            0,
-            new Error("The MCP server stopped."),
-            connection.output(),
-          );
-          yield* rebuildCatalog();
-          return true;
-        }),
-      );
-      if (!lost) return;
-      const attempt = reconnectAttempts.get(closed.id) ?? 0;
-      const delay = RECONNECT_BACKOFF[attempt];
-      if (delay === undefined) return;
-      reconnectAttempts.set(closed.id, attempt + 1);
-      yield* Effect.sleep(delay);
-      yield* reloadSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          if (connections.has(closed.id)) return;
-          const configured = yield* readConfigured;
-          yield* reloadUnlocked(configured, closed.id);
-        }),
-      );
-      // A connection that lasts a minute earns a fresh backoff budget.
-      const recovered = connections.get(closed.id)?.client;
-      if (recovered === undefined) return;
-      yield* Effect.sleep(Duration.minutes(1));
-      if (connections.get(closed.id)?.client === recovered) reconnectAttempts.delete(closed.id);
-    });
+  const recoverClosed = Effect.fn("GlobalMcpManager.recoverClosed")(function* (closed: {
+    readonly id: string;
+    readonly client: Client;
+  }) {
+    const lost = yield* reloadSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const connection = connections.get(closed.id);
+        if (connection === undefined || connection.client !== closed.client) return false;
+        connections.delete(closed.id);
+        setStatus(
+          connection.server,
+          "error",
+          0,
+          new Error("The MCP server stopped."),
+          connection.output(),
+        );
+        yield* rebuildCatalog();
+        return true;
+      }),
+    );
+    if (!lost) return;
+    const attempt = reconnectAttempts.get(closed.id) ?? 0;
+    const delay = RECONNECT_BACKOFF[attempt];
+    if (delay === undefined) return;
+    reconnectAttempts.set(closed.id, attempt + 1);
+    yield* Effect.sleep(delay);
+    yield* reloadSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        if (connections.has(closed.id)) return;
+        const configured = yield* readConfigured;
+        yield* reloadUnlocked(configured, closed.id);
+      }),
+    );
+    // A connection that lasts a minute earns a fresh backoff budget.
+    const recovered = connections.get(closed.id)?.client;
+    if (recovered === undefined) return;
+    yield* Effect.sleep(Duration.minutes(1));
+    if (connections.get(closed.id)?.client === recovered) reconnectAttempts.delete(closed.id);
+  });
 
   const refreshTools = (changed: { readonly id: string; readonly client: Client }) =>
     reloadSemaphore.withPermits(1)(

@@ -278,7 +278,6 @@ const agentTest = Effect.fn("AntigravityDiagnostics.agentTest")(function* (
     const runtime = yield* makeAntigravityAcpRuntime({
       childProcessSpawner: spawner,
       cwd: root,
-      clientInfo: { name: "t3-code-diagnostics", version: packageJson.version },
       mcpServers: [],
       authMethod: "oauth-personal",
       spawn: buildAntigravityAcpSpawnInput({

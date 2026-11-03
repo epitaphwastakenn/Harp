@@ -1,4 +1,4 @@
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
 
 export interface HostedPairingRequest {
   readonly host: string;

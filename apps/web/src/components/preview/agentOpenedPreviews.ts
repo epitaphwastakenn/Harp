@@ -31,7 +31,7 @@ export function revealServerTabs(
         (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
       );
     if (surface && force) {
-      useRightPanelStore.getState().activateSurface(threadRef, surface.id);
+      useRightPanelStore.getState().revealSurface(threadRef, surface.id);
     } else if (!surface) {
       usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(session.tabId));
     }
@@ -99,7 +99,10 @@ function followThread(threadKey: string, threadRef: ScopedThreadRef): () => void
   });
 }
 
-/** Follows every thread's browser previews for the life of the page, not just the open thread's. */
+/**
+ * Follows every thread's browser previews for the life of the page, not just the open
+ * thread's: an agent in a background thread can open one.
+ */
 export function startAgentOpenedPreviews(): () => void {
   const followed = new Map<string, () => void>();
   const followNewThreads = (refs: ReadonlyMap<string, ScopedThreadRef>) => {

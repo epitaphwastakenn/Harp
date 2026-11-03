@@ -44,9 +44,9 @@ import {
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
 import {
-  removeAntigravityRuntimeTempDirs,
   removeAntigravitySessionFiles,
   settleOrphanedAntigravityCommands,
+  retireAntigravityRuntimeTempDirs,
 } from "../acp/AntigravitySessionFiles.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
@@ -172,9 +172,11 @@ export const AntigravityDriver: ProviderDriver<
       directories.runtimeTemp,
       path.join(profileDirectory, "antigravity-acp", "tmp"),
     ]) {
-      yield* removeAntigravityRuntimeTempDirs(directory).pipe(
+      const removeRetired = yield* retireAntigravityRuntimeTempDirs(directory).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
       );
+      yield* Effect.forkScoped(removeRetired);
     }
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER,
@@ -278,6 +280,7 @@ export const AntigravityDriver: ProviderDriver<
       );
       const runtime = yield* makeAntigravityAcpRuntime({
         ...input,
+        runtimeVersion: executable.version,
         authMethod: auth.authMethod,
         childProcessSpawner:
           platform === "win32" ? withRuntimeLedger(spawner, runtimeLedger) : spawner,
@@ -353,7 +356,6 @@ export const AntigravityDriver: ProviderDriver<
       );
       const runtime = yield* makeRuntime({
         cwd,
-        clientInfo: { name: "t3-code-provider-setup", version: "0.0.0" },
         mcpServers: [],
         ...(input.onAuthorizationUrl ? { onAuthorizationUrl: input.onAuthorizationUrl } : {}),
         ...(input.onInitialized ? { onInitialized: () => input.onInitialized! } : {}),
@@ -376,7 +378,10 @@ export const AntigravityDriver: ProviderDriver<
 
     const publishCatalog = Effect.fn("AntigravityDriver.publishCatalog")(function* (
       started: AcpSessionRuntime.AcpSessionRuntimeStartResult,
-      runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "getEvents" | "drainEvents">,
+      runtime: Pick<
+        AcpSessionRuntime.AcpSessionRuntime["Service"],
+        "getEvents" | "drainEvents" | "setModel"
+      >,
     ) {
       yield* provider.onSessionStarted(started);
       yield* Stream.runForEach(runtime.getEvents(), (event) => {
@@ -396,7 +401,11 @@ export const AntigravityDriver: ProviderDriver<
     const authFlow: AntigravityAuth = yield* makeAntigravityAuth({
       instanceId,
       makeRuntime: makeDisposableRuntime,
-      onAuthenticated: publishCatalog,
+      // A new sign-in may be another account; drop any in-flight quota read first.
+      onAuthenticated: (started, runtime) =>
+        Effect.suspend(() => provider.onSignedIn).pipe(
+          Effect.andThen(publishCatalog(started, runtime)),
+        ),
       onSignedOut: Effect.suspend(() => provider.onSignedOut),
       usesBrowser: antigravityAuthUsesBrowser(auth.authMethod),
       diagnoseNetwork: connectProxy
@@ -518,6 +527,7 @@ export const AntigravityDriver: ProviderDriver<
       makeRuntime,
       withProcess: authFlow.withProcess,
       defaultModel,
+      profileDirectory,
       onSessionStarted: provider.onSessionStarted,
       onSessionEvent: (event) => {
         if (event._tag === "ConfigOptionsUpdated") {
@@ -542,7 +552,6 @@ export const AntigravityDriver: ProviderDriver<
       makeRuntime: (cwd) =>
         makeRuntime({
           cwd,
-          clientInfo: { name: "t3-code-text", version: "0.0.0" },
           mcpServers: [],
         }),
     });

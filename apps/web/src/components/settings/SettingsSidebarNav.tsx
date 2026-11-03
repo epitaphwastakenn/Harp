@@ -33,6 +33,7 @@ import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
   isSettingsOverviewVisible,
+  revealSettingsSearchTarget,
   SETTINGS_SECTION_LABELS,
   type SettingsPath,
   type SettingsSearchItem,
@@ -177,6 +178,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     clearSearch();
     setCompactSearchOpen(false);
     const targetId = item.targetId ?? item.id;
+    revealSettingsSearchTarget(targetId);
     if (pathname === item.to && currentHash.replace(/^#/, "") === targetId) {
       scrollToSettingsTarget(targetId);
       return;
@@ -191,6 +193,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   };
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape" && isSearching) {
       event.preventDefault();
       event.stopPropagation();

@@ -229,8 +229,12 @@ export const makeCommandCodeAdapterV2 = Effect.fn("makeCommandCodeAdapterV2")(fu
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver: COMMAND_CODE_DRIVER_KIND,
-    getCapabilities: () => Effect.succeed(CommandCodeCapabilitiesV2),
-    planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    getCapabilities: Effect.fn("ProviderAdapter.ProviderAdapterV2.getCapabilities")(() =>
+      Effect.succeed(CommandCodeCapabilitiesV2),
+    ),
+    planSelectionTransition: Effect.fn("ProviderAdapter.ProviderAdapterV2.planSelectionTransition")(
+      () => Effect.succeed(turnScopedSelectionTransition()),
+    ),
     openSession: Effect.fn("CommandCodeAdapterV2.openSession")(function* (
       input: ProviderAdapter.ProviderAdapterV2OpenSessionInput,
     ) {
@@ -757,43 +761,42 @@ export const makeCommandCodeAdapterV2 = Effect.fn("makeCommandCodeAdapterV2")(fu
         yield* finishTurn(state, turn, { exitCode: code, stderr });
       });
 
-      const registerThread = (
+      const registerThread = Effect.fn("registerThread")(function* (
         threadInput: ProviderAdapter.ProviderAdapterV2EnsureThreadInput,
         sessionId: string | null,
-      ) =>
-        Effect.gen(function* () {
-          if (active !== null) {
-            return yield* protocolError("Cannot register a CommandCode thread while a turn runs");
-          }
-          const existing = threadInput.existingProviderThread;
-          const now = yield* DateTime.now;
-          const providerThread: OrchestrationV2ProviderThread = {
-            id:
-              existing?.id ??
-              idAllocator.derive.providerThread({
-                driver: COMMAND_CODE_DRIVER_KIND,
-                providerInstanceId: options.instanceId,
-                nativeThreadId: `thread:${threadInput.threadId}`,
-              }),
-            driver: COMMAND_CODE_DRIVER_KIND,
-            providerInstanceId: options.instanceId,
-            providerSessionId: input.providerSessionId,
-            appThreadId: threadInput.threadId,
-            ownerNodeId: existing?.ownerNodeId ?? null,
-            nativeThreadRef: sessionId === null ? null : providerRef(sessionId),
-            nativeConversationHeadRef: existing?.nativeConversationHeadRef ?? null,
-            status: "idle",
-            firstRunOrdinal: existing?.firstRunOrdinal ?? null,
-            lastRunOrdinal: existing?.lastRunOrdinal ?? null,
-            handoffIds: existing?.handoffIds ?? [],
-            forkedFrom: existing?.forkedFrom ?? null,
-            pendingBackgroundTasks: [],
-            createdAt: existing?.createdAt ?? now,
-            updatedAt: now,
-          };
-          thread = { providerThread, sessionId };
-          return providerThread;
-        });
+      ) {
+        if (active !== null) {
+          return yield* protocolError("Cannot register a CommandCode thread while a turn runs");
+        }
+        const existing = threadInput.existingProviderThread;
+        const now = yield* DateTime.now;
+        const providerThread: OrchestrationV2ProviderThread = {
+          id:
+            existing?.id ??
+            idAllocator.derive.providerThread({
+              driver: COMMAND_CODE_DRIVER_KIND,
+              providerInstanceId: options.instanceId,
+              nativeThreadId: `thread:${threadInput.threadId}`,
+            }),
+          driver: COMMAND_CODE_DRIVER_KIND,
+          providerInstanceId: options.instanceId,
+          providerSessionId: input.providerSessionId,
+          appThreadId: threadInput.threadId,
+          ownerNodeId: existing?.ownerNodeId ?? null,
+          nativeThreadRef: sessionId === null ? null : providerRef(sessionId),
+          nativeConversationHeadRef: existing?.nativeConversationHeadRef ?? null,
+          status: "idle",
+          firstRunOrdinal: existing?.firstRunOrdinal ?? null,
+          lastRunOrdinal: existing?.lastRunOrdinal ?? null,
+          handoffIds: existing?.handoffIds ?? [],
+          forkedFrom: existing?.forkedFrom ?? null,
+          pendingBackgroundTasks: [],
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        thread = { providerThread, sessionId };
+        return providerThread;
+      });
 
       const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
         instanceId: options.instanceId,

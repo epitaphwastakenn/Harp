@@ -13,6 +13,7 @@ export function TimelineSystemDivider(props: {
   readonly tone?: "neutral" | "danger";
   readonly icon?: LucideIcon;
   readonly showDetailSeparator?: boolean;
+  readonly wrapDetail?: boolean;
   readonly actionLabel?: string;
   readonly onAction?: () => void;
   readonly active?: boolean;
@@ -28,7 +29,8 @@ export function TimelineSystemDivider(props: {
           className={cn(
             "inline-flex min-w-0 items-center",
             props.tone !== "danger" && "text-muted-foreground",
-            typeof props.detail === "string" && "max-w-80 truncate",
+            typeof props.detail === "string" &&
+              (props.wrapDetail ? "max-w-80 whitespace-pre-wrap" : "max-w-80 truncate"),
           )}
         >
           {props.showDetailSeparator === false ? null : "· "}

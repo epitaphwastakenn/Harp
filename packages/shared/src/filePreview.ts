@@ -8,6 +8,7 @@ export {
   isWorkspaceImagePreviewPath,
   mediaKindFromPath,
 } from "./mediaPreview.ts";
+import { GENERIC_MIME_TYPES } from "./image.ts";
 import { videoMimeType } from "./video.ts";
 
 export type FilePreviewKind =
@@ -40,7 +41,7 @@ export function filePreviewKind(
   const mime = file.mimeType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const name = file.name.toLowerCase();
   const extension = name.slice(name.lastIndexOf("."));
-  const generic = !mime || mime === "application/octet-stream" || mime === "text/plain";
+  const generic = !mime || GENERIC_MIME_TYPES.has(mime) || mime === "text/plain";
   const richDocuments = options?.richDocuments !== false;
   const office = richDocuments ? officePreviewKind(file) : null;
   if (office) return office;
@@ -60,7 +61,7 @@ export function filePreviewKind(
   )
     return "font";
   if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("video/") && !generic) return "video";
   if (mime.startsWith("audio/")) return "audio";
   if (generic) {
     if (extension === ".pdf") return "pdf";

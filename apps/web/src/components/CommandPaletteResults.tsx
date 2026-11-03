@@ -22,6 +22,7 @@ import {
   CommandShortcut,
 } from "./ui/command";
 import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
+import { ProjectPinButton } from "./ProjectPinButton";
 import { SearchMatchHintLine, ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 
 interface CommandPaletteResultsProps {
@@ -252,6 +253,14 @@ function CommandPaletteResultRow(props: {
       }}
     >
       <CommandPaletteRowBody item={props.item} />
+      {props.item.kind === "action" && props.item.pin ? (
+        <ProjectPinButton
+          name={props.item.pin.name}
+          pinned={props.item.pin.pinned}
+          onToggle={props.item.pin.toggle}
+          shortcutLabel={shortcutLabelForCommand(props.keybindings, "thread.pin")}
+        />
+      ) : null}
       {props.item.timestamp ? (
         <span className="min-w-12 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
           {props.item.timestamp}

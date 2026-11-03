@@ -52,8 +52,10 @@ import * as ProviderHostLive from "./provider/ProviderHostLive.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
+import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
 import { BUILT_IN_SOURCE_CONTROL_DRIVER_LIST } from "./sourceControl/sourceControlDefinitions.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceRegistryHydration.ts";
@@ -70,6 +72,13 @@ import * as StudioPrompt from "./studioBridge/StudioPrompt.ts";
 import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as RobloxToolVisibility from "./roblox/RobloxToolVisibility.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as SecretResolver from "./secrets/SecretResolver.ts";
+import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
+import * as PeerForwarding from "./peer/PeerForwarding.ts";
+import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
+import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
+import * as PeerLinks from "./peer/PeerLinks.ts";
+import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -171,7 +180,12 @@ import { acceptsPrivateNetworkConnection, loopbackUrlHostForAddress } from "./st
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import {
+  disableTailscaleServe,
+  ensureTailscaleServe,
+  readTailscaleServeRoutesTo,
+  readTailscaleStatus,
+} from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
 
 // Escaped MCP handoff provenance can exceed find-my-way's 100-character segment default.
@@ -213,6 +227,7 @@ const layerPtyAdapter = NodePtyAdapter.layer;
 
 const layerServerSettings = ServerSettings.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
+  Layer.provideMerge(ManagedPolicy.layer),
   Layer.provideMerge(SqlitePersistence.layerConfig),
 );
 
@@ -383,6 +398,9 @@ const layerVcs = Layer.empty.pipe(
   Layer.provideMerge(layerGitWorkflow),
   Layer.provideMerge(layerReview),
   Layer.provideMerge(layerSourceControlRepositoryService),
+  Layer.provideMerge(
+    SourceControlSignIn.layer.pipe(Layer.provide(layerSourceControlProviderRegistry)),
+  ),
   Layer.provideMerge(layerProjectCloneTracker),
   Layer.provideMerge(
     VcsStatusBroadcaster.layer.pipe(
@@ -453,10 +471,10 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   ),
 );
 
-const layerOrchestrationApplication = CheckpointDiffQuery.layer.pipe(
-  Layer.provideMerge(layerCheckpointStore),
-  Layer.provideMerge(layerOrchestrationV2Runtime),
-);
+const layerOrchestrationApplication = Layer.merge(
+  CheckpointDiffQuery.layer,
+  NativeChildWorkQuery.layer,
+).pipe(Layer.provideMerge(layerCheckpointStore), Layer.provideMerge(layerOrchestrationV2Runtime));
 
 const layerThreadSettlementWorker = Layer.effectDiscard(
   ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
@@ -571,6 +589,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(
     Layer.mergeAll(ProjectStore.layer, ThreadSearch.layer, ProjectDiffIndex.layer),
   ),
+  Layer.provideMerge(SecretResolver.layer),
   Layer.provideMerge(layerServerSettings),
   Layer.provideMerge(layerSourceControlProviderRegistry),
   Layer.provideMerge(layerGit),
@@ -582,6 +601,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   Layer.provideMerge(ProviderRegistry.layer),
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  // Provider hydration builds the Claude runner, which reports agents to the same scanner the
+  // terminal and preview layers share.
+  Layer.provideMerge(layerPortScanner),
   Layer.provideMerge(
     Layer.mergeAll(
       AntigravityInstallation.AntigravityInstallation.layer,
@@ -674,10 +696,18 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
+  // Follows delegated tasks running in linked environments, including after a restart.
+  Layer.effectDiscard(
+    RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),
+  ),
 ).pipe(
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),
+  // delegate_task to a linked environment, from /mcp and the follower above.
+  Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
+  // Links agents ask for: shown in a thread from /mcp, answered over WebSocket.
+  Layer.provide(PeerLinkRequests.layer),
   // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
   Layer.provide(layerPullRequestService),
   // The same activity instance RunExecutionService reports to, by layer memoization.
@@ -687,6 +717,13 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
   ),
   Layer.provide(PreviewBrowser.layer),
+  // Links to other environments, shared by Settings (WebSocket) and agents (/mcp).
+  Layer.provide(
+    PeerForwarding.layer.pipe(
+      Layer.provideMerge(PeerMcpClient.layer),
+      Layer.provideMerge(PeerLinks.layer),
+    ),
+  ),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
   Layer.provide(layerCommandReadiness),
@@ -754,12 +791,17 @@ const layerMakeServer = Layer.unwrap(
               }
 
               const localPort = address.port;
+              const localHost = loopbackUrlHostForAddress(address);
               return yield* ensureTailscaleServe({
                 localPort,
                 servePort: config.tailscaleServePort,
-                localHost: loopbackUrlHostForAddress(address),
+                localHost,
               }).pipe(
-                Effect.as({ localPort, servePort: config.tailscaleServePort }),
+                Effect.as({
+                  localPort,
+                  localHost: localHost.replace(/^\[|\]$/gu, ""),
+                  servePort: config.tailscaleServePort,
+                }),
                 Effect.tap(() =>
                   Effect.logInfo("Tailscale Serve configured", {
                     localPort,
@@ -777,11 +819,44 @@ const layerMakeServer = Layer.unwrap(
             }),
             (configured) =>
               configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                    Effect.tap(() =>
-                      Effect.logInfo("Tailscale Serve disabled", {
-                        servePort: configured.servePort,
+                ? Effect.all(
+                    [
+                      readTailscaleServeRoutesTo({
+                        host: configured.localHost,
+                        port: configured.localPort,
                       }),
+                      readTailscaleStatus,
+                    ],
+                    { concurrency: 2 },
+                  ).pipe(
+                    // Another service may hold the root route by now, or it may sit under a
+                    // former name, where `off` would act on the current one; only ours goes.
+                    Effect.map(([routes, status]) =>
+                      routes.some(
+                        (route) =>
+                          route.servePort === configured.servePort &&
+                          route.mount === "/" &&
+                          route.owner === undefined &&
+                          route.ambiguous === undefined &&
+                          route.host?.toLowerCase() === status.magicDnsName?.toLowerCase(),
+                      ),
+                    ),
+                    Effect.orElseSucceed(() => false),
+                    Effect.flatMap((ours) =>
+                      ours
+                        ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
+                            Effect.tap(() =>
+                              Effect.logInfo("Tailscale Serve disabled", {
+                                servePort: configured.servePort,
+                              }),
+                            ),
+                          )
+                        : Effect.logInfo(
+                            "Tailscale Serve left on; its root route is not known to be ours",
+                            {
+                              servePort: configured.servePort,
+                            },
+                          ),
                     ),
                     Effect.catch((cause) =>
                       Effect.logWarning("Failed to disable Tailscale Serve", {

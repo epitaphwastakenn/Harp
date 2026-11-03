@@ -107,51 +107,49 @@ export function resolveSpeechToTextProviderFromEnv(
   return null;
 }
 
-export const decodeVoiceAudio = (input: ServerVoiceTranscriptionInput) => {
+export const decodeVoiceAudio = Effect.fn("voiceTranscription.decodeVoiceAudio")(function* (
+  input: ServerVoiceTranscriptionInput,
+) {
   const invalid = (message: string) =>
-    Effect.fail(new VoiceTranscriptionError({ failure: "invalid_audio", message }));
+    new VoiceTranscriptionError({ failure: "invalid_audio", message });
 
   if (input.mimeType !== "audio/wav") {
-    return invalid("Only WAV audio is supported for voice transcription.");
+    return yield* invalid("Only WAV audio is supported for voice transcription.");
   }
   if (input.sampleRateHz !== VOICE_RECORDING_TARGET_SAMPLE_RATE_HZ) {
-    return invalid("Voice transcription requires 24 kHz mono WAV audio.");
+    return yield* invalid("Voice transcription requires 24 kHz mono WAV audio.");
   }
   if (input.durationMs <= 0) {
-    return invalid("Voice messages must include a positive duration.");
+    return yield* invalid("Voice messages must include a positive duration.");
   }
   if (input.durationMs > SERVER_VOICE_TRANSCRIPTION_MAX_DURATION_MS) {
-    return Effect.fail(
-      new VoiceTranscriptionError({
-        failure: "too_long",
-        message: "Voice messages are limited to 120 seconds.",
-      }),
-    );
+    return yield* new VoiceTranscriptionError({
+      failure: "too_long",
+      message: "Voice messages are limited to 120 seconds.",
+    });
   }
 
   const normalizedBase64 = normalizeBase64(input.audioBase64);
   if (!normalizedBase64 || !isLikelyBase64(normalizedBase64)) {
-    return invalid("The recorded audio could not be decoded.");
+    return yield* invalid("The recorded audio could not be decoded.");
   }
 
   const audioBuffer = Buffer.from(normalizedBase64, "base64");
   if (!audioBuffer.length || audioBuffer.toString("base64") !== normalizedBase64) {
-    return invalid("The recorded audio could not be decoded.");
+    return yield* invalid("The recorded audio could not be decoded.");
   }
   if (audioBuffer.length > SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BYTES) {
-    return Effect.fail(
-      new VoiceTranscriptionError({
-        failure: "too_large",
-        message: "Voice messages are limited to 10 MB.",
-      }),
-    );
+    return yield* new VoiceTranscriptionError({
+      failure: "too_large",
+      message: "Voice messages are limited to 10 MB.",
+    });
   }
   if (!isLikelyWavBuffer(audioBuffer)) {
-    return invalid("The recorded audio is not a valid WAV file.");
+    return yield* invalid("The recorded audio is not a valid WAV file.");
   }
 
-  return Effect.succeed(audioBuffer);
-};
+  return audioBuffer;
+});
 
 export class VoiceTranscription extends Context.Service<
   VoiceTranscription,

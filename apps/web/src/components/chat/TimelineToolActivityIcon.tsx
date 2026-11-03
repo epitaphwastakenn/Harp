@@ -11,6 +11,7 @@ import {
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
+  ListTodoIcon,
   MessageCircleIcon,
   SearchIcon,
   SquarePenIcon,
@@ -36,6 +37,7 @@ export type WorkEntryIconName =
   | "brain"
   | "browser"
   | "check"
+  | "list-todo"
   | "circle-alert"
   | "computer"
   | "code"
@@ -222,6 +224,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <HarpGlyph className={className} />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
+    case "list-todo":
+      return <ListTodoIcon className={className} aria-hidden />;
     case "circle-alert":
       return <CircleAlertIcon className={className} aria-hidden />;
     case "eye":

@@ -1,4 +1,6 @@
-const ANTIGRAVITY_RELEASE_VERSION = "1.4.3";
+// Hashes and sizes match the official ACP registry release. Like 1.4.2 through 1.4.4, it writes a
+// run-workflow skill into the workspace unless Harp disables the tool (antigravitySessionMeta).
+const ANTIGRAVITY_RELEASE_VERSION = "1.4.5";
 
 export interface AntigravityReleaseAsset {
   readonly version: string;
@@ -20,10 +22,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "darwin-arm64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.3-darwin-arm64.zip",
-      sha256: "c57db0a9b8b712daa9c3c17cdb990a61842ea569f279e8bd79d7aa85a303b20b",
-      archiveBytes: 114_147_623,
-      executable: { name: "agy_acp_server.par", bytes: 282_446_160 },
+      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.5-darwin-arm64.zip",
+      sha256: "886fff7767d08994ca39eb02c3d01a7532c7325a94aa33aaf52d52068733284f",
+      archiveBytes: 97_923_855,
+      executable: { name: "agy_acp_server.par", bytes: 178_915_920 },
       harness: { name: "localharness_external", bytes: 122_957_936 },
     },
   ],
@@ -31,10 +33,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "darwin-x64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.3-darwin-x86_64.zip",
-      sha256: "9392dbbdad7f0663dbfb5a0bf641297b0cf80d2ee9cd2d49a616bbbc7378731d",
-      archiveBytes: 119_801_100,
-      executable: { name: "agy_acp_server.par", bytes: 286_653_712 },
+      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.5-darwin-x86_64.zip",
+      sha256: "b39f3573c03b9acb9df028853f647527f1f3133f32bd77e78b796e48a205114a",
+      archiveBytes: 103_577_295,
+      executable: { name: "agy_acp_server.par", bytes: 183_127_600 },
       harness: { name: "localharness_external", bytes: 127_612_208 },
     },
   ],
@@ -42,10 +44,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "linux-x64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.3-linux-x86_64.zip",
-      sha256: "0634ce5306ba92c932945455e7a83fda78e2d99c33fa8aa6ee0566206a382714",
-      archiveBytes: 336_846_435,
-      executable: { name: "agy_acp_server.par", bytes: 927_707_135 },
+      url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.5-linux-x86_64.zip",
+      sha256: "923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013b",
+      archiveBytes: 321_783_181,
+      executable: { name: "agy_acp_server.par", bytes: 826_226_766 },
       harness: { name: "localharness_external", bytes: 133_926_136 },
     },
   ],
@@ -53,10 +55,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "linux-arm64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.3-linux-arm64.zip",
-      sha256: "05c153443b0b1175151c760eeddea538950bc9843e317d54786a1f03670182bc",
-      archiveBytes: 322_887_047,
-      executable: { name: "agy_acp_server.par", bytes: 932_662_106 },
+      url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.5-linux-arm64.zip",
+      sha256: "7d64246633ae094f67e3bbcd2d679e89048f91346d5339313336e7483f40f056",
+      archiveBytes: 307_829_008,
+      executable: { name: "agy_acp_server.par", bytes: 831_194_025 },
       harness: { name: "localharness_external", bytes: 127_512_832 },
     },
   ],
@@ -64,10 +66,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "win32-x64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.3-windows-x86_64.zip",
-      sha256: "54c2e16378d9a4952e1da70e355f3c33c4f284308d6de48ab3e6e34a127bd325",
-      archiveBytes: 131_267_135,
-      executable: { name: "agy_acp_server.exe", bytes: 87_022_872 },
+      url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.5-windows-x86_64.zip",
+      sha256: "d24f4c73c9f96d4f44384e281c855a56c72d8eaa9c5b0fad7ccb1635c6b63f50",
+      archiveBytes: 100_423_655,
+      executable: { name: "agy_acp_server.exe", bytes: 55_839_864 },
       harness: { name: "localharness_external.exe", bytes: 147_843_736 },
     },
   ],
@@ -75,10 +77,10 @@ const releaseAssets = new Map<string, AntigravityReleaseAsset>([
     "win32-arm64",
     {
       version: ANTIGRAVITY_RELEASE_VERSION,
-      url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.3-windows-arm64.zip",
-      sha256: "fcd46431ad33d3b510ce0b98fe7b43d095bd8b3f1c363ee2d57faa7ee981c7bb",
-      archiveBytes: 134_301_870,
-      executable: { name: "agy_acp_server.exe", bytes: 94_238_816 },
+      url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.5-windows-arm64.zip",
+      sha256: "ab0a9aac8349e08ef289be6d16da8f89e3abe60eba5158032ef78c4a1220261c",
+      archiveBytes: 102_703_121,
+      executable: { name: "agy_acp_server.exe", bytes: 62_293_488 },
       harness: { name: "localharness_external.exe", bytes: 139_322_008 },
     },
   ],

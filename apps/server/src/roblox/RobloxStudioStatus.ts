@@ -76,15 +76,16 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       );
 
-  const cachedVersion = (executable: string) =>
-    Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis;
-      const cached = versions.get(executable);
-      if (cached !== undefined && now - cached.at < VERSION_CACHE_MS) return cached.version;
-      const version = yield* blenderVersion(executable);
-      versions.set(executable, { version, at: now });
-      return version;
-    });
+  const cachedVersion = Effect.fn("RobloxStudioStatus.cachedVersion")(function* (
+    executable: string,
+  ) {
+    const now = yield* Clock.currentTimeMillis;
+    const cached = versions.get(executable);
+    if (cached !== undefined && now - cached.at < VERSION_CACHE_MS) return cached.version;
+    const version = yield* blenderVersion(executable);
+    versions.set(executable, { version, at: now });
+    return version;
+  });
 
   const get: RobloxStudioStatusService["Service"]["get"] = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orDie);

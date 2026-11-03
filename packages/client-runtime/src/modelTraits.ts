@@ -14,6 +14,20 @@ export const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
   "thinking",
 ]);
 
+/** The model's reasoning control: a known effort id, or a select its agent marked as reasoning. */
+export function isReasoningControl(descriptor: ProviderOptionDescriptor): boolean {
+  return (
+    (descriptor.type === "select" && descriptor.role === "reasoning") ||
+    REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id)
+  );
+}
+
+export function isReasoningSelect(
+  descriptor: ProviderOptionDescriptor,
+): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> {
+  return descriptor.type === "select" && isReasoningControl(descriptor);
+}
+
 export function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
   descriptorId: string,
@@ -46,10 +60,13 @@ export function getDescriptorStringValue(
   return typeof value === "string" ? value : null;
 }
 
+// Prompt-injected levels such as Ultrathink still work when typed, but pickers do not offer them.
 export function selectableProviderOptionChoices(
   descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
 ) {
-  return descriptor.options;
+  return descriptor.options.filter(
+    (option) => !descriptor.promptInjectedValues?.includes(option.id),
+  );
 }
 
 export function buildTraitsTriggerDisplay(input: {
@@ -59,7 +76,11 @@ export function buildTraitsTriggerDisplay(input: {
   ultrathinkPromptControlled: boolean;
   modelSelection?: ModelSelection | null;
   reportedModelSelection?: ModelSelection | null | undefined;
-}): { label: string } {
+}): {
+  label: string;
+  /** "Fast" or "Ultrafast" when a speed option is on. */
+  speedLabel: string | null;
+} {
   let fastModeFallbackLabel: string | null = null;
   let speedLabel: string | null = null;
   let reasoningLabelIndex = -1;
@@ -109,11 +130,7 @@ export function buildTraitsTriggerDisplay(input: {
               input.reportedModelSelection,
             );
     if (typeof label === "string" && label.length > 0) {
-      if (
-        reasoningLabelIndex === -1 &&
-        descriptor.type === "select" &&
-        REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id)
-      ) {
+      if (reasoningLabelIndex === -1 && isReasoningSelect(descriptor)) {
         reasoningLabelIndex = labels.length;
       }
       labels.push(label);
@@ -121,7 +138,7 @@ export function buildTraitsTriggerDisplay(input: {
   }
 
   if (labels.length === 0 && fastModeFallbackLabel !== null) {
-    return { label: fastModeFallbackLabel };
+    return { label: fastModeFallbackLabel, speedLabel };
   }
   if (speedLabel) {
     if (reasoningLabelIndex >= 0) {
@@ -130,5 +147,5 @@ export function buildTraitsTriggerDisplay(input: {
       labels.push(speedLabel);
     }
   }
-  return { label: labels.join(" · ") };
+  return { label: labels.join(" · "), speedLabel };
 }

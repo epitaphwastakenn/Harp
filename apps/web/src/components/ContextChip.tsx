@@ -27,7 +27,19 @@ const contextChipVariants = cva(
         "pr-closed": "[--context-chip-accent:var(--destructive)]",
         skill: "[--context-chip-accent:var(--brand-accent)]",
         thread: "[--context-chip-accent:var(--muted-foreground)]",
+        environment: "[--context-chip-accent:var(--muted-foreground)]",
         citation: "[--context-chip-accent:var(--muted-foreground)]",
+        "doc-pdf": "[--context-chip-accent:var(--context-chip-doc-pdf,var(--muted-foreground))]",
+        "doc-word": "[--context-chip-accent:var(--context-chip-doc-word,var(--muted-foreground))]",
+        "doc-spreadsheet":
+          "[--context-chip-accent:var(--context-chip-doc-spreadsheet,var(--muted-foreground))]",
+        "doc-slides":
+          "[--context-chip-accent:var(--context-chip-doc-slides,var(--muted-foreground))]",
+        "doc-epub": "[--context-chip-accent:var(--context-chip-doc-epub,var(--muted-foreground))]",
+      },
+      shape: {
+        inline: "",
+        bubble: "w-64 gap-2 rounded-2xl bg-message px-3 py-2 text-sm text-message-foreground",
       },
       state: {
         unresolved: "border-dashed",
@@ -52,7 +64,13 @@ const contextChipVariants = cva(
           "pr-closed",
           "skill",
           "thread",
+          "environment",
           "citation",
+          "doc-pdf",
+          "doc-word",
+          "doc-spreadsheet",
+          "doc-slides",
+          "doc-epub",
         ],
         className:
           "[--context-chip-border:color-mix(in_oklab,var(--context-chip-accent)_34%,var(--contrast-border))] [--context-chip-border-hover:color-mix(in_oklab,var(--context-chip-accent)_48%,var(--contrast-border))] [--context-chip-foreground:color-mix(in_oklab,var(--context-chip-accent)_22%,var(--contrast-foreground))] border-(--context-chip-border) bg-(--context-chip-accent)/11 text-(--context-chip-foreground) [button:enabled&,a&]:hover:border-(--context-chip-border-hover) [button:enabled&,a&]:hover:bg-(--context-chip-accent)/17",
@@ -71,11 +89,12 @@ type ContextChipKind = NonNullable<VariantProps<typeof contextChipVariants>["kin
 interface ContextChipProps extends useRender.ComponentProps<"span"> {
   kind?: ContextChipKind;
   state?: "unresolved" | "invalid";
+  shape?: "inline" | "bubble";
 }
 
-function ContextChip({ className, kind, state, render, ...props }: ContextChipProps) {
+function ContextChip({ className, kind, state, shape, render, ...props }: ContextChipProps) {
   const defaultProps = {
-    className: cn(contextChipVariants({ kind, state }), className),
+    className: cn(contextChipVariants({ kind, state, shape }), className),
     "data-slot": "context-chip",
     "data-state": state,
   };

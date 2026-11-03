@@ -916,38 +916,40 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catch((error) => Effect.succeed(requestFailure(error))));
 
   /** The playtest client a UI or input call goes to: target client-N, else the first client. */
-  const runtimeClient = (args: Args, tool: string) =>
-    Effect.gen(function* () {
-      const edit = yield* placeOf(args);
-      const clients = (yield* runtimePeers(placeKey(edit))).filter((peer) =>
-        peer.role.startsWith("client-"),
-      );
-      const requested = str(args.target);
-      if (requested !== undefined && !requested.startsWith("client-")) {
-        return {
-          ok: false,
-          result: errorResult(
-            "runtime_client_required",
-            `${tool} target must be a live client-N role. Start a playtest first.`,
-          ),
-        } as const;
-      }
-      const client =
-        requested === undefined
-          ? preferRuntimeClient(clients)
-          : clients.find((peer) => peer.role === requested);
-      if (client === undefined || !client.role.startsWith("client-")) {
-        return {
-          ok: false,
-          result: errorResult(
-            "runtime_client_required",
-            `${tool} requires an active playtest client. Start a Play or multiplayer test, wait for client-N, and retry.`,
-            { connected: clients.map((peer) => peer.role) },
-          ),
-        } as const;
-      }
-      return { ok: true, client } as const;
-    });
+  const runtimeClient = Effect.fn("StudioTools.runtimeClient")(function* (
+    args: Args,
+    tool: string,
+  ) {
+    const edit = yield* placeOf(args);
+    const clients = (yield* runtimePeers(placeKey(edit))).filter((peer) =>
+      peer.role.startsWith("client-"),
+    );
+    const requested = str(args.target);
+    if (requested !== undefined && !requested.startsWith("client-")) {
+      return {
+        ok: false,
+        result: errorResult(
+          "runtime_client_required",
+          `${tool} target must be a live client-N role. Start a playtest first.`,
+        ),
+      } as const;
+    }
+    const client =
+      requested === undefined
+        ? preferRuntimeClient(clients)
+        : clients.find((peer) => peer.role === requested);
+    if (client === undefined || !client.role.startsWith("client-")) {
+      return {
+        ok: false,
+        result: errorResult(
+          "runtime_client_required",
+          `${tool} requires an active playtest client. Start a Play or multiplayer test, wait for client-N, and retry.`,
+          { connected: clients.map((peer) => peer.role) },
+        ),
+      } as const;
+    }
+    return { ok: true, client } as const;
+  });
 
   const inspectUi = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -1073,37 +1075,40 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch((error) => Effect.succeed(requestFailure(error))));
 
   /** The simulator target: edit (default) or a client; several clients for set. */
-  const deviceTargets = (args: Args, tool: string, allowAll: boolean) =>
-    Effect.gen(function* () {
-      const edit = yield* placeOf(args);
-      const clients = (yield* runtimePeers(placeKey(edit))).filter((peer) =>
-        peer.role.startsWith("client-"),
-      );
-      const target = str(args.target) ?? "edit";
-      if (target === "edit") return { ok: true, peers: [edit] } as const;
-      if (target === "all-clients" && allowAll) {
-        return clients.length > 0
-          ? ({ ok: true, peers: clients } as const)
-          : ({
-              ok: false,
-              result: errorResult(
-                "runtime_client_required",
-                "No playtest client is connected. Start a playtest first.",
-              ),
-            } as const);
-      }
-      const client = clients.find((peer) => peer.role === target);
-      if (!target.startsWith("client-") || client === undefined) {
-        return {
-          ok: false,
-          result: errorResult(
-            "invalid_target",
-            `${tool} target must be "edit"${allowAll ? ', "all-clients"' : ""} or a connected client-N (got ${target}).`,
-          ),
-        } as const;
-      }
-      return { ok: true, peers: [client] } as const;
-    });
+  const deviceTargets = Effect.fn("StudioTools.deviceTargets")(function* (
+    args: Args,
+    tool: string,
+    allowAll: boolean,
+  ) {
+    const edit = yield* placeOf(args);
+    const clients = (yield* runtimePeers(placeKey(edit))).filter((peer) =>
+      peer.role.startsWith("client-"),
+    );
+    const target = str(args.target) ?? "edit";
+    if (target === "edit") return { ok: true, peers: [edit] } as const;
+    if (target === "all-clients" && allowAll) {
+      return clients.length > 0
+        ? ({ ok: true, peers: clients } as const)
+        : ({
+            ok: false,
+            result: errorResult(
+              "runtime_client_required",
+              "No playtest client is connected. Start a playtest first.",
+            ),
+          } as const);
+    }
+    const client = clients.find((peer) => peer.role === target);
+    if (!target.startsWith("client-") || client === undefined) {
+      return {
+        ok: false,
+        result: errorResult(
+          "invalid_target",
+          `${tool} target must be "edit"${allowAll ? ', "all-clients"' : ""} or a connected client-N (got ${target}).`,
+        ),
+      } as const;
+    }
+    return { ok: true, peers: [client] } as const;
+  });
 
   const deviceGet = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -3463,7 +3468,7 @@ const make = Effect.gen(function* () {
 
   return StudioTools.of({
     list,
-    call: (name, args, context) => {
+    call: Effect.fn("StudioTools.call")((name, args, context) => {
       const tool = byName.get(name);
       if (tool === undefined) {
         return Effect.succeed(errorResult("unknown_tool", `No Studio tool is named ${name}.`));
@@ -3499,7 +3504,7 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-    },
+    }),
   });
 });
 

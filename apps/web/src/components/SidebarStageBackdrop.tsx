@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentIdentificationMode } from "@t3tools/contracts/settings";
 
 import { APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
@@ -25,8 +26,10 @@ export function useEnvironmentStageLabel(): string {
   });
 }
 
-export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
-  return resolveSidebarStageBackdropVariant(useEnvironmentStageLabel(), enabled);
+export function useSidebarStageBackdropVariant(
+  mode: EnvironmentIdentificationMode,
+): SidebarStageBackdropVariant | null {
+  return resolveSidebarStageBackdropVariant(useEnvironmentStageLabel(), mode);
 }
 
 /** Waits for hydration like the identification mode, so the art never flashes in and out. */

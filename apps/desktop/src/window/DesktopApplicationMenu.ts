@@ -241,7 +241,10 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
+          // Cmd/Ctrl+W belongs to the renderer's tab close; it must never close the window.
+          environment.platform === "darwin"
+            ? { label: "Close Window", click: (_item, window) => window?.close() }
+            : { role: "quit" },
         ],
       },
       {

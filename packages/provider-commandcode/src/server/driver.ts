@@ -66,114 +66,120 @@ export const CommandCodeDriver: ProviderDriver<CommandCodeSettings, CommandCodeD
   metadata: { displayName: "CommandCode", supportsMultipleInstances: true },
   configSchema: CommandCodeSettings,
   defaultConfig: () => decodeSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const httpClient = yield* HttpClient.HttpClient;
-      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
-      const host = yield* ProviderHost.ProviderHost;
-      const { cwd, providerStatusCacheDir } = host.paths;
-      const processEnvironment = yield* mergeProviderInstanceEnvironment(
-        environment,
-        yield* HostProcess.Environment,
-      );
-      const effectiveConfig = { ...config, enabled } satisfies CommandCodeSettings;
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: COMMAND_CODE_DRIVER_KIND,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: COMMAND_CODE_DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
-        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-          binaryPath: effectiveConfig.binaryPath,
-          env: processEnvironment,
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        ),
-      );
-      const checkProvider = Effect.fn("CommandCodeDriver.checkProvider")(function* (
-        reason: ProviderCheckReason,
-      ) {
-        const status = yield* checkCommandCodeProviderStatus(
-          effectiveConfig,
-          processEnvironment,
-          cwd,
-          {
-            reason,
-            modelListCachePath: path.join(
-              providerStatusCacheDir,
-              "commandcode-models",
-              `${instanceId}.json`,
-            ),
-          },
-        ).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-          Effect.provideService(HttpClient.HttpClient, httpClient),
-        );
-        return stampIdentity(status);
-      });
-      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-      const snapshot = yield* makeManagedServerProvider<
-        ProviderSnapshotSettings<CommandCodeSettings>
-      >({
-        resolveMaintenance,
-        getSettings: snapshotSettings.getSettings,
-        streamSettings: snapshotSettings.streamSettings,
-        haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-        initialSnapshot: (settings) =>
-          makePendingCommandCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
-        checkProvider: checkProvider("requested"),
-        checkProviderFor: checkProvider,
-        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
-          resolveMaintenance().pipe(
-            Effect.flatMap((maintenanceCapabilities) =>
-              enrichProviderSnapshotWithVersionAdvisory(currentSnapshot, maintenanceCapabilities, {
-                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-              }),
-            ),
-            Effect.provideService(HttpClient.HttpClient, httpClient),
-            Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
-            Effect.flatMap(publishSnapshot),
-          ),
+  create: Effect.fn("create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }) {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const httpClient = yield* HttpClient.HttpClient;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+    const host = yield* ProviderHost.ProviderHost;
+    const { cwd, providerStatusCacheDir } = host.paths;
+    const processEnvironment = yield* mergeProviderInstanceEnvironment(
+      environment,
+      yield* HostProcess.Environment,
+    );
+    const effectiveConfig = { ...config, enabled } satisfies CommandCodeSettings;
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: COMMAND_CODE_DRIVER_KIND,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      driverKind: COMMAND_CODE_DRIVER_KIND,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+      resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnvironment,
       }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: COMMAND_CODE_DRIVER_KIND,
-              instanceId,
-              detail: "Failed to build CommandCode snapshot.",
-              cause,
-            }),
-        ),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      ),
+    );
+    const checkProvider = Effect.fn("CommandCodeDriver.checkProvider")(function* (
+      reason: ProviderCheckReason,
+    ) {
+      const status = yield* checkCommandCodeProviderStatus(
+        effectiveConfig,
+        processEnvironment,
+        cwd,
+        {
+          reason,
+          modelListCachePath: path.join(
+            providerStatusCacheDir,
+            "commandcode-models",
+            `${instanceId}.json`,
+          ),
+        },
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
       );
-      const orchestrationAdapter = yield* makeCommandCodeAdapterV2({
-        instanceId,
-        settings: effectiveConfig,
-        environment: processEnvironment,
-        modelCatalog: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
-      });
-      return {
-        instanceId,
-        driverKind: COMMAND_CODE_DRIVER_KIND,
-        continuationIdentity,
-        displayName,
-        accentColor,
-        enabled,
-        snapshot,
-        orchestrationAdapter,
-        textGeneration: makeUnsupportedCommandCodeTextGeneration(),
-      } satisfies ProviderInstance;
-    }),
+      return stampIdentity(status);
+    });
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
+    const snapshot = yield* makeManagedServerProvider<
+      ProviderSnapshotSettings<CommandCodeSettings>
+    >({
+      resolveMaintenance,
+      getSettings: snapshotSettings.getSettings,
+      streamSettings: snapshotSettings.streamSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      initialSnapshot: (settings) =>
+        makePendingCommandCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
+      checkProvider: checkProvider("requested"),
+      checkProviderFor: checkProvider,
+      enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+        resolveMaintenance().pipe(
+          Effect.flatMap((maintenanceCapabilities) =>
+            enrichProviderSnapshotWithVersionAdvisory(currentSnapshot, maintenanceCapabilities, {
+              enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+            }),
+          ),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
+          Effect.flatMap(publishSnapshot),
+        ),
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: COMMAND_CODE_DRIVER_KIND,
+            instanceId,
+            detail: "Failed to build CommandCode snapshot.",
+            cause,
+          }),
+      ),
+    );
+    const orchestrationAdapter = yield* makeCommandCodeAdapterV2({
+      instanceId,
+      settings: effectiveConfig,
+      environment: processEnvironment,
+      modelCatalog: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
+    });
+    return {
+      instanceId,
+      driverKind: COMMAND_CODE_DRIVER_KIND,
+      continuationIdentity,
+      displayName,
+      accentColor,
+      enabled,
+      snapshot,
+      orchestrationAdapter,
+      textGeneration: makeUnsupportedCommandCodeTextGeneration(),
+    } satisfies ProviderInstance;
+  }),
 };

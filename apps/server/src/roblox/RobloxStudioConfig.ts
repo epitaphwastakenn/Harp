@@ -321,17 +321,16 @@ const make = Effect.gen(function* () {
   };
 
   const detections = new Map<string, { readonly value: boolean; readonly at: number }>();
-  const isRobloxProject = (root: string) =>
-    Effect.gen(function* () {
-      const cached = detections.get(root);
-      const now = yield* Clock.currentTimeMillis;
-      if (cached !== undefined && now - cached.at < PROJECT_DETECTION_TTL_MS) return cached.value;
-      const entries = yield* fs.readDirectory(root).pipe(Effect.orElseSucceed(() => []));
-      const value = isRobloxProjectListing(entries);
-      detections.set(root, { value, at: now });
-      if (detections.size > 256) detections.delete(detections.keys().next().value ?? root);
-      return value;
-    });
+  const isRobloxProject = Effect.fn("RobloxStudioConfig.isRobloxProject")(function* (root: string) {
+    const cached = detections.get(root);
+    const now = yield* Clock.currentTimeMillis;
+    if (cached !== undefined && now - cached.at < PROJECT_DETECTION_TTL_MS) return cached.value;
+    const entries = yield* fs.readDirectory(root).pipe(Effect.orElseSucceed(() => []));
+    const value = isRobloxProjectListing(entries);
+    detections.set(root, { value, at: now });
+    if (detections.size > 256) detections.delete(detections.keys().next().value ?? root);
+    return value;
+  });
 
   const appliesTo: RobloxStudioConfigShape["appliesTo"] = (settings, workspaceRoot) => {
     const roblox = settings.robloxStudio;
@@ -340,27 +339,29 @@ const make = Effect.gen(function* () {
     return workspaceRoot === undefined ? Effect.succeed(false) : isRobloxProject(workspaceRoot);
   };
 
-  const hiddenServerIds: RobloxStudioConfigShape["hiddenServerIds"] = (settings, workspaceRoot) =>
-    Effect.gen(function* () {
-      const managed = Object.keys(managedServersFor(settings, environment)).filter(
-        (id) => settings.mcpServers[id] === undefined,
-      );
-      if (managed.length === 0) return new Set<string>();
-      return (yield* appliesTo(settings, workspaceRoot)) ? new Set<string>() : new Set(managed);
-    });
+  const hiddenServerIds: RobloxStudioConfigShape["hiddenServerIds"] = Effect.fn(
+    "RobloxStudioConfig.hiddenServerIds",
+  )(function* (settings, workspaceRoot) {
+    const managed = Object.keys(managedServersFor(settings, environment)).filter(
+      (id) => settings.mcpServers[id] === undefined,
+    );
+    if (managed.length === 0) return new Set<string>();
+    return (yield* appliesTo(settings, workspaceRoot)) ? new Set<string>() : new Set(managed);
+  });
 
-  const instructions: RobloxStudioConfigShape["instructions"] = (settings, input) =>
-    Effect.gen(function* () {
-      const roblox = settings.robloxStudio;
-      if (roblox.mode !== "sealcode" || !roblox.instructions) return undefined;
-      if (!(yield* appliesTo(settings, input.workspaceRoot ?? input.cwd))) return undefined;
-      return studioBridgeInstructions({
-        skillCatalog: studioSkillCatalog,
-        autoPlaytest: roblox.autoPlaytest,
-        officialMcp: roblox.officialMcpAlongside && environment.officialMcpPath !== undefined,
-        blenderMcp: roblox.blenderMcp,
-      });
+  const instructions: RobloxStudioConfigShape["instructions"] = Effect.fn(
+    "RobloxStudioConfig.instructions",
+  )(function* (settings, input) {
+    const roblox = settings.robloxStudio;
+    if (roblox.mode !== "sealcode" || !roblox.instructions) return undefined;
+    if (!(yield* appliesTo(settings, input.workspaceRoot ?? input.cwd))) return undefined;
+    return studioBridgeInstructions({
+      skillCatalog: studioSkillCatalog,
+      autoPlaytest: roblox.autoPlaytest,
+      officialMcp: roblox.officialMcpAlongside && environment.officialMcpPath !== undefined,
+      blenderMcp: roblox.blenderMcp,
     });
+  });
 
   return {
     environment,

@@ -115,7 +115,12 @@ function makeRegistry(input: {
         kind: provider.kind,
         label: provider.kind,
         installHint: "unused",
-        probeAuth: Effect.die("unused"),
+        probeAuth: Effect.succeed({
+          status: "unknown",
+          account: Option.none(),
+          host: Option.none(),
+          detail: Option.none(),
+        }),
       },
     })),
   ).pipe(
@@ -432,5 +437,30 @@ it.effect("asks again once Settings change", () =>
     yield* PubSub.publish(changes, DEFAULT_SERVER_SETTINGS);
     yield* Deferred.await(handled);
     assert.strictEqual((yield* resolveUnknown(registry, "c")).provider.kind, "github");
+  }),
+);
+
+it.effect("answers discovery without waiting on a hosting API that stalls", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry({
+      remotes: [],
+      discovery: [
+        claimingCli("fakeforge"),
+        {
+          type: "api",
+          kind: kind("github"),
+          label: "GitHub",
+          installHint: "unused",
+          probeAuth: Effect.never,
+        },
+      ],
+    });
+    const discovering = yield* registry.discover.pipe(Effect.forkChild);
+    yield* TestClock.adjust("3 seconds");
+    const items = yield* Fiber.join(discovering);
+    const github = items.find((item) => item.kind === "github");
+    assert.strictEqual(github?.status, "available");
+    assert.strictEqual(github?.auth.status, "unknown");
+    assert.strictEqual(items.find((item) => item.kind === "fakeforge")?.status, "available");
   }),
 );

@@ -22,6 +22,7 @@
         "knip-schemas.ts",
         "setup-worktree.ts",
         "sign-macos.ts",
+        "prepare-server-compile-cache.cjs",
         "verify-windows-desktop-artifact.ts",
       ],
       "ignoreDependencies": ["esbuild"],
@@ -35,7 +36,7 @@
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
-        "scripts/evaluate-thread-titles.ts",
+        "scripts/print-studio-instructions.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
@@ -45,7 +46,12 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "@napi-rs/keyring"],
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "@t3tools/web",
+        "@napi-rs/keyring",
+        "ffi-rs",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
@@ -56,6 +62,7 @@
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
         "src/boot.ts!",
         "src/compileCache.ts!",
+        "src/serverCompileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",

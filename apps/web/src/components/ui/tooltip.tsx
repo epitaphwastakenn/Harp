@@ -64,6 +64,7 @@ function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
   const tracker = use(TooltipScrollContext);
   const localActionsRef = useRef<TooltipPrimitive.Root.Actions | null>(null);
   const actionsRef = props.actionsRef ?? localActionsRef;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases this tooltip from the scroll tracker on unmount
   useEffect(() => () => tracker?.release(actionsRef), [actionsRef, tracker]);
 
   if (!tracker) return <TooltipPrimitive.Root {...props} />;
@@ -103,7 +104,7 @@ function TooltipPositioner(props: TooltipPrimitive.Positioner.Props) {
   const titlebarHeight = useNativeTitlebarHeight();
   return (
     <TooltipPrimitive.Positioner
-      className="pointer-events-none z-[140] h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+      className="pointer-events-none z-[140] max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
       collisionPadding={{
         top: COLLISION_PADDING + titlebarHeight,
         right: COLLISION_PADDING,
@@ -147,12 +148,9 @@ function TooltipPopup({
           data-slot="tooltip-popup"
           {...props}
         >
-          <TooltipPrimitive.Viewport
-            className="relative size-full overflow-clip px-(--viewport-inline-padding) py-1 [--viewport-inline-padding:--spacing(2)] data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:truncate **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity"
-            data-slot="tooltip-viewport"
-          >
+          <div className="min-w-0 px-2 py-1" data-slot="tooltip-viewport">
             {children}
-          </TooltipPrimitive.Viewport>
+          </div>
         </TooltipPrimitive.Popup>
       </TooltipPositioner>
     </TooltipPrimitive.Portal>

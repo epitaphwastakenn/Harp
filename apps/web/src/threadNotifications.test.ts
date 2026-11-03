@@ -53,6 +53,31 @@ afterEach(() => {
 });
 
 describe("playNotificationSound", () => {
+  it("preloads every sound on unlock and reuses them for playback", async () => {
+    const { unlockNotificationAudio, playNotificationSound } = await loadUnlocked();
+    expect(fetch).toHaveBeenCalledTimes(4);
+    unlockNotificationAudio();
+    await playNotificationSound("completion", () => true, 70);
+    await playNotificationSound("question", () => true, 70);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(audio.started).toBe(2);
+  });
+
+  it("retries failed preloads on an alert rather than every gesture", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("offline"));
+    const { unlockNotificationAudio, playNotificationSound } = await loadUnlocked();
+    await playNotificationSound("completion", () => true, 70);
+    expect(fetch).toHaveBeenCalledTimes(4);
+
+    unlockNotificationAudio();
+    expect(fetch).toHaveBeenCalledTimes(4);
+
+    vi.mocked(fetch).mockResolvedValue(new Response(new ArrayBuffer(0)));
+    await playNotificationSound("completion", () => true, 70);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    expect(audio.started).toBe(1);
+  });
+
   it("plays one sound for threads that complete together", async () => {
     const { playNotificationSound } = await loadUnlocked();
 

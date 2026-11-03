@@ -20,7 +20,7 @@ import type {
   ModelSelection,
   ProjectId,
   PreviewAnnotationPayload,
-  ProviderApprovalDecision,
+  EnvironmentContextRecord,
   ThreadContextRecord,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
@@ -167,7 +167,10 @@ import {
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../../lib/terminalContext";
-import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
+import {
+  threadContextRecord,
+  toKindScopedComposerContextId,
+} from "@t3tools/shared/composerContextReferences";
 import {
   shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
@@ -201,7 +204,6 @@ import {
   reviewCommentContextRecord,
   terminalContextReference,
   terminalContextRecord,
-  threadContextRecord,
   threadContextReference,
 } from "~/lib/composerContextRecords";
 import { rememberCopiedComposerAttachments } from "~/lib/copiedComposerAttachments";
@@ -215,7 +217,6 @@ import {
   ComposerCommandMenu,
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
-import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import {
   ComposerAttachButton,
   ComposerAttachmentFileList,
@@ -226,7 +227,6 @@ import {
 } from "./ComposerAttachmentStrip";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerFooterPrimaryActions, ComposerModelPicker } from "./ComposerFooterControls";
-import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -265,7 +265,7 @@ const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidErro
 const COMPOSER_SCROLL_COLLAPSE_THRESHOLD_PX = 24;
 const COMPOSER_SCROLL_GESTURE_RESET_MS = 120;
 import { toastManager } from "../ui/toast";
-import { ArrowUpIcon, CircleAlertIcon, PlayIcon, ShieldIcon } from "lucide-react";
+import { ArrowUpIcon, CircleAlertIcon, PlayIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { ComposerSendButton } from "./ComposerSendButton";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
@@ -280,7 +280,7 @@ import {
   type ThreadShell,
 } from "../../types";
 import { type ComposerPromptHistoryPosition } from "./composerPromptHistory";
-import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
+import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
 import type {
   LatestProposedPlanState,
   PendingApproval,
@@ -300,7 +300,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useSoftwareKeyboardOpen } from "../../hooks/useSoftwareKeyboardOpen";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { usePanelAnimationSettings } from "../../panelAnimations";
-import { readEnvironmentScope } from "../../state/session";
+import { readEnvironmentScope, readPreparedConnection } from "../../state/session";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 import { useComposerRestingTransition } from "./useComposerRestingTransition";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
@@ -371,6 +371,7 @@ export interface ChatComposerHandle {
     previewAnnotations: PreviewAnnotationPayload[];
     reviewComments: ReviewCommentContext[];
     threadContexts: ThreadContextRecord[];
+    environmentContexts: EnvironmentContextRecord[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
     selectedModelSelection: ModelSelection;
@@ -416,7 +417,6 @@ export interface ChatComposerProps {
 
   phase: SessionPhase;
   canInterrupt: boolean;
-  isConnecting: boolean;
   isSendBusy: boolean;
   canResume: boolean;
   isRevertingCheckpoint?: boolean;
@@ -428,6 +428,8 @@ export interface ChatComposerProps {
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
   onUsageLimitsCommand?: (() => void) | undefined;
+  sideChatAvailable?: boolean;
+  sideChatDisabledReason?: string | null;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -435,6 +437,7 @@ export interface ChatComposerProps {
 
   activePendingApproval: PendingApproval | null;
   pendingApprovals: PendingApproval[];
+  onHeldRequestIdsChange: (requestIds: ReadonlySet<string>) => void;
   pendingUserInputs: PendingUserInput[];
   activePendingProgress: {
     questionIndex: number;
@@ -520,10 +523,6 @@ export interface ChatComposerProps {
   onResume: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
-  onRespondToApproval: (
-    requestId: RuntimeRequestId,
-    decision: ProviderApprovalDecision,
-  ) => Promise<unknown>;
   onSelectActivePendingUserInputOption: (questionId: string, optionValue: string) => void;
   onAdvanceActivePendingUserInput: () => void;
   onDismissActivePendingUserInput: (requestId: RuntimeRequestId) => void;
@@ -584,7 +583,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectSelectionRequired,
     phase,
     canInterrupt,
-    isConnecting,
     isSendBusy,
     canResume,
     isRevertingCheckpoint = false,
@@ -594,6 +592,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     environmentUnavailable,
     activePendingApproval: incomingPendingApproval,
     pendingApprovals,
+    onHeldRequestIdsChange,
     pendingUserInputs: incomingPendingUserInputs,
     activePendingProgress: incomingPendingProgress,
     activePendingResolvedAnswers,
@@ -646,7 +645,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onResume,
     onInterrupt,
     onImplementPlanInNewThread,
-    onRespondToApproval,
     onSelectActivePendingUserInputOption,
     onAdvanceActivePendingUserInput,
     onDismissActivePendingUserInput,
@@ -680,6 +678,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ...pendingApprovals.map((request) => request.requestId),
     ...incomingPendingUserInputs.map((request) => request.requestId),
   ]);
+  useLayoutEffect(() => {
+    onHeldRequestIdsChange(heldRequestIds);
+  }, [heldRequestIds, onHeldRequestIdsChange]);
   const activePendingApproval =
     incomingPendingApproval && !heldRequestIds.has(incomingPendingApproval.requestId)
       ? incomingPendingApproval
@@ -769,6 +770,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
   const composerReviewComments = composerDraft.reviewComments;
   const composerThreadContexts = attachmentDraft.threadContexts;
+  const composerEnvironmentContexts = composerDraft.environmentContexts;
   const {
     pendingSnapShotAnimations,
     pendingSnapShotIds,
@@ -1030,12 +1032,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
-  const refreshWorkspaceSnapshotOnTyping = useProviderWorkspaceSnapshotRefresh({
-    environmentId,
-    gitCwd,
-    selectedProviderEntry,
-    selectedProviderStatus: selectedProviderStatus,
-  });
+  const { refresh: refreshWorkspaceSnapshotOnTyping, scanning: workspaceSkillsScanning } =
+    useProviderWorkspaceSnapshotRefresh({
+      environmentId,
+      gitCwd,
+      instanceId: selectedProviderEntry?.instanceId,
+    });
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
@@ -1229,11 +1231,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestRepository,
     threadPullRequests,
     planModeUiEnabled,
+    sideChatAvailable: props.sideChatAvailable === true,
+    sideChatDisabledReason: props.sideChatDisabledReason ?? null,
     compactSlashCommandAvailable,
     selectedProvider,
     selectedProviderSkills,
     selectedProviderSlashCommands,
     showSkillsInSlashMenu: settings.showSkillsInSlashMenu,
+    workspaceSkillsScanning,
   });
 
   const composerMenuOpen = Boolean(composerTrigger);
@@ -1263,7 +1268,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptSuggestion !== null &&
     settings.suggestNextPrompt &&
     phase !== "running" &&
-    !isConnecting &&
     !projectSelectionRequired &&
     !isEditingQueuedMessage &&
     !isComposerApprovalState &&
@@ -1286,7 +1290,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
   const showComposerTopDrawer =
-    isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile;
@@ -1401,7 +1404,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     reportFailure: false,
   });
   const voiceDisabled =
-    isConnecting ||
     isComposerApprovalState ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
@@ -1450,7 +1452,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase === "running" ||
     isSendBusy ||
     isSendDisabled ||
-    isConnecting ||
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
@@ -1571,6 +1572,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     attachmentTargetKey,
     attachmentTargetKeyRef,
     questionAttachmentTarget,
+    promptRef,
     pendingUserInputs,
     composerContextRecords,
     composerImages,
@@ -2089,6 +2091,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         return;
       }
+      if (item.command === "side" || item.command === "btw") {
+        if (props.sideChatDisabledReason) return;
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `/${item.command} `,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
       if (!planModeUiEnabled) return;
       void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
@@ -2229,7 +2242,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       isSendBusy ||
       isSendDisabled ||
-      isConnecting ||
       noProviderAvailable ||
       environmentUnavailable !== null ||
       phase === "running"
@@ -2355,7 +2367,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       pendingUserInputs.length > 0 ||
       phase === "running" ||
       isSendBusy ||
-      isConnecting ||
       !activeThreadId
     ) {
       return;
@@ -2506,8 +2517,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const toggleTasksDrawerStable = useStableCallback(toggleTasksDrawer);
   const hasBannerItems = props.bannerItems.length > 0;
-  const hasBlockingComposerTopDrawer =
-    activePendingApproval !== null || pendingUserInputs.length > 0;
+  const hasBlockingComposerTopDrawer = pendingUserInputs.length > 0;
   const showInlineTasksBadge =
     activeTasksProgress !== null &&
     activeTaskSteps !== null &&
@@ -2848,7 +2858,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ): boolean => {
     if (
       text.length === 0 ||
-      isConnecting ||
       activePendingIsResponding ||
       (pendingUserInputs.length > 0 && !activePendingProgress?.activeQuestion) ||
       projectSelectionRequired ||
@@ -2921,7 +2930,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       pendingUserInputs,
       supportsQuestionAttachments,
       isLiteralPendingAnswer,
-      isConnecting,
       projectSelectionRequired,
       questionAttachmentTarget,
       attachmentTargetKey,
@@ -2973,7 +2981,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         showComposerAttachAction ? (
           <ComposerAttachButton
             size={composerControlsCollapsed ? "xs" : "sm"}
-            disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
+            disabled={isComposerApprovalState || projectSelectionRequired}
             addComposerAttachments={addComposerAttachments}
             focusComposer={focusComposer}
           />
@@ -3002,6 +3010,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       localEnvironmentDisabled: isLocalEnvironmentDisabled(),
       environmentId,
       primaryEnvironmentId,
+      connection: readPreparedConnection(environmentId),
+      isDesktopRenderer: window.desktopBridge !== undefined,
     });
     if (target === "remote") {
       toastManager.add({
@@ -3176,7 +3186,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (questionAttachmentTarget !== null) {
       const canAnswer =
         canOperateThread &&
-        !isConnecting &&
         !activePendingIsResponding &&
         activePendingProgress?.activeQuestion?.allowCustomAnswer !== false;
       const text = `${records
@@ -3485,6 +3494,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         previewAnnotations: composerPreviewAnnotations,
         reviewComments: composerReviewComments,
         threadContexts: composerThreadContexts,
+        environmentContexts: composerEnvironmentContexts,
         selectedPromptEffort,
         selectedModelOptionsForDispatch,
         selectedModelSelection,
@@ -3543,7 +3553,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       focusComposer,
       environmentId,
       primaryEnvironmentId,
-      isConnecting,
       isChoiceOnlyPendingQuestion,
       isLiteralPendingAnswer,
       pendingUserInputs.length,
@@ -3734,39 +3743,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ) : null}
           {showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer) ? (
             <ComposerBanner.Attachment>
-              <ComposerBanner.Root
-                data-chat-composer-top-drawer="true"
-                variant={activePendingApproval ? "warning" : "info"}
-                density={activePendingApproval ? "spacious" : "default"}
-              >
-                {activePendingApproval ? (
-                  <ComposerBanner.Row
-                    layout="approval"
-                    data-chat-composer-collapsed-controls="true"
-                  >
-                    <ComposerBanner.Icon>
-                      <ShieldIcon />
-                    </ComposerBanner.Icon>
-                    <ComposerBanner.Content>
-                      <ComposerPendingApprovalPanel
-                        approval={activePendingApproval}
-                        pendingCount={pendingApprovals.length}
-                      />
-                    </ComposerBanner.Content>
-                    <ComposerBanner.Actions>
-                      <ComposerPendingApprovalActions
-                        requestId={activePendingApproval.requestId}
-                        disabled={!canOperateThread}
-                        isResponding={respondingRequestIds.includes(
-                          activePendingApproval.requestId,
-                        )}
-                        options={activePendingApproval.options}
-                        canRespond={activePendingApproval.responseCapability === "live"}
-                        onRespondToApproval={onRespondToApproval}
-                      />
-                    </ComposerBanner.Actions>
-                  </ComposerBanner.Row>
-                ) : pendingUserInputs.length > 0 ? (
+              <ComposerBanner.Root data-chat-composer-top-drawer="true" variant="info">
+                {pendingUserInputs.length > 0 ? (
                   <ComposerPendingUserInputPanel
                     pendingUserInputs={pendingUserInputs}
                     cwd={gitCwd ?? undefined}
@@ -4045,7 +4023,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                     : DEFAULT_COMPOSER_PLACEHOLDER
                     }
                     disabled={
-                      isConnecting ||
                       projectSelectionRequired ||
                       isChoiceOnlyPendingQuestion ||
                       activePendingIsResponding
@@ -4068,7 +4045,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       promptHasText={false}
                       isSendBusy={isSendBusy}
                       sendDisabledReason={sendDisabledReason}
-                      isConnecting={isConnecting}
                       isEnvironmentUnavailable={
                         environmentUnavailable !== null ||
                         noProviderAvailable ||
@@ -4177,7 +4153,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     promptHasText={prompt.trim().length > 0}
                     isSendBusy={isSendBusy}
                     sendDisabledReason={sendDisabledReason}
-                    isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
                       noProviderAvailable ||
@@ -4202,9 +4177,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isVoiceTranscribing={isVoiceTranscribing}
                     voiceDurationLabel={voiceRecordingDurationLabel}
                     onToggleVoice={toggleComposerVoiceRecordingStable}
-                    compactDisabled={
-                      compactDisabled || noProviderAvailable || isSendBusy || isConnecting
-                    }
+                    compactDisabled={compactDisabled || noProviderAvailable || isSendBusy}
                     compactDisabledReason={resolvedCompactDisabledReason}
                     {...(compactCommandAvailable
                       ? { onCompactContext: compactThreadContextStable }

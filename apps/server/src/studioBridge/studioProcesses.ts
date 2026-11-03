@@ -66,33 +66,34 @@ export const placeFromTitle = (title: string): string | undefined => {
 /** Window titles and plugin hellos name a place file with or without its extension. */
 export const normalizePlaceName = (name: string): string => name.trim().replace(/\.rbxlx?$/iu, "");
 
-export const listStudioWindows = (platform: string) =>
-  Effect.gen(function* () {
-    if (platform !== "win32") return [] as ReadonlyArray<StudioWindow>;
-    const output = yield* run("tasklist", [
-      "/FI",
-      "IMAGENAME eq RobloxStudioBeta.exe",
-      "/V",
-      "/FO",
-      "CSV",
-      "/NH",
-    ]);
-    const windows: StudioWindow[] = [];
-    for (const line of output.split(/\r?\n/u)) {
-      if (!line.startsWith('"')) continue;
-      const cells = parseCsvLine(line);
-      const pid = Number(cells[1]);
-      if (!Number.isInteger(pid)) continue;
-      const title = cells[8] ?? "";
-      windows.push({
-        pid,
-        title: title === "N/A" ? "" : title,
-        place: placeFromTitle(title),
-        memoryKb: Number((cells[4] ?? "").replace(/[^\d]/gu, "")) || 0,
-      });
-    }
-    return windows as ReadonlyArray<StudioWindow>;
-  });
+export const listStudioWindows = Effect.fn("studioProcesses.listStudioWindows")(function* (
+  platform: string,
+) {
+  if (platform !== "win32") return [] as ReadonlyArray<StudioWindow>;
+  const output = yield* run("tasklist", [
+    "/FI",
+    "IMAGENAME eq RobloxStudioBeta.exe",
+    "/V",
+    "/FO",
+    "CSV",
+    "/NH",
+  ]);
+  const windows: StudioWindow[] = [];
+  for (const line of output.split(/\r?\n/u)) {
+    if (!line.startsWith('"')) continue;
+    const cells = parseCsvLine(line);
+    const pid = Number(cells[1]);
+    if (!Number.isInteger(pid)) continue;
+    const title = cells[8] ?? "";
+    windows.push({
+      pid,
+      title: title === "N/A" ? "" : title,
+      place: placeFromTitle(title),
+      memoryKb: Number((cells[4] ?? "").replace(/[^\d]/gu, "")) || 0,
+    });
+  }
+  return windows as ReadonlyArray<StudioWindow>;
+});
 
 /** The newest installed RobloxStudioBeta.exe. */
 export const findStudioExecutable = (platform: string, localAppData: string | undefined) =>

@@ -93,8 +93,8 @@ export const layer: Layer.Layer<ShellSnapshotLoader, never, HttpClient.HttpClien
   Effect.gen(function* () {
     const httpClient = yield* HttpClient.HttpClient;
     return ShellSnapshotLoader.of({
-      load: (prepared, options) =>
-        fetchEnvironmentShellSnapshot({
+      load: Effect.fn("ShellSnapshotLoader.load")(function (prepared, options) {
+        return fetchEnvironmentShellSnapshot({
           prepared,
           ...(options?.omitIdleSubagents === true ? { omitIdleSubagents: true } : {}),
           ...(options?.omitOlderSettled === true ? { omitOlderSettled: true } : {}),
@@ -109,7 +109,8 @@ export const layer: Layer.Layer<ShellSnapshotLoader, never, HttpClient.HttpClien
               Effect.as(Option.none<DeferredShellSnapshot>()),
             ),
           ),
-        ),
+        );
+      }),
     });
   }),
 );

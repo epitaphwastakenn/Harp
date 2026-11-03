@@ -4,8 +4,6 @@ import * as NodeURL from "node:url";
 import { remoteCacheUrl } from "./infra/task-cache/src/remoteCache.ts";
 import { cachedTestTasks } from "./scripts/lib/cached-tests.ts";
 
-const DOM_TEST_ENVIRONMENT_ALLOWLIST: Array<string> = [];
-
 const TEST_EXCLUDE = [
   "**/.repos/**",
   "**/.t3/**",
@@ -295,7 +293,6 @@ export default defineConfig({
       },
       {
         files: ["apps/**/src/**", "packages/**/src/**"],
-        excludeFiles: DOM_TEST_ENVIRONMENT_ALLOWLIST,
         rules: { "t3code/no-dom-test-environment": "error" },
       },
       {
@@ -471,9 +468,9 @@ export default defineConfig({
                 "transition",
                 "rounded-[inherit]",
                 "gap-[0.33em]",
-                "px-[0.5em]",
-                "rounded-[0.5em]",
-                "text-[0.86em]",
+                "gap-[0.2em]",
+                "leading-[normal]",
+                "underline-offset-[0.2em]",
                 "rounded-[25%]",
                 "text-[length:80cqh]",
                 "bg-[Highlight]",
@@ -532,7 +529,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/**", "packages/*/src/**"],
-        rules: { "t3code/react-effect-budget": "error" },
+        rules: { "t3code/no-unreasoned-state-sync": "error" },
       },
       {
         // React Compiler caches use* functions only if they call a hook.

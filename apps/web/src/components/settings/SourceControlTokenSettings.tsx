@@ -15,6 +15,9 @@ import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
 import { Label } from "../ui/label";
 
+const hasToken = (token: string | object | undefined) =>
+  typeof token === "string" ? token.length > 0 : token !== undefined;
+
 export function SourceControlTokenSettings({
   environmentId,
   definition,
@@ -37,9 +40,9 @@ export function SourceControlTokenSettings({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const normalizedHost = host.trim().toLowerCase();
-  const isSaved = (tokens[normalizedHost] ?? "").length > 0;
+  const isSaved = hasToken(tokens[normalizedHost]);
   const savedHosts = Object.entries(tokens)
-    .filter(([, value]) => value.length > 0)
+    .filter(([, value]) => hasToken(value))
     .map(([saved]) => saved);
 
   const save = async (target: string, token: string) => {

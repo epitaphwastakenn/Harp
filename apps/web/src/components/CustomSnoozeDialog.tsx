@@ -21,6 +21,7 @@ function finish(choice: SnoozeChoice | null) {
 
 export function CustomSnoozeDialogHost() {
   const request = useRequest((state) => state.request);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resolves any pending snooze request promise with null when the dialog host unmounts
   useEffect(() => () => finish(null), []);
   return request ? (
     <Suspense fallback={null}>

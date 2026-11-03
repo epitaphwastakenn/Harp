@@ -139,7 +139,7 @@ export class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<Unsu
   }
 }
 
-const checkNodeSqliteCompat = () => {
+const checkNodeSqliteCompat = Effect.fn("checkNodeSqliteCompat")(function () {
   const parts = process.versions.node.split(".").map(Number);
   const major = parts[0] ?? 0;
   const minor = parts[1] ?? 0;
@@ -154,7 +154,7 @@ const checkNodeSqliteCompat = () => {
     );
   }
   return Effect.void;
-};
+});
 
 // node:sqlite supplies errcode; classifySqliteError expects errno.
 const classifyError = (cause: unknown, message: string, operation: string) => {
@@ -643,6 +643,7 @@ const startCheckpointWorker = Effect.fnUntraced(function* (
     yield* warn("Node SQLite lacks transaction-state or statement-authorizer support");
     return undefined;
   }
+  writer.exec("PRAGMA busy_timeout = 5000;");
   const version = String(writer.prepare("SELECT sqlite_version() AS version").get()?.version);
   const [major = 0, minor = 0] = version.split(".").map(Number);
   // Older SQLite treats NOOP as PASSIVE, which would checkpoint on the writer.

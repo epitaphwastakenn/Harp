@@ -54,30 +54,30 @@ const callPolicyLayer = Layer.effect(
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
     return {
-      forCall: ({ thread, serverId }) =>
-        serverId !== STUDIO_BRIDGE_SERVER_ID
-          ? Effect.succeed({ _tag: "Allow" })
-          : threads.getThreadShell(thread.threadId).pipe(
-              Effect.map((shell) =>
-                shell === null
-                  ? ({
-                      _tag: "Refuse",
-                      message: "Harp could not find this thread, so the Studio call was refused.",
-                    } as const)
-                  : ({
-                      _tag: "Allow",
-                      meta: { [studioControlsMetaKey]: policyFromControls(shell.studioControls) },
-                    } as const),
-              ),
-              Effect.orElseSucceed(
-                () =>
-                  ({
-                    _tag: "Refuse",
-                    message:
-                      "Harp could not read this thread's Studio controls, so the Studio call was refused. Try again.",
-                  }) as const,
-              ),
-            ),
+      forCall: Effect.fn("McpCallPolicy.forCall")(function* ({ thread, serverId }) {
+        if (serverId !== STUDIO_BRIDGE_SERVER_ID) return { _tag: "Allow" } as const;
+        return yield* threads.getThreadShell(thread.threadId).pipe(
+          Effect.map((shell) =>
+            shell === null
+              ? ({
+                  _tag: "Refuse",
+                  message: "Harp could not find this thread, so the Studio call was refused.",
+                } as const)
+              : ({
+                  _tag: "Allow",
+                  meta: { [studioControlsMetaKey]: policyFromControls(shell.studioControls) },
+                } as const),
+          ),
+          Effect.orElseSucceed(
+            () =>
+              ({
+                _tag: "Refuse",
+                message:
+                  "Harp could not read this thread's Studio controls, so the Studio call was refused. Try again.",
+              }) as const,
+          ),
+        );
+      }),
     };
   }),
 );

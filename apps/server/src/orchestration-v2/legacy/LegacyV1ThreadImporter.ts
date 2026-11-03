@@ -685,7 +685,7 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  // transcript_imported_at never resets; cache confirmed imports for the process lifetime to skip repeated locks and reads.
+  // Both results are final for this process: transcript_imported_at never resets, and only startup shell reconciliation creates legacy rows.
   const confirmedTranscriptThreadIds = new Set<ThreadId>();
 
   const ensureTranscriptBase = (threadId: ThreadId) =>

@@ -12,7 +12,11 @@ import {
   MIN_SCROLLBAR_SIZE,
 } from "@t3tools/contracts/settings";
 import { useEnvironmentStageLabel } from "../SidebarStageBackdrop";
-import { resolveEnvironmentIdentificationPillLabel } from "../SidebarStageBackdrop.logic";
+import {
+  resolveEnvironmentIdentificationPillLabel,
+  resolveSidebarStageBackdropVariant,
+  type SidebarStageBackdropVariant,
+} from "../SidebarStageBackdrop.logic";
 import { useCustomThemes } from "../../hooks/useCustomThemes";
 import { useTheme } from "../../hooks/useTheme";
 import { useThrottledRange } from "../../hooks/useThrottledRange";
@@ -35,12 +39,41 @@ import { CornerSettingsSection } from "./CornerSettings";
 import { AppearancePresetsSection } from "./AppearancePresetSettings";
 import { SidebarHeaderArtSettings } from "./SidebarHeaderArtSettings";
 import { ReasoningSliderSettings } from "./ReasoningSliderSettings";
+import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
+  "nightly-artwork": "Nightly artwork",
+  "dev-artwork": "Dev artwork",
   pill: "Version pill",
   none: "None",
 };
+
+function environmentIdentificationOptions(
+  stageVariant: SidebarStageBackdropVariant | null,
+): ReadonlyArray<readonly [EnvironmentIdentificationMode, string]> {
+  if (stageVariant === "dev") {
+    return [
+      ["artwork", "Dev artwork"],
+      ["nightly-artwork", "Nightly artwork"],
+      ["pill", "Version pill"],
+      ["none", "None"],
+    ];
+  }
+  if (stageVariant === "nightly") {
+    return [
+      ["artwork", "Nightly artwork"],
+      ["dev-artwork", "Dev artwork"],
+      ["pill", "Version pill"],
+      ["none", "None"],
+    ];
+  }
+  return [
+    ["artwork", "None"],
+    ["nightly-artwork", "Nightly artwork"],
+    ["dev-artwork", "Dev artwork"],
+  ];
+}
 
 const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
   comfortable: "Comfortable",
@@ -77,6 +110,13 @@ export function AppearanceSettingsPanel() {
   const environmentStageLabel = useEnvironmentStageLabel();
   const showEnvironmentIdentification =
     resolveEnvironmentIdentificationPillLabel(environmentStageLabel) !== null;
+  const environmentIdentificationOptionList = environmentIdentificationOptions(
+    resolveSidebarStageBackdropVariant(environmentStageLabel),
+  );
+  const environmentIdentificationLabel =
+    environmentIdentificationOptionList.find(
+      ([value]) => value === settings.environmentIdentificationMode,
+    )?.[1] ?? ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode];
 
   return (
     <SettingsPageContainer>
@@ -155,9 +195,10 @@ export function AppearanceSettingsPanel() {
               <Select
                 value={settings.environmentIdentificationMode}
                 onValueChange={(value) => {
-                  if (value === "artwork" || value === "pill" || value === "none") {
-                    updateSettings({ environmentIdentificationMode: value });
-                  }
+                  const option = environmentIdentificationOptionList.find(
+                    ([optionValue]) => optionValue === value,
+                  );
+                  if (option) updateSettings({ environmentIdentificationMode: option[0] });
                 }}
               >
                 <SelectTrigger
@@ -165,12 +206,10 @@ export function AppearanceSettingsPanel() {
                   className="w-full sm:w-40"
                   aria-label="Environment identification"
                 >
-                  <SelectValue>
-                    {ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode]}
-                  </SelectValue>
+                  <SelectValue>{environmentIdentificationLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(ENVIRONMENT_IDENTIFICATION_LABELS).map(([value, label]) => (
+                  {environmentIdentificationOptionList.map(([value, label]) => (
                     <SelectItem hideIndicator key={value} value={value}>
                       {label}
                     </SelectItem>
@@ -288,6 +327,8 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+
+        <ThreadDetailsItemsRow />
 
         <ReasoningSliderSettings />
 

@@ -1,3 +1,4 @@
+import { parseKeybindingShortcut } from "@t3tools/shared/keybindings";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -7,6 +8,7 @@ import {
   findAccessibleWindow,
   findCaptureSource,
   hideAndWaitForBlur,
+  toElectronAccelerator,
 } from "./snapShot.ts";
 
 describe("accessibleWindowText", () => {
@@ -368,5 +370,19 @@ describe("findCaptureSource", () => {
         },
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("toElectronAccelerator", () => {
+  it.each([
+    ["mod+shift+arrowup", "CommandOrControl+Shift+Up"],
+    ["mod+shift+arrowdown", "CommandOrControl+Shift+Down"],
+    ["ctrl+alt+arrowleft", "Control+Alt+Left"],
+    ["ctrl+alt+arrowright", "Control+Alt+Right"],
+    ["mod+shift+esc", "CommandOrControl+Shift+Esc"],
+    ["mod+shift+space", "CommandOrControl+Shift+Space"],
+    ["mod+shift+2", "CommandOrControl+Shift+2"],
+  ])("maps a recorded %s to an Electron accelerator", (recorded, accelerator) => {
+    expect(toElectronAccelerator(parseKeybindingShortcut(recorded)!)).toBe(accelerator);
   });
 });

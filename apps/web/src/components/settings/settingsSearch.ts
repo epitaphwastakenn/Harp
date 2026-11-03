@@ -9,6 +9,9 @@ import {
   type SourceControlDefinition,
 } from "@t3tools/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import * as Schema from "effect/Schema";
+import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
+import { writeLocalStorageValue } from "../../hooks/useLocalStorage";
 import { commandLabel } from "./KeybindingsSettings.logic";
 import {
   validateSettingsScopeSearch,
@@ -209,6 +212,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
+    id: "fallback-model",
+    title: "Fallback model",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["fallback agent provider out of usage new threads"],
+    environmentOnly: true,
+  },
+  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/general",
@@ -390,6 +401,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["typography family size monospace output"],
   },
   {
+    id: "thread-details-items",
+    title: "Thread details",
+    to: "/settings/appearance",
+    searchTerms: [
+      "customize show hide panel card environment editor scripts branch pull request git changes servers automations lineage usage limits 5 hour weekly quota tokens context window",
+    ],
+  },
+  {
+    id: "separate-fonts",
+    title: "Separate fonts",
+    to: "/settings/appearance",
+    searchTerms: ["typography advanced prompt code terminal font family size individually"],
+  },
+  {
     id: "font-smoothing",
     title: "Font smoothing",
     to: "/settings/appearance",
@@ -418,6 +443,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Project order",
     to: "/settings/general",
     searchTerms: ["sort projects sidebar manual created recent"],
+  },
+  {
+    id: "snooze-options",
+    title: "Snooze options",
+    to: "/settings/general",
+    searchTerms: ["snooze presets times later tonight tomorrow next week remind"],
+    environmentOnly: true,
+    scope: "environment-defaults",
   },
   {
     id: "snooze-limited-threads",
@@ -451,6 +484,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Auto-settle merged threads",
     to: "/settings/general",
     searchTerms: ["pull request merge closed automatically sidebar"],
+    requiresThreadAutoSettlement: true,
+    scope: "project-defaults",
+  },
+  {
+    id: "keep-threads-with-pull-requests",
+    title: "Keep threads with a PR",
+    to: "/settings/general",
+    targetId: "auto-settle-inactive-threads",
+    searchTerms: ["pull request inactivity auto-settle merge close sidebar"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
@@ -1296,4 +1338,19 @@ export function searchSettings(
         left.index - right.index,
     )
     .map(({ item }) => item);
+}
+
+const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
+  "prompt-font",
+  "terminal-font",
+]);
+
+export function isAdvancedTypographyTarget(targetId: string): boolean {
+  return ADVANCED_TYPOGRAPHY_TARGET_IDS.has(targetId);
+}
+
+export function revealSettingsSearchTarget(targetId: string): void {
+  if (isAdvancedTypographyTarget(targetId)) {
+    writeLocalStorageValue(TYPOGRAPHY_ADVANCED_STORAGE_KEY, true, false, Schema.Boolean);
+  }
 }

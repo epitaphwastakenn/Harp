@@ -29,7 +29,7 @@ const GitActionsControl = memo(BaseGitActionsControl);
 
 export interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
-  "anchor" | "handle" | "onPresentationChange"
+  "anchor" | "handle"
 > {
   forceNewWorktree?: boolean;
   environmentId: EnvironmentId;
@@ -108,7 +108,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
-      onPresentationChange={props.onPresentationChange}
+      contentKey={[
+        props.gitCwd ? "git" : "nogit",
+        props.isGitRepo ? "repo" : "norepo",
+        props.draftId ? "draft" : "thread",
+        props.session.receivesMcpServers ? "mcp" : "nomcp",
+      ].join(":")}
     >
       {(density) => (
         <>
@@ -173,7 +178,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 ) : null}
                 {props.activeProjectName ? (
                   <GitActionsControl
-                    displayMode="panel"
                     compact={density !== "full"}
                     gitCwd={props.gitCwd}
                     activeThreadRef={activeThreadRef}
@@ -207,6 +211,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <ThreadRelationshipsPanel
               environmentId={props.environmentId}
               threadId={props.threadId}
+              showLineage
+              showSideChats
             />
           ) : null}
         </>

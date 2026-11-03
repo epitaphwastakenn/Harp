@@ -133,6 +133,7 @@ describe("DesktopAppLinks", () => {
         `setPath:userData:${userData}`,
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
       ]);
     },
   );

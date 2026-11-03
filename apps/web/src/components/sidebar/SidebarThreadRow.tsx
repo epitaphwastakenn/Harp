@@ -94,7 +94,7 @@ import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { getTriggerDisplayModelLabel } from "../chat/providerIconUtils";
+import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { Badge } from "../ui/badge";
@@ -459,6 +459,7 @@ type SidebarThreadRowProps = {
   // Folder-grouped inbox rows use a one-line presentation so the sidebar stays
   // dense without changing the full pinned/working card treatment.
   compact: boolean;
+  navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
   snoozeSupported: boolean;
@@ -728,7 +729,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     (model) => model.slug === thread.modelSelection.model,
   );
   const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
+    ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
   const isRemote = thread.environmentId !== props.currentEnvironmentId;
@@ -767,6 +768,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   };
   const handleKeyDown = (event: ReactKeyboardEvent) => {
     if (event.target !== event.currentTarget) return;
+    if (
+      event.key === "F2" &&
+      !isRenaming &&
+      readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
+    ) {
+      event.preventDefault();
+      onStartRename(threadRef, thread.title);
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     onThreadActivate(threadRef);
@@ -1070,8 +1080,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             render={
               <div
                 ref={rowRef}
-                role="button"
-                tabIndex={0}
+                role="treeitem"
+                tabIndex={-1}
+                data-sidebar-row={threadKey}
+                data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
                 aria-current={accessibility.current}
                 data-testid={props.compact ? "sidebar-row-compact" : "sidebar-row-slim"}
@@ -1191,8 +1203,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           render={
             <div
               ref={rowRef}
-              role="button"
-              tabIndex={0}
+              role="treeitem"
+              tabIndex={-1}
+              data-sidebar-row={threadKey}
+              data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
@@ -1391,7 +1405,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
     (model) => model.slug === thread.modelSelection.model,
   );
   const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
+    ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,

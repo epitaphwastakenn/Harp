@@ -121,7 +121,6 @@ export function SidebarHeaderArtSettings() {
             </ToggleGroup>
             {customColor !== null && style !== "off" ? (
               <ProviderAccentColorPicker
-                commitDelayMs={120}
                 displayName="the sidebar header art"
                 layout="inline"
                 onCommit={(value) => updateSettings({ sidebarHeaderArtColor: value || "theme" })}

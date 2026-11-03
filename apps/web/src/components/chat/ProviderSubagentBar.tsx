@@ -4,8 +4,9 @@ import {
 } from "@t3tools/client-runtime/state/thread-execution";
 import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 import { ArrowUpLeftIcon } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import type { ReactNode } from "react";
 
+import { tickTextContent } from "~/lib/tickTextContent";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
@@ -18,8 +19,8 @@ export function ProviderSubagentBar(props: {
   readonly effortLabel: string | null;
   readonly status: ProviderSubagentStatus | null;
   readonly onOpenParent: (() => void) | null;
+  readonly actions?: ReactNode;
 }) {
-  const statusRef = useRef<HTMLSpanElement>(null);
   const { status } = props;
   const live = status !== null && isOrchestrationV2WorkActive(status.status);
   const modelDescription =
@@ -28,19 +29,6 @@ export function ProviderSubagentBar(props: {
     status === null ? null : { ...status, startedAt: null },
     0,
   );
-
-  // Write timer labels to the DOM to avoid chat renders on each tick.
-  useLayoutEffect(() => {
-    const update = () => {
-      if (statusRef.current) {
-        statusRef.current.textContent = formatProviderSubagentStatus(status, Date.now());
-      }
-    };
-    update();
-    if (!live) return;
-    const id = setInterval(update, 1_000);
-    return () => clearInterval(id);
-  }, [live, status]);
 
   return (
     <div className="px-1 py-1 text-xs [--composer-banner-icon-column:--spacing(8)]">
@@ -68,7 +56,7 @@ export function ProviderSubagentBar(props: {
             )}
           </span>
           <span
-            ref={statusRef}
+            ref={tickTextContent((nowMs) => formatProviderSubagentStatus(status, nowMs), live)}
             aria-hidden
             className="min-w-0 max-w-full truncate text-xs text-muted-foreground tabular-nums"
           />
@@ -76,12 +64,15 @@ export function ProviderSubagentBar(props: {
         <span role="status" className="sr-only">
           {`${modelDescription} subagent: ${announcement}`}
         </span>
-        {props.onOpenParent ? (
+        {props.actions || props.onOpenParent ? (
           <ComposerBanner.Actions>
-            <Button size="xs" variant="ghost-muted" onClick={props.onOpenParent}>
-              <ArrowUpLeftIcon />
-              <span className="@max-[320px]/composer-surface:sr-only">Open parent</span>
-            </Button>
+            {props.actions}
+            {props.onOpenParent ? (
+              <Button size="xs" variant="ghost-muted" onClick={props.onOpenParent}>
+                <ArrowUpLeftIcon />
+                <span className="@max-[320px]/composer-surface:sr-only">Open parent</span>
+              </Button>
+            ) : null}
           </ComposerBanner.Actions>
         ) : null}
       </ComposerBanner.Row>

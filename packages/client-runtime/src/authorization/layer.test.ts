@@ -47,11 +47,12 @@ const websocketTicket = (ticket: string) =>
   });
 
 describe("RemoteEnvironmentAuthorization", () => {
-  it.effect("reuses a validated bearer descriptor while issuing fresh websocket tickets", () =>
+  it.effect("validates a fresh bearer descriptor while issuing fresh websocket tickets", () =>
     Effect.gen(function* () {
       const fetch = recordedFetch([
         Response.json(DESCRIPTOR),
         websocketTicket("first-ticket"),
+        Response.json(DESCRIPTOR),
         websocketTicket("second-ticket"),
       ]);
       const layer = RemoteEnvironmentAuthorization.layer.pipe(
@@ -89,7 +90,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       expect(second.socketUrl).toContain("wsTicket=second-ticket");
       expect(
         fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/t3/environment")),
-      ).toHaveLength(1);
+      ).toHaveLength(2);
       expect(
         fetch.calls.filter(([url]) => String(url).endsWith("/api/auth/websocket-ticket/rpc")),
       ).toHaveLength(2);

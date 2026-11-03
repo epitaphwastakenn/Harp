@@ -113,25 +113,26 @@ export const makeComputerUseBroker = Effect.fn("ComputerUseChannel.makeBroker")(
       }).pipe(Effect.ensuring(Effect.sync(() => pending.delete(requestId))));
     });
 
-  const handleEvent = (event: ComputerUseEventType) =>
-    Effect.gen(function* () {
-      if (event.type === "stop") {
-        for (const entry of pending.values()) {
-          if (entry.threadId !== event.threadId) continue;
-          yield* Deferred.fail(
-            entry.deferred,
-            new ComputerUseError({ message: "The user stopped computer use." }),
-          );
-        }
-        yield* PubSub.publish(stops, event.threadId);
-        return;
+  const handleEvent = Effect.fn("ComputerUseChannel.handleEvent")(function* (
+    event: ComputerUseEventType,
+  ) {
+    if (event.type === "stop") {
+      for (const entry of pending.values()) {
+        if (entry.threadId !== event.threadId) continue;
+        yield* Deferred.fail(
+          entry.deferred,
+          new ComputerUseError({ message: "The user stopped computer use." }),
+        );
       }
-      const entry = pending.get(event.requestId);
-      if (entry === undefined) return;
-      yield* event.ok
-        ? Deferred.succeed(entry.deferred, event.result)
-        : Deferred.fail(entry.deferred, new ComputerUseError({ message: event.message }));
-    });
+      yield* PubSub.publish(stops, event.threadId);
+      return;
+    }
+    const entry = pending.get(event.requestId);
+    if (entry === undefined) return;
+    yield* event.ok
+      ? Deferred.succeed(entry.deferred, event.result)
+      : Deferred.fail(entry.deferred, new ComputerUseError({ message: event.message }));
+  });
 
   return {
     invoke,
@@ -147,8 +148,10 @@ export const makeComputerUseBroker = Effect.fn("ComputerUseChannel.makeBroker")(
 const unavailable = (message: string) =>
   ComputerUseChannel.of({
     available: false,
-    invoke: () => Effect.fail(new ComputerUseError({ message })),
-    end: () => Effect.void,
+    invoke: Effect.fn("ComputerUseChannel.invoke")(() =>
+      Effect.fail(new ComputerUseError({ message })),
+    ),
+    end: Effect.fn("ComputerUseChannel.end")(() => Effect.void),
     stops: Stream.empty,
   });
 

@@ -1152,14 +1152,19 @@ export const make = Effect.gen(function* () {
           ),
         ),
     ),
-    setAnimationDestination: (id, destination) =>
-      Effect.promise(async () => {
-        transition.animateTo(id, destination);
-        await transition.waitForLanding(id);
-      }),
-    dismissAnimation: (id) => Effect.sync(() => transition.dismiss(id)),
-    acknowledge: (id) =>
-      Effect.promise(() => transition.complete(id)).pipe(
+    setAnimationDestination: Effect.fn("DesktopSnapShot.setAnimationDestination")(
+      function (id, destination) {
+        return Effect.promise(async () => {
+          transition.animateTo(id, destination);
+          await transition.waitForLanding(id);
+        });
+      },
+    ),
+    dismissAnimation: Effect.fn("DesktopSnapShot.dismissAnimation")(function (id) {
+      return Effect.sync(() => transition.dismiss(id));
+    }),
+    acknowledge: Effect.fn("DesktopSnapShot.acknowledge")(function (id) {
+      return Effect.promise(() => transition.complete(id)).pipe(
         Effect.andThen(
           Effect.all(
             [
@@ -1172,7 +1177,8 @@ export const make = Effect.gen(function* () {
         Effect.mapError(
           (cause) => new DesktopSnapShotError({ operation: "acknowledge", captureId: id, cause }),
         ),
-      ),
+      );
+    }),
   });
 });
 

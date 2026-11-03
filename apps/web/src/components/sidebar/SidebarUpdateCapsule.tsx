@@ -88,7 +88,7 @@ export function SidebarUpdateCapsule({
     <Popover>
       <div
         className={cn(
-          "relative flex h-8 min-w-0 flex-1 items-center rounded-lg border border-transparent bg-sidebar-control-surface text-sidebar-foreground",
+          "relative flex h-8 flex-1 items-center rounded-lg border border-transparent bg-sidebar-control-surface text-sidebar-foreground",
           view.tone === "slow" && "border-warning/32 bg-warning-surface text-warning-foreground",
           view.tone === "failed" && "border-error/32 bg-error-surface text-error-foreground",
         )}
@@ -104,7 +104,7 @@ export function SidebarUpdateCapsule({
             />
           }
         />
-        <span className="pointer-events-none relative min-w-0 flex-1 truncate pl-3 text-xs">
+        <span className="pointer-events-none relative w-0 min-w-0 flex-1 truncate pl-3 text-xs">
           <span>{view.label}</span>
           {view.slow ? <span className="tabular-nums"> {view.slow.elapsed}</span> : null}
         </span>

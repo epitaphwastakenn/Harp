@@ -1,4 +1,5 @@
 import { NotificationSettings } from "./NotificationSettings";
+import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { SnapShotSettings } from "./SnapShotSettings";
 import { CheckIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -72,11 +73,7 @@ import {
   resolveAppModelSelectionState,
   selectsPlanAgent,
 } from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform, randomUUID } from "../../lib/utils";
 import { useEnvironmentProviders } from "../../state/environments";
@@ -937,12 +934,10 @@ export function GeneralSettingsPanel() {
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
-  const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(textGenerationProviders),
-      settings,
-      target?.projectId ?? null,
-    ),
+  const textGenerationModelInstanceEntries = providerInstanceEntriesFor(
+    textGenerationProviders,
+    settings,
+    target?.projectId ?? null,
   );
   const hasTextGenerationProvider = textGenerationModelInstanceEntries.some(
     (entry) => entry.enabled && entry.isAvailable,
@@ -1010,6 +1005,11 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
+      {scope.kind === "project" || scope.kind === "checkout" ? null : (
+        <SettingsSection id="snooze" title="Snooze">
+          <SnoozePresetsRow />
+        </SettingsSection>
+      )}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}

@@ -73,6 +73,8 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
         Number.isSafeInteger(surface.revealRequestId) &&
         (surface.attachment === undefined || isAttachment(surface.attachment))
       );
+    case "side-chat":
+      return typeof surface.threadId === "string" && surface.id === `side-chat:${surface.threadId}`;
     case "pull-request":
       return (
         typeof surface.projectId === "string" &&

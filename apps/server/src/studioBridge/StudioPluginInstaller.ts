@@ -237,54 +237,55 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
-  const install: StudioPluginInstaller["Service"]["install"] = (input) =>
-    Effect.gen(function* () {
-      const sources = yield* loadSources;
-      const pluginHash = pluginHashOf(sources);
-      const model = buildPluginModel(sources, configModule({ ...input, pluginHash }));
-      const folder = yield* pluginsFolder;
-      if (folder === undefined) return yield* new StudioPluginInstallError({ stage: "folder" });
-      yield* fs
-        .makeDirectory(folder, { recursive: true })
-        .pipe(Effect.mapError((cause) => new StudioPluginInstallError({ stage: "folder", cause })));
-      const target = path.join(folder, PLUGIN_FILE_NAME);
-      const current = yield* fs.readFileString(target).pipe(Effect.orElseSucceed(() => undefined));
-      if (current === model) {
-        yield* removeLegacyPlugins(folder);
-        return { path: target, changed: false, pluginHash };
-      }
+  const install: StudioPluginInstaller["Service"]["install"] = Effect.fn(
+    "StudioPluginInstaller.install",
+  )(function* (input) {
+    const sources = yield* loadSources;
+    const pluginHash = pluginHashOf(sources);
+    const model = buildPluginModel(sources, configModule({ ...input, pluginHash }));
+    const folder = yield* pluginsFolder;
+    if (folder === undefined) return yield* new StudioPluginInstallError({ stage: "folder" });
+    yield* fs
+      .makeDirectory(folder, { recursive: true })
+      .pipe(Effect.mapError((cause) => new StudioPluginInstallError({ stage: "folder", cause })));
+    const target = path.join(folder, PLUGIN_FILE_NAME);
+    const current = yield* fs.readFileString(target).pipe(Effect.orElseSucceed(() => undefined));
+    if (current === model) {
+      yield* removeLegacyPlugins(folder);
+      return { path: target, changed: false, pluginHash };
+    }
 
-      // A lock directory keeps two Harp servers from interleaving their writes.
-      const lock = `${target}.lock`;
-      const acquired = yield* fs.makeDirectory(lock).pipe(
-        Effect.as(true),
-        Effect.catch(() =>
-          fs.stat(lock).pipe(
-            Effect.flatMap((info) =>
-              Effect.gen(function* () {
-                const modified = Option.getOrUndefined(info.mtime)?.getTime() ?? 0;
-                if ((yield* Clock.currentTimeMillis) - modified < LOCK_STALE_MS) return false;
-                yield* fs.remove(lock, { recursive: true });
-                yield* fs.makeDirectory(lock);
-                return true;
-              }),
-            ),
-            Effect.orElseSucceed(() => false),
+    // A lock directory keeps two Harp servers from interleaving their writes.
+    const lock = `${target}.lock`;
+    const acquired = yield* fs.makeDirectory(lock).pipe(
+      Effect.as(true),
+      Effect.catch(() =>
+        fs.stat(lock).pipe(
+          Effect.flatMap((info) =>
+            Effect.gen(function* () {
+              const modified = Option.getOrUndefined(info.mtime)?.getTime() ?? 0;
+              if ((yield* Clock.currentTimeMillis) - modified < LOCK_STALE_MS) return false;
+              yield* fs.remove(lock, { recursive: true });
+              yield* fs.makeDirectory(lock);
+              return true;
+            }),
           ),
+          Effect.orElseSucceed(() => false),
         ),
-      );
-      if (!acquired) return yield* new StudioPluginInstallError({ stage: "lock" });
-      return yield* Effect.gen(function* () {
-        const temporary = `${target}.${String(process.pid)}.tmp`;
-        yield* fs.writeFileString(temporary, model);
-        yield* fs.rename(temporary, target);
-        yield* removeLegacyPlugins(folder);
-        return { path: target, changed: true, pluginHash };
-      }).pipe(
-        Effect.mapError((cause) => new StudioPluginInstallError({ stage: "write", cause })),
-        Effect.ensuring(fs.remove(lock, { recursive: true }).pipe(Effect.ignore)),
-      );
-    });
+      ),
+    );
+    if (!acquired) return yield* new StudioPluginInstallError({ stage: "lock" });
+    return yield* Effect.gen(function* () {
+      const temporary = `${target}.${String(process.pid)}.tmp`;
+      yield* fs.writeFileString(temporary, model);
+      yield* fs.rename(temporary, target);
+      yield* removeLegacyPlugins(folder);
+      return { path: target, changed: true, pluginHash };
+    }).pipe(
+      Effect.mapError((cause) => new StudioPluginInstallError({ stage: "write", cause })),
+      Effect.ensuring(fs.remove(lock, { recursive: true }).pipe(Effect.ignore)),
+    );
+  });
 
   const uninstall = Effect.gen(function* () {
     const folder = yield* pluginsFolder;

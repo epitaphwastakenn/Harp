@@ -16,7 +16,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { cast } from "effect/Function";
+import { cast, pipe } from "effect/Function";
 import {
   HttpClient,
   HttpClientResponse,
@@ -179,8 +179,11 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     if (bytes === null) {
       return HttpServerResponse.text("MCP app is too large to preview.", { status: 413 });
     }
-    const body = new TextEncoder().encode(
-      injectMcpAppCookieBootstrap(injectMcpAppThemeBootstrap(new TextDecoder().decode(bytes))),
+    const body = pipe(
+      new TextDecoder().decode(bytes),
+      injectMcpAppThemeBootstrap,
+      injectMcpAppCookieBootstrap,
+      (html) => new TextEncoder().encode(html),
     );
     headers["Content-Length"] = String(body.byteLength);
     return method === "HEAD"
@@ -386,7 +389,12 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_P
 const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
   const queryIndex = request.url.indexOf("?");
   const path = queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
-  return UNTRACED_REQUEST_PATHS.has(path);
+  // Signed URLs carry bearer tokens in the path, so they never reach a trace.
+  return (
+    UNTRACED_REQUEST_PATHS.has(path) ||
+    path.startsWith(`${ASSET_ROUTE_PREFIX}/`) ||
+    path.startsWith(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`)
+  );
 });
 
 export const withUntracedRequests = Layer.provide(layerUntracedRequests);
