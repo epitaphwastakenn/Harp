@@ -10,6 +10,29 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.19 · 2026-11-03
+
+> Harp catches up with more than 1,300 changes from T3 Code: a faster app, security fixes and a long list of bug fixes.
+
+### Improved
+
+- **Faster sidebar and startup** — The sidebar loads about three times faster, and thread counts at startup come back much sooner.
+- **Lighter background work** — An idle Harp runs far fewer background queries, and busy threads stop re-reading subagents that already finished.
+- **Smaller thread updates** — Large checkpoints reach the app up to 75 times smaller, and streaming replies no longer redraw the composer, sidebar rows or the git panel.
+- **Luau in diffs** — Lua and Luau files get syntax highlighting in diffs.
+- **Electron 44.10.0** — The desktop app moves to Electron 44.10.0, which carries a Node.js security fix.
+- **Claude default model** — New Claude threads start on Opus 5.5.
+
+### Fixed
+
+- **Stop always stops** — Stop now always ends the turn, and an agent that ignores it can be force-stopped.
+- **Questions after a restart** — Questions an agent asked stay answerable after Harp restarts.
+- **Claude tools on resume** — A resumed Claude turn retries when its Harp tools fail to register.
+- **Codex capacity errors** — Codex retries when the service reports it has no capacity.
+- **Large previews** — Very large preview events no longer take down the app.
+- **Slow first start** — Harp waits up to three minutes for a large database to open before it shows the recovery screen.
+- **Security** — Agents can no longer read Harp's own secrets or databases through file tools, connection tickets stay out of traces, the preview browser is updated, and Antigravity can no longer write outside the workspace.
+
 ## 2.17.18 · 2026-11-02
 
 > A new Harp panel inside Roblox Studio: send prompts to your agent and attach any instance, without leaving Studio.
