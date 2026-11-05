@@ -13,6 +13,7 @@ const signals = (overrides: Partial<RobloxProjectSignals> = {}): RobloxProjectSi
   allProjects: false,
   hasGameIcon: false,
   containerFolder: false,
+  scratchFolder: false,
   folderNames: ["website"],
   title: "website",
   listing: { root: ["package.json", "src"], nested: [] },
@@ -96,6 +97,19 @@ describe("decideRobloxProject", () => {
       decideRobloxProject(signals({ containerFolder: true, listing, placeNames: ["match"] }))
         .applies,
     ).toBe(false);
+  });
+
+  it("gives No project threads Studio only while a place is open", () => {
+    const scratch = signals({
+      scratchFolder: true,
+      listing: { root: ["2026-11-02-demo"], nested: ["default.project.json"] },
+    });
+    expect(decideRobloxProject(scratch)).toEqual({ applies: false, reason: "no-signal" });
+    expect(decideRobloxProject({ ...scratch, placeNames: ["match"] })).toEqual({
+      applies: true,
+      reason: "studio-open",
+      detail: "match",
+    });
   });
 
   it("still honours a game icon on a home-style folder", () => {

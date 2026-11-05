@@ -286,6 +286,52 @@ describe("SealTurnInput", () => {
     }),
   );
 
+  it.effect("does not remember Studio for the No project folder", () =>
+    Effect.gen(function* () {
+      const updateSettings = vi.fn(() => Effect.succeed({} as never));
+      const layer = SealTurnInput.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ServerSettings.ServerSettingsService)({
+              getSettings: Effect.succeed({
+                sealsInstructions: "",
+                imageViewerEnabled: false,
+                projectSettingsOverrides: {},
+              } as never),
+              updateSettings,
+            }),
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
+              getInstance: () => Effect.succeed(undefined),
+            }),
+            Layer.mock(TextGeneration.TextGeneration)({}),
+            Layer.succeed(RobloxStudioConfig, {
+              ...RobloxStudioConfig.defaultValue(),
+              detect: () =>
+                Effect.succeed({ applies: true, reason: "studio-open", detail: "match" }),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* SealTurnInput.SealTurnInputV2;
+        yield* service.prepare({
+          cwd: "/scratch/chat",
+          workspaceRoot: "/scratch",
+          project: {
+            id: ProjectId.make("scratch"),
+            title: "No project",
+            workspaceRoot: "/scratch",
+          },
+          modelSelection: mainSelection,
+          text: "build a tower",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(layer));
+      expect(updateSettings).not.toHaveBeenCalled();
+    }),
+  );
+
   it.effect("gives a provider conversation the Studio instructions once, when it starts", () =>
     Effect.gen(function* () {
       const layer = SealTurnInput.layer.pipe(

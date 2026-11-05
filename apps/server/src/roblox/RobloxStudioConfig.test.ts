@@ -169,6 +169,22 @@ describe("a project's Roblox tools and instructions", () => {
     }).pipe(Effect.scoped, Effect.provide(configLayer)),
   );
 
+  it.effect("follows Studio in the No project folder", () =>
+    Effect.gen(function* () {
+      const roblox = yield* RobloxStudioConfig;
+      const config = yield* ServerConfig.ServerConfig;
+      const path = yield* Path.Path;
+      const current = settings();
+      const target = (places: ReadonlyArray<{ placeName: string }>) =>
+        robloxProjectTarget(current, project(path.resolve(config.baseDir, "scratch")), places);
+
+      expect((yield* roblox.hiddenServerIds(current, target([]))).has("studio")).toBe(true);
+      const open = target([{ placeName: "match" }]);
+      expect((yield* roblox.detect(current, open)).reason).toBe("studio-open");
+      expect((yield* roblox.hiddenServerIds(current, open)).has("studio")).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(configLayer)),
+  );
+
   it.effect("becomes a Roblox project when Studio connects to a blank folder", () =>
     Effect.gen(function* () {
       const roblox = yield* RobloxStudioConfig;

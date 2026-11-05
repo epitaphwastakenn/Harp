@@ -30,6 +30,8 @@ export function robloxProjectDescription(detection: RobloxProjectDetection): str
       return "The project's name points to Roblox, so threads get the Roblox tools and rules.";
     case "studio-place":
       return `${detection.detail ?? "A place"} is open in Roblox Studio, so threads get the Roblox tools and rules.`;
+    case "studio-open":
+      return "Threads here get the Roblox tools and rules while a place is open in Roblox Studio.";
     case "all-projects":
       return "Roblox Studio settings turn the Roblox tools on for all projects.";
     case "user-choice":

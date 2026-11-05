@@ -27,6 +27,7 @@ export interface RobloxProjectSignals {
   readonly allProjects: boolean;
   readonly hasGameIcon: boolean;
   readonly containerFolder: boolean;
+  readonly scratchFolder: boolean;
   readonly folderNames: ReadonlyArray<string>;
   readonly title: string | undefined;
   readonly listing: RobloxFolderListing;
@@ -61,6 +62,12 @@ export const decideRobloxProject = (signals: RobloxProjectSignals): RobloxProjec
   }
   if (signals.allProjects) return { applies: true, reason: "all-projects" };
   if (signals.hasGameIcon) return { applies: true, reason: "game-icon" };
+  if (signals.scratchFolder) {
+    const open = signals.placeNames[0];
+    return open === undefined
+      ? { applies: false, reason: "no-signal" }
+      : { applies: true, reason: "studio-open", detail: open };
+  }
   if (signals.containerFolder) return { applies: false, reason: "no-signal" };
 
   const file = firstRobloxFile(signals.listing);

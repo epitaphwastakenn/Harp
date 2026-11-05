@@ -371,16 +371,16 @@ const make = Effect.gen(function* () {
   });
 
   const containerFolders = new Set(
-    [
-      home,
-      ...["Documents", "Desktop", "Downloads"].map((folder) => path.join(home, folder)),
-      path.resolve(config.baseDir, "scratch"),
-    ].map((folder) => path.resolve(folder).toLowerCase()),
+    [home, ...["Documents", "Desktop", "Downloads"].map((folder) => path.join(home, folder))].map(
+      (folder) => path.resolve(folder).toLowerCase(),
+    ),
   );
   const isContainerFolder = (root: string) => {
     const resolved = path.resolve(root);
     return containerFolders.has(resolved.toLowerCase()) || path.dirname(resolved) === resolved;
   };
+
+  const scratchRoot = path.resolve(config.baseDir, "scratch").toLowerCase();
 
   const detect: RobloxStudioConfigShape["detect"] = Effect.fn("RobloxStudioConfig.detect")(
     function* (settings, target) {
@@ -388,8 +388,9 @@ const make = Effect.gen(function* () {
       const root = target.workspaceRoot;
       const mode = target.mode ?? "auto";
       const allProjects = settings.robloxStudio.scope === "all-projects";
+      const scratchFolder = root !== undefined && path.resolve(root).toLowerCase() === scratchRoot;
       const listing =
-        root === undefined || mode !== "auto" || allProjects
+        root === undefined || mode !== "auto" || allProjects || scratchFolder
           ? { root: [], nested: [] }
           : yield* listFolder(root);
       return decideRobloxProject({
@@ -397,6 +398,7 @@ const make = Effect.gen(function* () {
         allProjects,
         hasGameIcon: target.projectIcon?.kind === "roblox-game",
         containerFolder: root === undefined || isContainerFolder(root),
+        scratchFolder,
         folderNames:
           root === undefined
             ? []

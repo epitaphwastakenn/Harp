@@ -49,9 +49,10 @@ nothing for them and Harp never has to ask. A project counts as Roblox when any 
 - A place open in Studio has the project's name, or the folder is nearly empty while Studio is
   connected. Harp remembers this, so the project stays a Roblox project after Studio closes.
 
-Loose files in your home, Documents, Desktop or Downloads folder don't count. If Harp guessed wrong,
-change **Roblox game** on the Project settings page, in either direction. **All projects** in Roblox
-Studio settings gives the tools to every thread, except projects set to **Not a Roblox game**.
+**No project** threads get them only while a place is open in Studio. Loose files in your home,
+Documents, Desktop or Downloads folder don't count. If Harp guessed wrong, change **Roblox game** on
+the Project settings page, in either direction. **All projects** in Roblox Studio settings gives the
+tools to every thread, except projects set to **Not a Roblox game**.
 
 ## What agents can do
 

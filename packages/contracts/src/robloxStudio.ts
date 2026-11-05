@@ -54,6 +54,7 @@ export const RobloxProjectDetection = Schema.Struct({
     "project-files",
     "folder-name",
     "studio-place",
+    "studio-open",
     "no-signal",
   ]),
   detail: Schema.optionalKey(Schema.String),
