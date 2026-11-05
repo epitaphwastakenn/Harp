@@ -29,7 +29,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadMessageIntake from "../orchestration-v2/ThreadMessageIntake.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
-import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
+import { RobloxStudioConfig, robloxProjectTarget } from "../roblox/RobloxStudioConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 
@@ -159,9 +159,10 @@ const make = Effect.gen(function* () {
     const projectShells = yield* projects
       .listShells()
       .pipe(Effect.mapError(internal("Could not list projects")));
+    const peers = yield* bridge.peers;
     const robloxProjects = new Map<string, string>();
     for (const project of projectShells) {
-      if (yield* roblox.appliesTo(current, project.workspaceRoot)) {
+      if (yield* roblox.appliesTo(current, robloxProjectTarget(current, project, peers))) {
         robloxProjects.set(project.id, project.title);
       }
     }

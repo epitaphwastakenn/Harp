@@ -1222,6 +1222,7 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
     const globalMcpManager = yield* GlobalMcpManager.GlobalMcpManager;
     const mcpToolVisibility = yield* McpToolVisibility;
     const robloxStudioStatus = yield* RobloxStudioStatus.RobloxStudioStatusService;
+    const robloxProjects = yield* ProjectService.ProjectService;
     const studioBridge = yield* StudioBridge.StudioBridge;
     const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
     return ServerSealCodeWsRpcGroup.of({
@@ -1250,6 +1251,14 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
             ),
       [WS_METHODS.serverReconnectMcp]: ({ id }) => globalMcpManager.reconnectServer(id),
       [WS_METHODS.serverGetRobloxStudioStatus]: (_input) => robloxStudioStatus.get,
+      [WS_METHODS.serverDetectRobloxProject]: Effect.fn("ws.detectRobloxProject")(function* ({
+        projectId,
+      }) {
+        const project = yield* robloxProjects.getById(projectId).pipe(Effect.orDie);
+        return Option.isNone(project)
+          ? ({ applies: false, reason: "no-signal" } as const)
+          : yield* robloxStudioStatus.detectProject(project.value);
+      }),
       [WS_METHODS.voiceTranscribe]: (input) => voiceTranscription.transcribe(input),
       [WS_METHODS.subscribeRobloxStudioAlerts]: (_input) => studioBridge.alerts,
       [WS_METHODS.subscribeMcpStatus]: (_input) =>

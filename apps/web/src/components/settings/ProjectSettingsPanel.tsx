@@ -27,6 +27,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environmen
 import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectRobloxSetting } from "./ProjectRobloxSetting";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -467,6 +468,10 @@ function ProjectDetail({
                 }}
               />
             }
+          />
+          <ProjectRobloxSetting
+            environmentId={representative.environmentId}
+            projectId={representative.id}
           />
           <SettingsRow
             title="Project icon"

@@ -40,10 +40,18 @@ These switches are enforced in Studio and in Harp.
 
 ## Which threads get it
 
-Only threads in a Roblox project get the Studio tools and instructions, so other projects pay
-nothing for them. A Roblox project has a Rojo `*.project.json`, a place or model file, Roblox tooling
-such as `wally.toml` or `rokit.toml`, or an empty `.sealcode-roblox` file in its root. Choose
-**All projects** to give them to every thread.
+Only threads in a Roblox project get the Studio tools, rules and controls, so other projects pay
+nothing for them and Harp never has to ask. A project counts as Roblox when any of these is true:
+
+- The folder or one directly under it has a Rojo `*.project.json`, a place or model file, Roblox
+  tooling such as `wally.toml` or `rokit.toml`, or an empty `.sealcode-roblox` file.
+- The project has a Roblox game icon, or "Roblox" in its name.
+- A place open in Studio has the project's name, or the folder is nearly empty while Studio is
+  connected. Harp remembers this, so the project stays a Roblox project after Studio closes.
+
+Loose files in your home, Documents, Desktop or Downloads folder don't count. If Harp guessed wrong,
+change **Roblox game** on the Project settings page, in either direction. **All projects** in Roblox
+Studio settings gives the tools to every thread, except projects set to **Not a Roblox game**.
 
 ## What agents can do
 
@@ -68,14 +76,14 @@ Every tool call follows the thread's usual approval rules. Agents load Harp's Ro
 
 ## Limit what the agent does in a thread
 
-The **Agent** menu next to the composer, and **Studio places** in the thread details panel, set two
-limits for one thread:
+The place menu next to the composer and the same row in the thread details panel show which place
+the agent works in, and set two limits for one thread:
 
-- **Playtests:** switch off `Let the agent start playtests` and the agent cannot start a solo or
+- **Playtests:** switch them off and the agent cannot start a solo or
   multiplayer test. Stopping or ending a test that is already running still works, so a stuck test
   can be cleaned up. Running Luau that starts a playtest is refused too, but that check is a guard,
   not a sandbox: to rule it out completely, turn off running Luau in the Studio panel.
-- **Studio places:** switch off a place and the agent no longer sees it. It is left out of the
+- **Places:** untick a place and the agent no longer sees it. It is left out of the
   list of connected places, and a call that names it is refused with a message that says why.
   A place you turn off stays listed, dimmed, when it is not connected, so you can turn it back on.
 

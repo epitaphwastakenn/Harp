@@ -44,6 +44,22 @@ export const RobloxStudioAlert = Schema.Struct({
 });
 export type RobloxStudioAlert = typeof RobloxStudioAlert.Type;
 
+export const RobloxProjectDetection = Schema.Struct({
+  applies: Schema.Boolean,
+  reason: Schema.Literals([
+    "studio-off",
+    "user-choice",
+    "all-projects",
+    "game-icon",
+    "project-files",
+    "folder-name",
+    "studio-place",
+    "no-signal",
+  ]),
+  detail: Schema.optionalKey(Schema.String),
+});
+export type RobloxProjectDetection = typeof RobloxProjectDetection.Type;
+
 export const RobloxStudioStatus = Schema.Struct({
   mode: RobloxStudioMode,
   studioInstalled: Schema.Boolean,

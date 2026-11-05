@@ -1,4 +1,9 @@
-import type { RobloxStudioBridgeStatus, RobloxStudioStatus } from "@t3tools/contracts";
+import type {
+  Project,
+  RobloxProjectDetection,
+  RobloxStudioBridgeStatus,
+  RobloxStudioStatus,
+} from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,6 +19,7 @@ import {
   blenderMcpLaunchFor,
   MANAGED_SERVER_IDS,
   RobloxStudioConfig,
+  robloxProjectTarget,
 } from "./RobloxStudioConfig.ts";
 
 const VERSION_TIMEOUT = "10 seconds";
@@ -46,7 +52,10 @@ export const studioBridgeStatus = (
 
 export class RobloxStudioStatusService extends Context.Service<
   RobloxStudioStatusService,
-  { readonly get: Effect.Effect<RobloxStudioStatus> }
+  {
+    readonly get: Effect.Effect<RobloxStudioStatus>;
+    readonly detectProject: (project: Project) => Effect.Effect<RobloxProjectDetection>;
+  }
 >()("t3/roblox/RobloxStudioStatus/RobloxStudioStatusService") {}
 
 const make = Effect.gen(function* () {
@@ -85,6 +94,14 @@ const make = Effect.gen(function* () {
     const version = yield* blenderVersion(executable);
     versions.set(executable, { version, at: now });
     return version;
+  });
+
+  const detectProject: RobloxStudioStatusService["Service"]["detectProject"] = Effect.fn(
+    "RobloxStudioStatus.detectProject",
+  )(function* (project) {
+    const current = yield* settings.getSettings.pipe(Effect.orDie);
+    const places = yield* studioBridge.peers;
+    return yield* config.detect(current, robloxProjectTarget(current, project, places));
   });
 
   const get: RobloxStudioStatusService["Service"]["get"] = Effect.gen(function* () {
@@ -142,7 +159,7 @@ const make = Effect.gen(function* () {
     } satisfies RobloxStudioStatus;
   });
 
-  return RobloxStudioStatusService.of({ get });
+  return RobloxStudioStatusService.of({ get, detectProject });
 });
 
 export const layer = Layer.effect(RobloxStudioStatusService, make).pipe(

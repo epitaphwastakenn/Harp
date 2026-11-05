@@ -35,7 +35,7 @@ import {
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
 import { GlobalMcpStatus, GlobalMcpStatusUpdatedEvent, McpServerId } from "./mcp.ts";
-import { RobloxStudioAlert, RobloxStudioStatus } from "./robloxStudio.ts";
+import { RobloxProjectDetection, RobloxStudioAlert, RobloxStudioStatus } from "./robloxStudio.ts";
 import {
   ServerVoiceTranscriptionInput,
   ServerVoiceTranscriptionResult,
@@ -471,6 +471,7 @@ export const WS_METHODS = {
   serverGetMcpStatuses: "server.getMcpStatuses",
   serverReconnectMcp: "server.reconnectMcp",
   serverGetRobloxStudioStatus: "server.getRobloxStudioStatus",
+  serverDetectRobloxProject: "server.detectRobloxProject",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -1369,6 +1370,12 @@ export const WsServerGetRobloxStudioStatusRpc = Rpc.make(WS_METHODS.serverGetRob
   error: EnvironmentAuthorizationError,
 });
 
+export const WsServerDetectRobloxProjectRpc = Rpc.make(WS_METHODS.serverDetectRobloxProject, {
+  payload: Schema.Struct({ projectId: ProjectId }),
+  success: RobloxProjectDetection,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsSubscribeMcpStatusRpc = Rpc.make(WS_METHODS.subscribeMcpStatus, {
   payload: Schema.Struct({}),
   success: GlobalMcpStatusUpdatedEvent,
@@ -1900,6 +1907,7 @@ export const SealCodeWsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetProjectDiffIndexRpc,
   WsServerGetMcpStatusesRpc,
   WsServerGetRobloxStudioStatusRpc,
+  WsServerDetectRobloxProjectRpc,
   WsServerReconnectMcpRpc,
   WsSubscribeMcpStatusRpc,
   WsSubscribeRobloxStudioAlertsRpc,

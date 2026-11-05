@@ -1,12 +1,20 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { DEFAULT_SERVER_SETTINGS, type RobloxStudioSettings } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ProjectId, type RobloxStudioSettings } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
+import * as ServerConfig from "../config.ts";
 import {
   BLENDER_MCP_SERVER_ID,
   blenderExecutableFor,
-  isRobloxProjectListing,
+  layer as robloxStudioConfigLayer,
   managedServersFor,
   OFFICIAL_SERVER_ID,
+  RobloxStudioConfig,
+  robloxProjectTarget,
   STUDIO_BRIDGE_SERVER_ID,
   type RobloxStudioEnvironment,
 } from "./RobloxStudioConfig.ts";
@@ -101,18 +109,76 @@ describe("blenderExecutableFor", () => {
   });
 });
 
-describe("isRobloxProjectListing", () => {
-  it("recognizes Rojo projects, places, Roblox tooling and the .sealcode-roblox marker", () => {
-    for (const entry of [
-      "default.project.json",
-      "game.rbxl",
-      "Place.rbxlx",
-      "wally.toml",
-      "rokit.toml",
-      ".sealcode-roblox",
-    ]) {
-      expect(isRobloxProjectListing(["README.md", entry])).toBe(true);
-    }
-    expect(isRobloxProjectListing(["package.json", "tsconfig.json", "src"])).toBe(false);
+describe("a project's Roblox tools and instructions", () => {
+  const configLayer = robloxStudioConfigLayer.pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-roblox-config-" })),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const projectId = ProjectId.make("project-1");
+  const settings = (robloxProject?: "auto" | "roblox" | "other") => ({
+    ...DEFAULT_SERVER_SETTINGS,
+    ...withRoblox({ mode: "sealcode" }),
+    projectSettingsOverrides: robloxProject ? { [projectId]: { robloxProject } } : {},
   });
+  const project = (workspaceRoot: string) => ({ id: projectId, title: "Tools", workspaceRoot });
+
+  const folder = Effect.fn("test.folder")(function* (files: ReadonlyArray<string>) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-project-" });
+    yield* Effect.forEach(files, (file) => fs.writeFileString(path.join(root, file), ""));
+    return root;
+  });
+
+  it.effect("gates everything together for a Rojo project and a code project", () =>
+    Effect.gen(function* () {
+      const roblox = yield* RobloxStudioConfig;
+      const game = yield* folder(["default.project.json"]);
+      const site = yield* folder(["package.json"]);
+      const current = settings();
+      const gameTarget = robloxProjectTarget(current, project(game), []);
+      const siteTarget = robloxProjectTarget(current, project(site), []);
+
+      expect((yield* roblox.detect(current, gameTarget)).reason).toBe("project-files");
+      expect(yield* roblox.instructions(current, { ...gameTarget, cwd: game })).toContain(
+        "roblox-collaboration-mode",
+      );
+      expect((yield* roblox.hiddenServerIds(current, gameTarget)).has("studio")).toBe(false);
+
+      expect(yield* roblox.instructions(current, { ...siteTarget, cwd: site })).toBeUndefined();
+      expect((yield* roblox.hiddenServerIds(current, siteTarget)).has("studio")).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(configLayer)),
+  );
+
+  it.effect("turns a code project into a Roblox one by the project setting, and back", () =>
+    Effect.gen(function* () {
+      const roblox = yield* RobloxStudioConfig;
+      const site = yield* folder(["package.json"]);
+      const on = settings("roblox");
+      const off = settings("other");
+
+      expect(
+        (yield* roblox.hiddenServerIds(on, robloxProjectTarget(on, project(site), []))).size,
+      ).toBe(0);
+      expect(
+        yield* roblox.instructions(off, {
+          ...robloxProjectTarget(off, project(site), []),
+          cwd: site,
+        }),
+      ).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(configLayer)),
+  );
+
+  it.effect("becomes a Roblox project when Studio connects to a blank folder", () =>
+    Effect.gen(function* () {
+      const roblox = yield* RobloxStudioConfig;
+      const blank = yield* folder(["notes.md"]);
+      const current = settings();
+      const target = (places: ReadonlyArray<{ placeName: string }>) =>
+        robloxProjectTarget(current, project(blank), places);
+
+      expect(yield* roblox.appliesTo(current, target([]))).toBe(false);
+      expect(yield* roblox.appliesTo(current, target([{ placeName: "match" }]))).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(configLayer)),
+  );
 });

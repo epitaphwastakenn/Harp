@@ -725,6 +725,7 @@ export const layer: Layer.Layer<
         sealTurnInput.prepare({
           cwd: resolvedRuntimePolicy.cwd ?? project?.workspaceRoot ?? process.cwd(),
           workspaceRoot: project?.workspaceRoot,
+          project,
           providerThreadId: providerThread.id,
           freshConversation: providerThread.nativeThreadRef === null,
           modelSelection: run.modelSelection,

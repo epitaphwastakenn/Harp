@@ -1,4 +1,11 @@
-import type { GlobalMcpServer, RobloxStudioSettings, ServerSettings } from "@t3tools/contracts";
+import type {
+  GlobalMcpServer,
+  ProjectId,
+  RobloxProjectDetection,
+  RobloxProjectMode,
+  RobloxStudioSettings,
+  ServerSettings,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -12,6 +19,11 @@ import * as ServerConfig from "../config.ts";
 import { studioBridgeInstructions } from "../studioBridge/instructions.ts";
 import { loadStudioSkills, skillCatalog } from "../studioBridge/studioSkills.ts";
 import { DEFAULT_STUDIO_BRIDGE_PORT } from "../studioBridge/protocol.ts";
+import {
+  decideRobloxProject,
+  subfoldersToScan,
+  type RobloxFolderListing,
+} from "./robloxProjectDetection.ts";
 
 export const STUDIO_BRIDGE_SERVER_ID = "studio";
 export const OFFICIAL_SERVER_ID = "roblox-studio-official";
@@ -133,40 +145,59 @@ export const managedServersFor = (
   return servers;
 };
 
-const ROBLOX_PROJECT_FILE =
-  /^(?:.+\.project\.json|.+\.rbxlx?|.+\.rbxmx?|wally\.toml|aftman\.toml|rokit\.toml|foreman\.toml|selene\.toml|\.sealcode-roblox)$/i;
-
-/**
- * A workspace whose root holds a Rojo project, a place or model file, Roblox tooling, or the
- * `.sealcode-roblox` marker.
- */
-export const isRobloxProjectListing = (entries: ReadonlyArray<string>): boolean =>
-  entries.some((entry) => ROBLOX_PROJECT_FILE.test(entry));
-
 const PROJECT_DETECTION_TTL_MS = 30_000;
+
+export interface RobloxProjectTarget {
+  readonly workspaceRoot: string | undefined;
+  readonly title?: string | undefined;
+  readonly projectIcon?: { readonly kind: string } | null | undefined;
+  readonly mode?: RobloxProjectMode | undefined;
+  readonly placeNames?: ReadonlyArray<string> | undefined;
+}
+
+export const robloxProjectTarget = (
+  settings: Pick<ServerSettings, "projectSettingsOverrides">,
+  project: {
+    readonly id: ProjectId;
+    readonly title: string;
+    readonly workspaceRoot: string;
+    readonly projectIcon?: { readonly kind: string } | null | undefined;
+  },
+  places: ReadonlyArray<{ readonly placeName: string }>,
+): RobloxProjectTarget => ({
+  workspaceRoot: project.workspaceRoot,
+  title: project.title,
+  projectIcon: project.projectIcon,
+  mode: settings.projectSettingsOverrides[project.id]?.robloxProject,
+  placeNames: places.map((place) => place.placeName),
+});
 
 export interface RobloxStudioConfigShape {
   readonly environment: RobloxStudioEnvironment;
   readonly managedServers: (
     settings: Pick<ServerSettings, "robloxStudio">,
   ) => Readonly<Record<string, GlobalMcpServer>>;
-  /** Whether a thread rooted at this workspace gets the Roblox tools and instructions. */
+  readonly detect: (
+    settings: Pick<ServerSettings, "robloxStudio">,
+    target: RobloxProjectTarget,
+  ) => Effect.Effect<RobloxProjectDetection>;
+  /** Whether a thread of this project gets the Roblox tools and instructions. */
   readonly appliesTo: (
     settings: Pick<ServerSettings, "robloxStudio">,
-    workspaceRoot: string | undefined,
+    target: RobloxProjectTarget,
   ) => Effect.Effect<boolean>;
   /**
-   * Managed servers a thread rooted at this workspace must not see: outside Roblox projects
-   * their tools would only cost every conversation tokens. A user server of the same id stays.
+   * Managed servers a thread of this project must not see: outside Roblox projects their tools
+   * would only cost every conversation tokens. A user server of the same id stays.
    */
   readonly hiddenServerIds: (
     settings: Pick<ServerSettings, "robloxStudio" | "mcpServers">,
-    workspaceRoot: string | undefined,
+    target: RobloxProjectTarget,
   ) => Effect.Effect<ReadonlySet<string>>;
-  /** The Studio instructions for a turn in this workspace, or undefined when they do not apply. */
+  /** The Studio instructions for a turn in this project, or undefined when they do not apply. */
   readonly instructions: (
     settings: Pick<ServerSettings, "robloxStudio">,
-    input: { readonly workspaceRoot: string | undefined; readonly cwd: string },
+    target: RobloxProjectTarget & { readonly cwd: string },
   ) => Effect.Effect<string | undefined>;
 }
 
@@ -189,6 +220,7 @@ export const RobloxStudioConfig = Context.Reference<RobloxStudioConfigShape>(
     defaultValue: () => ({
       environment: disabledEnvironment,
       managedServers: () => ({}),
+      detect: () => Effect.succeed({ applies: false, reason: "studio-off" }),
       appliesTo: () => Effect.succeed(false),
       hiddenServerIds: () => Effect.succeed(new Set<string>()),
       // @effect-diagnostics-next-line effectSucceedWithVoid:off - No instructions is a value, not a void step.
@@ -320,41 +352,84 @@ const make = Effect.gen(function* () {
     detectedBlenderMcp,
   };
 
-  const detections = new Map<string, { readonly value: boolean; readonly at: number }>();
-  const isRobloxProject = Effect.fn("RobloxStudioConfig.isRobloxProject")(function* (root: string) {
-    const cached = detections.get(root);
+  const listings = new Map<string, { readonly value: RobloxFolderListing; readonly at: number }>();
+  const listFolder = Effect.fn("RobloxStudioConfig.listFolder")(function* (root: string) {
+    const cached = listings.get(root);
     const now = yield* Clock.currentTimeMillis;
     if (cached !== undefined && now - cached.at < PROJECT_DETECTION_TTL_MS) return cached.value;
-    const entries = yield* fs.readDirectory(root).pipe(Effect.orElseSucceed(() => []));
-    const value = isRobloxProjectListing(entries);
-    detections.set(root, { value, at: now });
-    if (detections.size > 256) detections.delete(detections.keys().next().value ?? root);
+    const read = (folder: string) => fs.readDirectory(folder).pipe(Effect.orElseSucceed(() => []));
+    const entries = yield* read(root);
+    const nested = yield* Effect.forEach(
+      subfoldersToScan(entries),
+      (entry) => read(path.join(root, entry)),
+      { concurrency: 8 },
+    );
+    const value = { root: entries, nested: nested.flat() };
+    listings.set(root, { value, at: now });
+    if (listings.size > 256) listings.delete(listings.keys().next().value ?? root);
     return value;
   });
 
-  const appliesTo: RobloxStudioConfigShape["appliesTo"] = (settings, workspaceRoot) => {
-    const roblox = settings.robloxStudio;
-    if (roblox.mode === "off") return Effect.succeed(false);
-    if (roblox.scope === "all-projects") return Effect.succeed(true);
-    return workspaceRoot === undefined ? Effect.succeed(false) : isRobloxProject(workspaceRoot);
+  const containerFolders = new Set(
+    [
+      home,
+      ...["Documents", "Desktop", "Downloads"].map((folder) => path.join(home, folder)),
+      path.resolve(config.baseDir, "scratch"),
+    ].map((folder) => path.resolve(folder).toLowerCase()),
+  );
+  const isContainerFolder = (root: string) => {
+    const resolved = path.resolve(root);
+    return containerFolders.has(resolved.toLowerCase()) || path.dirname(resolved) === resolved;
   };
+
+  const detect: RobloxStudioConfigShape["detect"] = Effect.fn("RobloxStudioConfig.detect")(
+    function* (settings, target) {
+      if (settings.robloxStudio.mode === "off") return { applies: false, reason: "studio-off" };
+      const root = target.workspaceRoot;
+      const mode = target.mode ?? "auto";
+      const allProjects = settings.robloxStudio.scope === "all-projects";
+      const listing =
+        root === undefined || mode !== "auto" || allProjects
+          ? { root: [], nested: [] }
+          : yield* listFolder(root);
+      return decideRobloxProject({
+        mode,
+        allProjects,
+        hasGameIcon: target.projectIcon?.kind === "roblox-game",
+        containerFolder: root === undefined || isContainerFolder(root),
+        folderNames:
+          root === undefined
+            ? []
+            : [path.basename(root), path.basename(path.dirname(root))].filter(
+                (name) => name.length > 0,
+              ),
+        title: target.title,
+        listing,
+        placeNames: target.placeNames ?? [],
+      });
+    },
+  );
+
+  const appliesTo: RobloxStudioConfigShape["appliesTo"] = (settings, target) =>
+    detect(settings, target).pipe(Effect.map((detection) => detection.applies));
 
   const hiddenServerIds: RobloxStudioConfigShape["hiddenServerIds"] = Effect.fn(
     "RobloxStudioConfig.hiddenServerIds",
-  )(function* (settings, workspaceRoot) {
+  )(function* (settings, target) {
     const managed = Object.keys(managedServersFor(settings, environment)).filter(
       (id) => settings.mcpServers[id] === undefined,
     );
     if (managed.length === 0) return new Set<string>();
-    return (yield* appliesTo(settings, workspaceRoot)) ? new Set<string>() : new Set(managed);
+    return (yield* appliesTo(settings, target)) ? new Set<string>() : new Set(managed);
   });
 
   const instructions: RobloxStudioConfigShape["instructions"] = Effect.fn(
     "RobloxStudioConfig.instructions",
-  )(function* (settings, input) {
+  )(function* (settings, target) {
     const roblox = settings.robloxStudio;
     if (roblox.mode !== "sealcode" || !roblox.instructions) return undefined;
-    if (!(yield* appliesTo(settings, input.workspaceRoot ?? input.cwd))) return undefined;
+    const workspaceRoot = target.workspaceRoot ?? target.cwd;
+    if (!(yield* appliesTo(settings, { ...target, workspaceRoot }))) return undefined;
     return studioBridgeInstructions({
       skillCatalog: studioSkillCatalog,
       autoPlaytest: roblox.autoPlaytest,
@@ -366,6 +441,7 @@ const make = Effect.gen(function* () {
   return {
     environment,
     managedServers: (settings) => managedServersFor(settings, environment),
+    detect,
     appliesTo,
     hiddenServerIds,
     instructions,

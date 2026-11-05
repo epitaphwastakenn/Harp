@@ -3,6 +3,8 @@ import { memo } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
   Menu,
+  MenuGroup,
+  MenuGroupLabel,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -81,7 +83,10 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         {props.agentControls ? (
           <>
             <MenuDivider />
-            <AgentControlsMenuContent {...props.agentControls} />
+            <MenuGroup>
+              <MenuGroupLabel>Roblox Studio</MenuGroupLabel>
+              <AgentControlsMenuContent {...props.agentControls} />
+            </MenuGroup>
           </>
         ) : null}
       </MenuPopup>

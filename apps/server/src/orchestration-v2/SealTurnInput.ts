@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   type ModelSelection,
   type OrchestrationV2StudioControls,
+  type ServerSettings as ServerSettingsContract,
 } from "@t3tools/contracts";
 import { modelHasVision } from "@t3tools/shared/model";
 import { isStudioPlaceExcluded } from "@t3tools/shared/studioControls";
@@ -35,11 +36,14 @@ export interface SealTurnInput {
   readonly frame: (text: string) => string;
 }
 
+type StudioTurnProject = Parameters<typeof RobloxStudioConfig.robloxProjectTarget>[1];
+
 export interface SealTurnInputShape {
   readonly prepare: (input: {
     readonly cwd: string;
     /** The project's root, which decides whether the thread is a Roblox project. */
     readonly workspaceRoot?: string | undefined;
+    readonly project?: StudioTurnProject | undefined;
     /** The provider conversation this turn joins, and whether it has no turns yet. */
     readonly providerThreadId?: string | undefined;
     readonly freshConversation?: boolean | undefined;
@@ -82,6 +86,24 @@ export const layer = Layer.effect(
     // The Studio instructions are long, so a provider conversation gets them once rather than on
     // every turn: when it starts, and once more after a server restart or a settings change.
     const studioDelivered = new Map<string, string>();
+
+    const rememberStudioProject = Effect.fn("SealTurnInput.rememberStudioProject")(function* (
+      current: ServerSettingsContract,
+      project: StudioTurnProject | undefined,
+      target: RobloxStudioConfig.RobloxProjectTarget,
+    ) {
+      if (project === undefined) return;
+      const detection = yield* roblox.detect(current, target);
+      if (detection.reason !== "studio-place") return;
+      const stored = current.projectSettingsOverrides[project.id];
+      yield* settings
+        .updateSettings({
+          projectSettingsOverrides: {
+            [project.id]: { ...stored, robloxProject: "roblox" },
+          },
+        })
+        .pipe(Effect.ignore);
+    });
 
     const lookupModel = Effect.fn("SealTurnInputV2.lookupModel")(function* (
       selection: ModelSelection,
@@ -159,10 +181,13 @@ export const layer = Layer.effect(
           text = withImageDescription(input.text, description);
           attachments = attachments.filter((attachment) => attachment.type !== "image");
         }
-        const studio = yield* roblox.instructions(current, {
-          workspaceRoot: input.workspaceRoot,
-          cwd: input.cwd,
-        });
+        const places = studioBridge._tag === "Some" ? yield* studioBridge.value.peers : [];
+        const target =
+          input.project === undefined
+            ? { workspaceRoot: input.workspaceRoot }
+            : RobloxStudioConfig.robloxProjectTarget(current, input.project, places);
+        yield* rememberStudioProject(current, input.project, target);
+        const studio = yield* roblox.instructions(current, { ...target, cwd: input.cwd });
         const conversation = input.providerThreadId;
         const sendStudio =
           studio !== undefined &&
@@ -179,7 +204,10 @@ export const layer = Layer.effect(
         const studioApplies =
           studioBridge._tag === "Some" &&
           current.robloxStudio.mode === "sealcode" &&
-          (yield* roblox.appliesTo(current, input.workspaceRoot ?? input.cwd));
+          (yield* roblox.appliesTo(current, {
+            ...target,
+            workspaceRoot: target.workspaceRoot ?? input.cwd,
+          }));
         const studioContext =
           studioBridge._tag === "Some" && studioApplies && current.robloxStudio.studioContext
             ? studioSelectionContext(

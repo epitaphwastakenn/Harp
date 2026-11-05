@@ -1,5 +1,5 @@
 import type { OrchestrationV2StudioControls, RobloxStudioPlace } from "@t3tools/contracts";
-import { excludedStudioPlaces } from "@t3tools/shared/studioControls";
+import { excludedStudioPlaces, isStudioRestricted } from "@t3tools/shared/studioControls";
 
 export interface StudioPlaceRow {
   readonly placeKey: string;
@@ -59,4 +59,35 @@ export function studioPlaceDetail(row: StudioPlaceRow): string | null {
   if (!row.included) return "Ignored by the agent";
   if (row.playtestRunning) return "Playtest running";
   return null;
+}
+
+export function studioPlaceTone(row: StudioPlaceRow) {
+  if (!row.connected) return "muted" as const;
+  return row.playtestRunning ? ("info" as const) : ("success" as const);
+}
+
+export interface StudioTargetSummary {
+  readonly label: string;
+  readonly extra: number;
+  readonly tone: "brand" | "info" | "muted" | "success";
+}
+
+export function studioTargetSummary(
+  rows: ReadonlyArray<StudioPlaceRow>,
+  controls: OrchestrationV2StudioControls | null | undefined,
+): StudioTargetSummary {
+  const working = rows.filter((row) => row.included && row.connected);
+  const lead = working.find((row) => row.playtestRunning) ?? working[0];
+  if (lead === undefined) {
+    return {
+      label: rows.length === 0 ? "No place open" : "No place selected",
+      extra: 0,
+      tone: "muted",
+    };
+  }
+  return {
+    label: lead.name,
+    extra: working.length - 1,
+    tone: lead.playtestRunning ? "info" : isStudioRestricted(controls) ? "brand" : "success",
+  };
 }

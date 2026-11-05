@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { studioPlaceChange, studioPlaceDetail, studioPlaceRows } from "./ThreadStudioPanel.logic";
+import {
+  studioPlaceChange,
+  studioPlaceDetail,
+  studioPlaceRows,
+  studioPlaceTone,
+  studioTargetSummary,
+} from "./ThreadStudioPanel.logic";
 
 const edit = (instanceId: string, placeName: string, placeKey = instanceId) => ({
   instanceId,
@@ -47,5 +53,66 @@ describe("studioPlaceRows", () => {
       excludePlaces: [{ placeKey: "place:1", placeName: "Lobby" }],
     });
     expect(studioPlaceChange(row!, true)).toEqual({ includePlaces: ["place:1"] });
+  });
+});
+
+const namedPlace = (name: string, role: string = "edit") => ({
+  instanceId: `id:${name}:${role}`,
+  placeKey: `place:${name}`,
+  role,
+  placeName: name,
+});
+
+describe("studioTargetSummary", () => {
+  it("names the first place and counts the others", () => {
+    const rows = studioPlaceRows(
+      [namedPlace("TD Testing"), namedPlace("Lobby"), namedPlace("match")],
+      undefined,
+    );
+    expect(studioTargetSummary(rows, undefined)).toEqual({
+      label: "Lobby",
+      extra: 2,
+      tone: "success",
+    });
+  });
+
+  it("leads with the place that has a playtest running", () => {
+    const rows = studioPlaceRows(
+      [namedPlace("Lobby"), namedPlace("match"), namedPlace("match", "server")],
+      {},
+    );
+    expect(studioTargetSummary(rows, undefined)).toEqual({
+      label: "match",
+      extra: 1,
+      tone: "info",
+    });
+  });
+
+  it("skips switched off places", () => {
+    const controls = { excludedPlaces: [{ placeKey: "place:Lobby", placeName: "Lobby" }] };
+    const rows = studioPlaceRows([namedPlace("Lobby"), namedPlace("match")], controls);
+    expect(studioTargetSummary(rows, controls)).toEqual({
+      label: "match",
+      extra: 0,
+      tone: "brand",
+    });
+  });
+
+  it("says so when the agent has no place to work in", () => {
+    expect(studioTargetSummary([], undefined)).toMatchObject({ label: "No place open", extra: 0 });
+    const controls = { excludedPlaces: [{ placeKey: "place:Lobby", placeName: "Lobby" }] };
+    const rows = studioPlaceRows([namedPlace("Lobby")], controls);
+    expect(studioTargetSummary(rows, controls)).toMatchObject({
+      label: "No place selected",
+      tone: "muted",
+    });
+  });
+
+  it("marks a place that is gone and keeps it switched off", () => {
+    const controls = { excludedPlaces: [{ placeKey: "place:Old", placeName: "Old" }] };
+    const [row] = studioPlaceRows([], controls);
+    expect(row).toMatchObject({ name: "Old", connected: false, included: false });
+    expect(studioPlaceTone(row!)).toBe("muted");
+    expect(studioPlaceChange(row!, true)).toEqual({ includePlaces: ["place:Old"] });
   });
 });

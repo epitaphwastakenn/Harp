@@ -169,10 +169,13 @@ const get = HttpRouter.add(
     const invocation = yield* McpInvocationContext.McpInvocationContext;
     if (invocation.thread === undefined) return forbidden;
     const manager = yield* GlobalMcpManager.GlobalMcpManager;
+    const visibility = yield* McpToolVisibility;
     return HttpServerResponse.stream(
       Stream.concat(
         Stream.make(new TextEncoder().encode(": connected\n\n")),
-        manager.streamChanges.pipe(Stream.map(() => encodeEvent(LIST_CHANGED_NOTIFICATION))),
+        Stream.merge(manager.streamChanges, visibility.changes).pipe(
+          Stream.map(() => encodeEvent(LIST_CHANGED_NOTIFICATION)),
+        ),
       ),
       {
         contentType: "text/event-stream",

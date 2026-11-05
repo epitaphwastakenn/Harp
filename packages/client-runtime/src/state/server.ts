@@ -1541,6 +1541,7 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:mcp-statuses",
       tag: WS_METHODS.serverGetMcpStatuses,
       staleTimeMs: 0,
+      refreshIntervalMs: 15_000,
     }),
     mcpStatusUpdates: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:mcp-status-updates",
@@ -1557,6 +1558,12 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetRobloxStudioStatus,
       staleTimeMs: 0,
       // Studio connects and disconnects on its own, so Settings follows it while open.
+      refreshIntervalMs: 5_000,
+    }),
+    robloxProjectDetection: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:roblox-project-detection",
+      tag: WS_METHODS.serverDetectRobloxProject,
+      staleTimeMs: 0,
       refreshIntervalMs: 5_000,
     }),
     reconnectMcp: createEnvironmentRpcCommand(runtime, {

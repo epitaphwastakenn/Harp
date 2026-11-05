@@ -10,6 +10,7 @@ import {
   type ModelSelection,
 } from "@t3tools/contracts";
 
+import { ProjectId } from "@t3tools/contracts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -237,6 +238,51 @@ describe("SealTurnInput", () => {
       });
       const error = yield* Effect.flip(prepare("look", [image]));
       expect(error.detail).toBe(`Codex CLI request timed out. ${SealTurnInput.IMAGE_VIEWER_HINT}`);
+    }),
+  );
+
+  it.effect("remembers a project that Studio claimed, so closing Studio does not undo it", () =>
+    Effect.gen(function* () {
+      const updateSettings = vi.fn(() => Effect.succeed({} as never));
+      const layer = SealTurnInput.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ServerSettings.ServerSettingsService)({
+              getSettings: Effect.succeed({
+                sealsInstructions: "",
+                imageViewerEnabled: false,
+                projectSettingsOverrides: {},
+              } as never),
+              updateSettings,
+            }),
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
+              getInstance: () => Effect.succeed(undefined),
+            }),
+            Layer.mock(TextGeneration.TextGeneration)({}),
+            Layer.succeed(RobloxStudioConfig, {
+              ...RobloxStudioConfig.defaultValue(),
+              detect: () =>
+                Effect.succeed({ applies: true, reason: "studio-place", detail: "match" }),
+            }),
+          ),
+        ),
+      );
+      const projectId = ProjectId.make("project-1");
+      yield* Effect.gen(function* () {
+        const service = yield* SealTurnInput.SealTurnInputV2;
+        yield* service.prepare({
+          cwd: "/notes",
+          workspaceRoot: "/notes",
+          project: { id: projectId, title: "Notes", workspaceRoot: "/notes" },
+          modelSelection: mainSelection,
+          text: "build a tower",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(layer));
+      expect(updateSettings).toHaveBeenCalledWith({
+        projectSettingsOverrides: { [projectId]: { robloxProject: "roblox" } },
+      });
     }),
   );
 

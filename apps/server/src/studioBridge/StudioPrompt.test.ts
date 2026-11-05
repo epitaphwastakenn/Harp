@@ -140,7 +140,7 @@ const layerFor = (harness: Harness) => {
   });
   const roblox = Layer.succeed(RobloxStudioConfig, {
     ...RobloxStudioConfig.defaultValue(),
-    appliesTo: (_settings, workspaceRoot) => Effect.succeed(workspaceRoot === "/games/obby"),
+    appliesTo: (_settings, target) => Effect.succeed(target.workspaceRoot === "/games/obby"),
   });
   return StudioPrompt.layer.pipe(
     Layer.provideMerge(StudioBridge.layer),

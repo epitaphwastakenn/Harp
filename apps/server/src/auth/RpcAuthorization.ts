@@ -90,6 +90,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetMcpStatuses]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReconnectMcp]: AuthSettingsWriteScope,
   [WS_METHODS.serverGetRobloxStudioStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverDetectRobloxProject]: AuthOrchestrationReadScope,
   [WS_METHODS.serverSearchAcpRegistry]: AuthOrchestrationReadScope,
   [WS_METHODS.serverPrepareAcpRegistryAgent]: AuthProvidersManageScope,
   [WS_METHODS.serverUninstallAcpRegistryManagedBinary]: AuthProvidersManageScope,

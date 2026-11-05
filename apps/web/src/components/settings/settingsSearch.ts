@@ -192,6 +192,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
   },
   {
+    id: "project-roblox-game",
+    title: "Roblox game",
+    to: "/settings/projects",
+    scope: "project",
+    searchTerms: ["roblox studio project detection tools rules not a game override"],
+  },
+  {
     id: "project-defaults",
     title: "Project defaults and overrides",
     to: "/settings/general",

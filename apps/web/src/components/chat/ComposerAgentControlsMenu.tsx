@@ -1,21 +1,22 @@
 import type { EnvironmentId, OrchestrationV2StudioControls } from "@t3tools/contracts";
-import { isStudioRestricted, type StudioControlsChange } from "@t3tools/shared/studioControls";
-import { SlidersHorizontalIcon } from "lucide-react";
+import { playtestsAllowed, type StudioControlsChange } from "@t3tools/shared/studioControls";
+import { useLocation } from "@tanstack/react-router";
+import { PlayIcon } from "lucide-react";
 import { memo } from "react";
 
 import { useStudioPlaces } from "../../hooks/useThreadStudioControls";
-import {
-  Menu,
-  MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuPopup,
-  MenuTrigger,
-} from "../ui/menu";
-import { agentControlGroups } from "./ComposerAgentControlsMenu.logic";
-import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
-import { useComposerMenuProps } from "./composerEventScope";
+import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { StatusDot } from "../ui/status-dot";
+import { ComposerControl } from "./ComposerControl";
+import { useComposerMenuProps } from "./composerEventScope";
+import {
+  studioPlaceChange,
+  studioPlaceDetail,
+  studioPlaceRows,
+  studioPlaceTone,
+  studioTargetSummary,
+  type StudioTargetSummary,
+} from "./ThreadStudioPanel.logic";
 import { useComposerMenuState } from "./useComposerMenuState";
 
 export interface AgentControlsBinding {
@@ -24,39 +25,85 @@ export interface AgentControlsBinding {
   readonly onChange: (change: StudioControlsChange) => void;
 }
 
-export function AgentControlsMenuContent(props: AgentControlsBinding) {
-  const places = useStudioPlaces(props.environmentId, true);
-  const groups = agentControlGroups({
-    controls: props.controls,
-    places,
-    onChange: props.onChange,
+export function useStudioMenuState(hidden = false) {
+  const settingsOpen = useLocation({
+    select: (location) => location.pathname.startsWith("/settings"),
   });
+  return useComposerMenuState(hidden || settingsOpen);
+}
+
+export function StudioTargetLabel(props: {
+  readonly summary: StudioTargetSummary;
+  readonly composer?: boolean;
+}) {
   return (
     <>
-      {groups.map((group) => (
-        <MenuGroup key={group.id}>
-          <MenuGroupLabel>{group.label}</MenuGroupLabel>
-          {group.items.map((item) => (
-            <MenuCheckboxItem
-              key={item.id}
-              variant="switch"
-              checked={item.checked}
-              onCheckedChange={item.onCheckedChange}
-            >
+      <StatusDot size="md" tone={props.summary.tone} />
+      <span
+        {...(props.composer ? { "data-composer-control-label": true } : {})}
+        className={props.composer ? "max-w-32 truncate" : "min-w-0 truncate"}
+      >
+        {props.summary.label}
+      </span>
+      {props.summary.extra > 0 ? (
+        <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">
+          +{props.summary.extra}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+export function AgentControlsMenuContent(props: AgentControlsBinding) {
+  const places = useStudioPlaces(props.environmentId, true);
+  const rows = studioPlaceRows(places, props.controls);
+  const allowed = playtestsAllowed(props.controls);
+  return (
+    <div className="flex w-64 flex-col gap-1">
+      {rows.map((row) => {
+        const detail = studioPlaceDetail(row);
+        return (
+          <MenuCheckboxItem
+            key={row.placeKey}
+            variant="trailing"
+            checked={row.included}
+            onCheckedChange={(included) => props.onChange(studioPlaceChange(row, included))}
+          >
+            <span className="flex min-w-0 items-center gap-2.5">
+              <StatusDot size="md" tone={studioPlaceTone(row)} />
               <span className="flex min-w-0 flex-col">
-                <span className="truncate">{item.label}</span>
-                {item.detail ? (
-                  <span className="truncate text-xs text-muted-foreground">{item.detail}</span>
+                <span className="truncate">{row.name}</span>
+                {detail ? (
+                  <span className="truncate text-xs text-muted-foreground">{detail}</span>
                 ) : null}
               </span>
-            </MenuCheckboxItem>
-          ))}
-          {group.items.length === 0 && group.emptyHint ? (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">{group.emptyHint}</p>
-          ) : null}
-        </MenuGroup>
-      ))}
-    </>
+            </span>
+          </MenuCheckboxItem>
+        );
+      })}
+      {rows.length === 0 ? (
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          Open a place in Roblox Studio and it shows up here.
+        </p>
+      ) : null}
+      <div className="rounded-lg bg-foreground/6 p-0.5">
+        <MenuCheckboxItem
+          variant="switch"
+          checked={allowed}
+          onCheckedChange={(allowPlaytests) => props.onChange({ allowPlaytests })}
+        >
+          <span className="flex min-w-0 items-center gap-2.5">
+            <PlayIcon aria-hidden className="-mx-0.75 size-3.5 text-icon-muted" />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">Playtests</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {allowed ? "The agent can start them" : "The agent can't start one"}
+              </span>
+            </span>
+          </span>
+        </MenuCheckboxItem>
+      </div>
+    </div>
   );
 }
 
@@ -68,26 +115,18 @@ export const ComposerAgentControlsMenu = memo(function ComposerAgentControlsMenu
 ) {
   const size = props.size ?? "sm";
   const composerFloatingLayerProps = useComposerMenuProps();
-  const [open, setOpen] = useComposerMenuState(props.hidden);
-  const restricted = isStudioRestricted(props.controls);
+  const [open, setOpen] = useStudioMenuState(props.hidden);
+  const places = useStudioPlaces(props.environmentId, true);
+  const summary = studioTargetSummary(studioPlaceRows(places, props.controls), props.controls);
 
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger
         render={
-          <ComposerControl
-            size={size}
-            className="shrink-0"
-            aria-label="Agent controls"
-            data-agent-controls-restricted={restricted ? "true" : undefined}
-          />
+          <ComposerControl size={size} className="shrink-0" aria-label="Roblox Studio controls" />
         }
       >
-        <ComposerControlIcon icon={SlidersHorizontalIcon} size={size} />
-        <span data-composer-control-label className="sr-only sm:not-sr-only">
-          Agent
-        </span>
-        {restricted ? <StatusDot tone="brand" /> : null}
+        <StudioTargetLabel summary={summary} composer />
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
         <AgentControlsMenuContent

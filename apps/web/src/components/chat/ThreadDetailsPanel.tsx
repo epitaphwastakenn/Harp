@@ -189,6 +189,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             </ThreadDetailsSection>
           ) : null}
 
+          {density !== "essential" && !props.draftId && props.session.receivesMcpServers ? (
+            <ThreadStudioPanel environmentId={props.environmentId} threadId={props.threadId} />
+          ) : null}
+
           {density !== "essential" ? (
             <ThreadSessionPanel
               environmentId={props.environmentId}
@@ -197,10 +201,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               showMcpServers={!props.draftId}
               compact={density !== "full"}
             />
-          ) : null}
-
-          {density === "full" && !props.draftId && props.session.receivesMcpServers ? (
-            <ThreadStudioPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
 
           {density === "full" && !props.draftId ? (
