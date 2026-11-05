@@ -286,3 +286,19 @@ describe("source control host search items", () => {
     );
   });
 });
+
+describe("settings pages", () => {
+  const routes = import.meta.glob("../../routes/_chat.settings.*.tsx", {
+    eager: true,
+    import: "default",
+    query: "?raw",
+  });
+
+  it.each([...new Set(SETTINGS_SEARCH_ITEMS.map((item) => item.to))])(
+    "%s renders a page",
+    (path) => {
+      const file = `../../routes/_chat.settings.${path.replace("/settings/", "")}.tsx`;
+      expect(String(routes[file])).toMatch(/component:|redirect[(]/);
+    },
+  );
+});
