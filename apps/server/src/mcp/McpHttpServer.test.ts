@@ -928,6 +928,16 @@ it.effect("serves the global MCP gateway to thread credentials only", () =>
       // Handler requirements resolve from outside `serve`, not from the app layer.
       yield* HttpRouter.serve(layerGateway, { disableListenLog: true, disableLogger: true }).pipe(
         Layer.provide(
+          Layer.succeed(McpToolVisibility, {
+            hiddenServers: () => Effect.succeed(new Set<string>()),
+            hiddenServersForProject: () => Effect.succeed(new Set<string>()),
+            changes: Stream.empty,
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(McpCallPolicy, { forCall: () => Effect.succeed({ _tag: "Allow" }) }),
+        ),
+        Layer.provide(
           Layer.mock(GlobalMcpManager.GlobalMcpManager)({
             getCatalog: Effect.succeed(catalog),
             callTool: (input) =>
@@ -1168,6 +1178,7 @@ it.effect(
             Layer.succeed(McpToolVisibility, {
               hiddenServers: () => Effect.succeed(new Set(["roblox-studio-official"])),
               hiddenServersForProject: () => Effect.succeed(new Set<string>()),
+              changes: Stream.empty,
             }),
           ),
           Layer.provide(

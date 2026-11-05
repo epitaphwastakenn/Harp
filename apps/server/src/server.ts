@@ -689,10 +689,9 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAttachmentUploadRoute,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
-    Ws.layer.pipe(Layer.provide(RobloxToolVisibility.layer)),
+    Ws.layer,
   ),
   McpHttpServer.layer.pipe(
-    Layer.provide(RobloxToolVisibility.layer),
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
@@ -888,6 +887,7 @@ const layerMakeServer = Layer.unwrap(
     }).pipe(
       withUntracedRequests,
       Layer.tap(() => Deferred.succeed(routesReady, undefined).pipe(Effect.orDie)),
+      Layer.provide(RobloxToolVisibility.layer),
     );
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,

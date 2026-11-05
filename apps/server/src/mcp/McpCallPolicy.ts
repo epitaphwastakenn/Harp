@@ -14,6 +14,6 @@ export interface McpCallPolicyShape {
   }) => Effect.Effect<McpCallPolicyResult>;
 }
 
-export const McpCallPolicy = Context.Reference<McpCallPolicyShape>("t3/mcp/McpCallPolicy", {
-  defaultValue: () => ({ forCall: () => Effect.succeed({ _tag: "Allow" }) }),
-});
+export class McpCallPolicy extends Context.Service<McpCallPolicy, McpCallPolicyShape>()(
+  "t3/mcp/McpCallPolicy",
+) {}
