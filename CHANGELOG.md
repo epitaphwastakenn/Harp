@@ -10,6 +10,25 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.20 · 2026-11-05
+
+> Harp now tells Roblox games from everything else, so other projects stop carrying Studio's tools and rules.
+
+### New
+
+- **Roblox game detection** — Harp works out on its own whether a project is a Roblox game, from its files, game icon, name and the places open in Studio. Other projects skip the Studio tools and rules, and there is nothing to answer.
+- **Roblox game setting** — A wrong guess can be fixed on the Project settings page, in either direction.
+- **Place menu** — The thread panel and the composer now show which place the agent works in, with the same menu for places and playtests.
+
+### Improved
+
+- **No project chats** — They get the Studio tools only while a place is open in Studio.
+
+### Fixed
+
+- **Studio limits on a thread** — Turning off playtests or a place for a thread now reaches the agent's tools.
+- **Integrations and Storage settings** — Both tabs show their settings again instead of an empty page.
+
 ## 2.17.19 · 2026-11-03
 
 > Harp catches up with more than 1,300 changes from T3 Code: a faster app, security fixes and a long list of bug fixes.
