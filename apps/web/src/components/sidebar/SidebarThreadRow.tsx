@@ -28,6 +28,9 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  FolderInputIcon,
+  FolderOutputIcon,
+  FolderPlusIcon,
   CircleDotDashedIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
@@ -451,6 +454,24 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
       Wake
     </>
   ),
+  "folder-new": (
+    <>
+      <FolderPlusIcon aria-hidden className="size-3" />
+      New folder
+    </>
+  ),
+  "folder-join": (
+    <>
+      <FolderInputIcon aria-hidden className="size-3" />
+      Move in
+    </>
+  ),
+  "folder-leave": (
+    <>
+      <FolderOutputIcon aria-hidden className="size-3" />
+      Move out
+    </>
+  ),
 };
 
 type SidebarThreadRowProps = {
@@ -459,6 +480,9 @@ type SidebarThreadRowProps = {
   // Folder-grouped inbox rows use a one-line presentation so the sidebar stays
   // dense without changing the full pinned/working card treatment.
   compact: boolean;
+  folderTray: "middle" | "last" | null;
+  folderTrayIndented: boolean;
+  isFolderDropTarget: boolean;
   navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
@@ -852,7 +876,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
     isFileDragOver && "ring-1 ring-inset ring-brand/60",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
-    props.sortable?.isDragging && "dropdown-glass text-sidebar-foreground opacity-100",
+    props.sortable?.isDragging &&
+      "dropdown-glass ![background:var(--sidebar)] text-sidebar-foreground opacity-100",
   );
   const sortable = props.sortable;
   const sortableRootProps = sortable
@@ -1065,13 +1090,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     return (
       <li
         data-thread-item={threadKey}
+        data-tray={props.folderTray ?? undefined}
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
         className={cn(
           "list-none [content-visibility:auto]",
-          props.compact
-            ? "-mb-px ml-3 border-l border-sidebar-border/50 pb-px pl-1 [contain-intrinsic-size:auto_32px]"
-            : "[contain-intrinsic-size:auto_36px]",
+          props.folderTray !== null
+            ? cn(
+                "-mb-px pb-px [contain-intrinsic-size:auto_32px]",
+                props.folderTrayIndented ? "ml-3" : "mx-0.5",
+                !sortable?.isDragging && "sidebar-folder-tray",
+              )
+            : props.compact
+              ? "-mb-px ml-3 border-l border-sidebar-border/50 pb-px pl-1 [contain-intrinsic-size:auto_32px]"
+              : "[contain-intrinsic-size:auto_36px]",
+          props.isFolderDropTarget && "rounded-lg bg-brand/20",
           sortable?.isDragging && "relative z-20",
         )}
       >
@@ -1092,6 +1125,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   rowSurfaceClassName,
                   "flex items-center gap-2 px-(--sidebar-row-content-inset)",
                   props.compact ? "h-8" : "h-9",
+                  props.folderTray !== null && "pl-8",
                 )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
@@ -1195,6 +1229,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       className={cn(
         "list-none py-0.5 [content-visibility:auto]",
         metaLineEmpty ? "[contain-intrinsic-size:auto_58px]" : "[contain-intrinsic-size:auto_78px]",
+        props.isFolderDropTarget && "rounded-lg bg-brand/20",
         sortable?.isDragging && "relative z-20",
       )}
     >

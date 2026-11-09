@@ -2628,6 +2628,30 @@ code {
   }
 }
 
+/* An open thread folder reads as one raised tray. Its rows are separate list items, so each
+   clips the shared shadow to the tray's outer edges. */
+.sidebar-folder-tray {
+  background: color-mix(
+    in oklab,
+    var(--brand-accent) 7%,
+    color-mix(in oklab, var(--sidebar-foreground) 5%, transparent)
+  );
+  box-shadow: 0 1px 4px color-mix(in oklab, black 18%, transparent);
+  border-radius: 0;
+  clip-path: inset(0 -6px);
+}
+.dark .sidebar-folder-tray {
+  box-shadow: 0 1px 4px color-mix(in oklab, black 38%, transparent);
+}
+.sidebar-folder-tray[data-tray="first"] {
+  border-radius: 0.625rem 0.625rem 0 0;
+  clip-path: inset(-6px -6px 0 -6px);
+}
+.sidebar-folder-tray[data-tray="last"] {
+  border-radius: 0 0 0.625rem 0.625rem;
+  clip-path: inset(0 -6px -6px -6px);
+}
+
 /* Let the sortable rows open label clearance before painting the dividers.
    This runs once per pickup; rows retain dnd-kit's normal 200ms transitions. */
 .sidebar-drag-boundary-label {

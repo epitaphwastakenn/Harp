@@ -3,6 +3,7 @@ import { closestCenter, type CollisionDetection } from "@dnd-kit/core";
 import type { SortingStrategy } from "@dnd-kit/sortable";
 import {
   createSidebarCollisionDetection,
+  createSidebarRestOffsets,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
@@ -737,6 +738,56 @@ describe("drag preview with project headers", () => {
     expect(result.get(depthsHeader)?.y).toBe(-83);
     expect(result.get("d1")?.y).toBe(-83);
     expect(result.get(telinhaHeader)?.y).toBe(-83);
+  });
+
+  it("hit-tests rows where the opened labels drew them", () => {
+    const restOffsets = createSidebarRestOffsets();
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      activeOrder: grouped,
+      activeGroupHeaderIds: [depthsHeader],
+      settledExpanded: false,
+      boundaryLabelHeight: 24,
+      restOffsets,
+    });
+    const args = layout(items, "d1", "d1");
+    strategy({ ...args, index: 0 });
+    expect(restOffsets.read()?.get("d1")).toBe(48);
+
+    const t1 = args.rects[items.findIndex((item) => sidebarListItemId(item) === "t1")]!;
+    const pointedAt = { ...t1, top: t1.top + 48, bottom: t1.bottom + 48 };
+    const collisionArgs = {
+      active: {
+        id: "d1",
+        data: { current: {} },
+        rect: { current: { initial: args.rects[args.activeIndex]!, translated: pointedAt } },
+      },
+      collisionRect: pointedAt,
+      droppableRects: new Map(
+        items.map((item, index) => [sidebarListItemId(item), args.rects[index]!]),
+      ),
+      droppableContainers: items.map((item, index) => ({
+        id: sidebarListItemId(item),
+        key: sidebarListItemId(item),
+        disabled: false,
+        data: { current: {} },
+        node: { current: null },
+        rect: { current: args.rects[index]! },
+      })),
+      pointerCoordinates: null,
+    } satisfies Parameters<CollisionDetection>[0];
+
+    const stale = createSidebarCollisionDetection(() => true);
+    const drawn = createSidebarCollisionDetection(() => true, { restOffsets });
+    expect(stale(collisionArgs)[0]?.id).not.toBe("t1");
+    expect(drawn(collisionArgs)[0]?.id).toBe("t1");
+
+    // Rows slid under a row still at its pickup point are not targets yet.
+    const held = { ...collisionArgs, pointerCoordinates: { x: 100, y: 508 } };
+    const aimed = createSidebarCollisionDetection(() => true, { restOffsets, activationY: 500 });
+    expect(aimed(held).map((collision) => collision.id)).toEqual(["d1"]);
+    expect(aimed({ ...held, pointerCoordinates: { x: 100, y: 560 } })[0]?.id).toBe("t1");
   });
 
   it("opens a returning row's slot above the next project's header", () => {

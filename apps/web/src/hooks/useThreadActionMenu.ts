@@ -25,12 +25,14 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { threadEnvironment } from "../state/threads";
+import { useThreadFolderActions } from "./useThreadFolderActions";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
 import {
   readEnvironmentServerConfigLoaded,
   readEnvironmentSupportsAutoSettleOptOut,
   readThreadShell,
+  readThreadShells,
   useProjects,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -92,6 +94,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const { moveThreads, createFolder } = useThreadFolderActions();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -133,7 +136,19 @@ export function useThreadActionMenu(input: {
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
+      const folderNames = [
+        ...new Set(
+          readThreadShells().flatMap((shell) =>
+            shell.folder != null &&
+            shell.environmentId === thread.environmentId &&
+            shell.projectId === thread.projectId
+              ? [shell.folder]
+              : [],
+          ),
+        ),
+      ];
       const items = buildThreadActionMenuItems({
+        folders: { current: thread.folder ?? null, available: folderNames },
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
         branch: thread.branch ?? null,
@@ -177,6 +192,26 @@ export function useThreadActionMenu(input: {
         if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           failureToast("Failed to snooze thread", squashAtomCommandFailure(result));
         }
+        return;
+      }
+      if (action === "folder-new") {
+        const project = projects.find(
+          (candidate) =>
+            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+        );
+        if (!project) return;
+        const projectKey =
+          logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
+          deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings);
+        await createFolder([threadRef], projectKey, folderNames);
+        return;
+      }
+      if (action === "folder-remove") {
+        await moveThreads([threadRef], null);
+        return;
+      }
+      if (action.startsWith("folder:")) {
+        await moveThreads([threadRef], action.slice("folder:".length));
         return;
       }
       const reportFailure = async (

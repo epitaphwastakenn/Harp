@@ -17,6 +17,10 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "move-to-folder"
+  | `folder:${string}`
+  | "folder-new"
+  | "folder-remove"
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -44,6 +48,34 @@ export function buildProjectActionMenuItems(options: {
     { id: "change-icon", label: "Change icon…", disabled: !options.canOperate },
     { id: "project-settings", label: "Project settings", icon: "settings" },
   ];
+}
+
+export type ThreadFolderMenuId =
+  | "move-to-folder"
+  | `folder:${string}`
+  | "folder-new"
+  | "folder-remove";
+
+export function buildThreadFolderMenuItem(options: {
+  readonly label: string;
+  readonly current: string | null;
+  readonly available: readonly string[];
+  readonly disabled?: boolean;
+}): ContextMenuItem<ThreadFolderMenuId> {
+  const others = options.available.filter((name) => name !== options.current);
+  return {
+    id: "move-to-folder",
+    label: options.label,
+    icon: "folder",
+    disabled: options.disabled === true,
+    children: [
+      ...others.map((name) => ({ id: `folder:${name}` as const, label: name })),
+      { id: "folder-new", label: "New folder", separatorBefore: others.length > 0 },
+      ...(options.current === null
+        ? []
+        : [{ id: "folder-remove" as const, label: `Remove from ${options.current}` }]),
+    ],
+  };
 }
 
 export function buildDraftActionMenuItems(options: {
@@ -103,6 +135,8 @@ export interface ThreadActionMenuState {
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  /** Absent where the thread has no project to hold a folder. */
+  readonly folders?: { readonly current: string | null; readonly available: readonly string[] };
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -171,6 +205,15 @@ export function buildThreadActionMenuItems(
                   },
                 ],
               },
+        ]
+      : []),
+    ...(state.folders
+      ? [
+          buildThreadFolderMenuItem({
+            label: "Move to folder",
+            current: state.folders.current,
+            available: state.folders.available,
+          }),
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },

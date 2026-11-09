@@ -26,6 +26,26 @@ const baseState: ThreadActionMenuState = {
 };
 
 describe("buildThreadActionMenuItems", () => {
+  it("offers the project's other folders, a new one, and the way out", () => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      folders: { current: "UI", available: ["UI", "Bugs"] },
+    });
+    const move = items.find((item) => item.id === "move-to-folder");
+    expect(move?.children?.map((child) => child.id)).toEqual([
+      "folder:Bugs",
+      "folder-new",
+      "folder-remove",
+    ]);
+    const loose = buildThreadActionMenuItems({
+      ...baseState,
+      folders: { current: null, available: [] },
+    });
+    expect(
+      loose.find((item) => item.id === "move-to-folder")?.children?.map((child) => child.id),
+    ).toEqual(["folder-new"]);
+  });
+
   it.each([false, true])(
     "disables both lifecycle directions without permission (reversed: %s)",
     (reversed) => {

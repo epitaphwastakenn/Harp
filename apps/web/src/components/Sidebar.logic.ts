@@ -319,7 +319,15 @@ type SidebarThreadDropPlan =
     }
   | { readonly kind: "settle" };
 
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake";
+export type SidebarDropVerb =
+  | "pin"
+  | "unpin"
+  | "settle"
+  | "unsettle"
+  | "wake"
+  | "folder-new"
+  | "folder-join"
+  | "folder-leave";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,
@@ -1431,59 +1439,242 @@ export function sidebarThreadFolderKey(
     : (layout.folderKeyByProject.get(`${thread.environmentId}:${thread.projectId}`) ?? null);
 }
 
+export function threadFolderKey(projectKey: string, folder: string): string {
+  return `${projectKey}\0folder\0${folder}`;
+}
+
+function compareThreadFolders(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
 /**
- * Stable grouping: threads keep their relative order inside a folder, folders
- * follow the layout order, and threads outside every folder come last.
+ * Stable grouping: projects follow the layout order, a project lists its thread
+ * folders by name and then its loose threads, and rows keep their relative order
+ * inside each. Threads outside every project come last.
  */
 export function groupSidebarThreadsByFolder<
-  T extends { readonly environmentId: string; readonly projectId: string | null },
->(threads: readonly T[], layout: SidebarFolderLayout): T[] {
-  const rank = new Map(layout.order.map((key, index) => [key, index] as const));
+  T extends {
+    readonly environmentId: string;
+    readonly projectId: string | null;
+    readonly folder?: string | null;
+  },
+>(threads: readonly T[], layout: SidebarFolderLayout | null): T[] {
+  const rank = new Map(layout?.order.map((key, index) => [key, index] as const));
   const rankOf = (thread: T) => {
+    if (layout === null) return 0;
     const folder = sidebarThreadFolderKey(layout, thread);
     return folder === null ? Number.POSITIVE_INFINITY : (rank.get(folder) ?? layout.order.length);
   };
   return threads
     .map((thread, index) => ({ thread, index, rank: rankOf(thread) }))
-    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        compareThreadFolders(a.thread.folder ?? null, b.thread.folder ?? null) ||
+        a.index - b.index,
+    )
     .map((entry) => entry.thread);
 }
 
-export interface SidebarFolderHeaderPlan {
-  /** Folder headers to render right before the row with this thread key. */
-  readonly before: ReadonlyMap<string, readonly string[]>;
-  /** Headers of collapsed folders with no visible row after them. */
-  readonly trailing: readonly string[];
-  readonly threadCount: ReadonlyMap<string, number>;
+export interface SidebarThreadFolderGroup<T> {
+  readonly key: string;
+  readonly projectKey: string;
+  readonly name: string;
+  readonly threads: T[];
+  /** Whether any of its rows shows below the header, which opens the tray. */
+  trayOpen: boolean;
+}
+
+export interface SidebarActiveListPlan<T> {
+  readonly items: readonly SidebarListItem[];
+  readonly visibleThreads: readonly T[];
+  readonly projectThreadCount: ReadonlyMap<string, number>;
+  readonly threadFolders: ReadonlyMap<string, SidebarThreadFolderGroup<T>>;
+  readonly folderKeyByThread: ReadonlyMap<string, string>;
+  readonly trayPositionByThread: ReadonlyMap<string, "middle" | "last">;
 }
 
 /**
- * A collapsed folder hides its rows but keeps its header, so headers anchor to
- * the next visible row instead of to their own first row.
+ * The Active list in display order: project headers, thread folder headers and
+ * rows. Collapsing hides rows but keeps headers, except the row the route shows.
  */
-export function planSidebarFolderHeaders<
-  T extends { readonly environmentId: string; readonly projectId: string | null },
+export function planSidebarActiveList<
+  T extends {
+    readonly environmentId: string;
+    readonly projectId: string | null;
+    readonly folder?: string | null;
+  },
 >(input: {
   readonly groupedThreads: readonly T[];
-  readonly layout: SidebarFolderLayout;
+  readonly layout: SidebarFolderLayout | null;
+  readonly projectKeyOf: (thread: T) => string | null;
+  readonly isFolderCollapsed: (folderKey: string) => boolean;
+  readonly pinnedProjectKeys: readonly string[];
   readonly keyOf: (thread: T) => string;
-  readonly isVisible: (thread: T) => boolean;
-}): SidebarFolderHeaderPlan {
-  const before = new Map<string, string[]>();
-  const threadCount = new Map<string, number>();
-  let pending: string[] = [];
+  readonly routeThreadKey: string | null;
+}): SidebarActiveListPlan<T> {
+  const { layout, pinnedProjectKeys } = input;
+  const headeredProjects = new Set(
+    layout === null
+      ? []
+      : input.groupedThreads.flatMap((thread) => sidebarThreadFolderKey(layout, thread) ?? []),
+  );
+  const isPinned = (key: string) => pinnedProjectKeys.includes(key);
+  let dividerPending =
+    [...headeredProjects].some(isPinned) && [...headeredProjects].some((key) => !isPinned(key));
+  const items: SidebarListItem[] = [];
+  const visibleThreads: T[] = [];
+  const projectThreadCount = new Map<string, number>();
+  const threadFolders = new Map<string, SidebarThreadFolderGroup<T>>();
+  const folderKeyByThread = new Map<string, string>();
+  const trayPositionByThread = new Map<string, "middle" | "last">();
+  let lastProject: string | null = null;
   let lastFolder: string | null = null;
+  let lastTrayRow: string | null = null;
+  const closeTray = () => {
+    if (lastTrayRow !== null) trayPositionByThread.set(lastTrayRow, "last");
+    lastTrayRow = null;
+  };
   for (const thread of input.groupedThreads) {
-    const folder = sidebarThreadFolderKey(input.layout, thread);
-    if (folder !== null) {
-      threadCount.set(folder, (threadCount.get(folder) ?? 0) + 1);
-      if (folder !== lastFolder) pending.push(folder);
+    const key = input.keyOf(thread);
+    const project = layout === null ? null : sidebarThreadFolderKey(layout, thread);
+    if (project !== null && project !== lastProject) {
+      closeTray();
+      lastFolder = null;
+      if (dividerPending && !isPinned(project)) {
+        dividerPending = false;
+        items.push({
+          kind: "group",
+          group: "divider",
+          id: sidebarGroupHeaderId("divider", project),
+          key: project,
+        });
+      }
+      items.push({
+        kind: "group",
+        group: "project",
+        id: sidebarGroupHeaderId("project", project),
+        key: project,
+      });
     }
-    lastFolder = folder;
-    if (input.isVisible(thread) && pending.length > 0) {
-      before.set(input.keyOf(thread), pending);
-      pending = [];
+    lastProject = project;
+    if (project !== null) {
+      projectThreadCount.set(project, (projectThreadCount.get(project) ?? 0) + 1);
+    }
+    const projectCollapsed = project !== null && layout!.collapsed.has(project);
+    const projectKey = input.projectKeyOf(thread);
+    const folderName = projectKey === null ? null : (thread.folder ?? null);
+    const folderKey =
+      projectKey === null || folderName === null ? null : threadFolderKey(projectKey, folderName);
+    if (folderKey !== lastFolder) closeTray();
+    if (folderKey !== null) {
+      folderKeyByThread.set(key, folderKey);
+      let folder = threadFolders.get(folderKey);
+      if (folder === undefined) {
+        folder = {
+          key: folderKey,
+          projectKey: projectKey!,
+          name: folderName!,
+          threads: [],
+          trayOpen: false,
+        };
+        threadFolders.set(folderKey, folder);
+      }
+      folder.threads.push(thread);
+      if (folderKey !== lastFolder && !projectCollapsed) {
+        items.push({
+          kind: "group",
+          group: "folder",
+          id: sidebarGroupHeaderId("folder", folderKey),
+          key: folderKey,
+        });
+      }
+    }
+    lastFolder = folderKey;
+    const hidden = projectCollapsed || (folderKey !== null && input.isFolderCollapsed(folderKey));
+    if (hidden && key !== input.routeThreadKey) continue;
+    visibleThreads.push(thread);
+    items.push({ kind: "thread", key, section: "active" });
+    if (folderKey !== null && !projectCollapsed) {
+      threadFolders.get(folderKey)!.trayOpen = true;
+      trayPositionByThread.set(key, "middle");
+      lastTrayRow = key;
     }
   }
-  return { before, trailing: pending, threadCount };
+  closeTray();
+  return {
+    items,
+    visibleThreads,
+    projectThreadCount,
+    threadFolders,
+    folderKeyByThread,
+    trayPositionByThread,
+  };
+}
+
+export type SidebarFolderDrop =
+  | { readonly kind: "join"; readonly folder: string }
+  | { readonly kind: "leave" }
+  | { readonly kind: "create"; readonly targetKey: string };
+
+interface SidebarFolderDropRow {
+  readonly section: SidebarSection;
+  readonly projectKey: string | null;
+  readonly folder: string | null;
+}
+
+/**
+ * Active rows sort by time, so dropping one on another never means reorder: it
+ * files the thread. Loose on loose makes a folder, a folder's row or header joins
+ * it, and from inside a folder a loose row or the project's header takes it out.
+ */
+export function planSidebarFolderDrop(input: {
+  readonly activeKey: string;
+  readonly over: SidebarListItem | undefined;
+  readonly rowOf: (threadKey: string) => SidebarFolderDropRow | null;
+  readonly folderOf: (
+    folderKey: string,
+  ) => { readonly projectKey: string; readonly name: string } | null;
+}): SidebarFolderDrop | null {
+  const { over } = input;
+  const active = input.rowOf(input.activeKey);
+  if (!over || !active || active.section !== "active" || active.projectKey === null) return null;
+  if (over.kind === "thread") {
+    if (over.key === input.activeKey) return null;
+    const target = input.rowOf(over.key);
+    if (!target || target.section !== "active" || target.projectKey !== active.projectKey) {
+      return null;
+    }
+    if (target.folder !== null) {
+      return target.folder === active.folder ? null : { kind: "join", folder: target.folder };
+    }
+    return active.folder === null ? { kind: "create", targetKey: over.key } : { kind: "leave" };
+  }
+  if (over.kind !== "group") return null;
+  if (over.group === "project") {
+    return over.key === active.projectKey && active.folder !== null ? { kind: "leave" } : null;
+  }
+  if (over.group !== "folder") return null;
+  const folder = input.folderOf(over.key);
+  if (!folder || folder.projectKey !== active.projectKey || folder.name === active.folder) {
+    return null;
+  }
+  return { kind: "join", folder: folder.name };
+}
+
+export function sidebarFolderDropVerb(drop: SidebarFolderDrop | null): SidebarDropVerb | null {
+  if (drop === null) return null;
+  if (drop.kind === "create") return "folder-new";
+  return drop.kind === "join" ? "folder-join" : "folder-leave";
+}
+
+export function nextThreadFolderName(existing: readonly string[]): string {
+  const taken = new Set(existing.map((name) => name.toLocaleLowerCase()));
+  if (!taken.has("new folder")) return "New folder";
+  let suffix = 2;
+  while (taken.has(`new folder ${suffix}`)) suffix += 1;
+  return `New folder ${suffix}`;
 }

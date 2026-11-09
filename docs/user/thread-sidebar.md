@@ -127,6 +127,17 @@ choice.
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
 
+## Group threads into folders
+
+Drag a thread onto another thread of the same project to make a folder, then type its name. Drag a
+thread onto a folder to file it. To take one out, drag it onto a loose thread or the project's
+header. **Move to folder** in a thread's menu does the same. Right-click a folder to rename it or
+ungroup it; ungrouping returns its threads to the project and never deletes them.
+
+Folders live on the server, so every connected client shows them, and a thread keeps its folder
+while it is pinned, settled, snoozed, or archived. Those threads show in their own sections and
+return to the folder when they come back to Active. Collapsing a folder is remembered per device.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

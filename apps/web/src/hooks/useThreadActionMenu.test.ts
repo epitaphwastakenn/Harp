@@ -66,6 +66,7 @@ vi.mock("../state/entities", () => ({
     runtime: null,
     latestRun: null,
   }),
+  readThreadShells: () => [],
   useProjects: () => [{ id: "project", environmentId: "secondary" }],
 }));
 vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "primary" }));
@@ -124,6 +125,9 @@ vi.mock("./useSettings", () => ({
       confirmThreadArchive: true,
       timestampFormat: "12-hour",
     }),
+}));
+vi.mock("./useThreadFolderActions", () => ({
+  useThreadFolderActions: () => ({ moveThreads: vi.fn(), createFolder: vi.fn() }),
 }));
 vi.mock("./useThreadActions", () => ({
   canTurnThreadIntoProject: () => false,

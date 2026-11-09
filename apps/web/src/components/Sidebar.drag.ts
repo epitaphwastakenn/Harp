@@ -10,6 +10,7 @@ import {
 } from "./Sidebar.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+const PICKUP_SLOP = 16;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type GroupItem = Extract<SidebarListItem, { kind: "group" }>;
@@ -29,11 +30,30 @@ export function restrictBelowSidebarLabel(
   return transform.y < minimumY ? { ...transform, y: minimumY } : transform;
 }
 
+/**
+ * Where a pickup moved each row. Picking a row up opens room for the section labels, but
+ * dnd-kit keeps hit-testing the rects it measured before that, so rows read as lower or
+ * higher than they are drawn. Taken once per drag so a slot opening later cannot feed back.
+ */
+export function createSidebarRestOffsets() {
+  let offsets: ReadonlyMap<string, number> | null = null;
+  return {
+    reset: () => {
+      offsets = null;
+    },
+    capture: (next: ReadonlyMap<string, number>) => {
+      offsets ??= next;
+    },
+    read: () => offsets,
+  };
+}
+
 export function createSidebarCollisionDetection(
   isValidTarget: (id: string) => boolean,
   options: {
     items?: readonly SidebarListItem[];
     activationY?: number | null;
+    restOffsets?: ReturnType<typeof createSidebarRestOffsets>;
   } = {},
 ): CollisionDetection {
   const validity = new Map<string, boolean>();
@@ -41,8 +61,30 @@ export function createSidebarCollisionDetection(
   let previousPointerY = options.activationY;
   let boundarySection: "pinned" | "active" | undefined;
   return (args) => {
-    let collisions = closestCenter(args);
+    const offsets = options.restOffsets?.read();
+    let collisions = closestCenter(
+      offsets
+        ? {
+            ...args,
+            droppableRects: new Map(
+              [...args.droppableRects].map(([id, rect]) => {
+                const y = offsets.get(String(id)) ?? 0;
+                return [id, { ...rect, top: rect.top + y, bottom: rect.bottom + y }] as const;
+              }),
+            ),
+          }
+        : args,
+    );
     const pointer = args.pointerCoordinates;
+    // Opening the labels slides rows under a row that has not moved; only a real move aims.
+    if (
+      offsets &&
+      pointer &&
+      options.activationY != null &&
+      Math.abs(pointer.y - options.activationY) < PICKUP_SLOP
+    ) {
+      return collisions.filter((collision) => collision.id === args.active.id);
+    }
     const items = options.items;
     const source = items?.find((item) => item.kind === "thread" && item.key === args.active.id);
     const boundary = args.droppableContainers
@@ -96,6 +138,7 @@ export function createSidebarSortingStrategy(input: {
   settledOrder: readonly string[];
   activeOrder?: readonly string[];
   activeGroupHeaderIds?: readonly string[];
+  restOffsets?: ReturnType<typeof createSidebarRestOffsets>;
   settledExpanded: boolean;
   settledVisibleCount?: number;
   routeThreadKey?: string | null;
@@ -247,6 +290,11 @@ export function createSidebarSortingStrategy(input: {
       const rect = index === undefined ? undefined : rects[index];
       if (index !== undefined && rect) result[index] = { ...stationary, y: top - rect.top };
       top += heights[projectedIndex]! + 1;
+    }
+    if (overIndex === activeIndex || overIndex < 0) {
+      input.restOffsets?.capture(
+        new Map(items.map((item, index) => [sidebarListItemId(item), result[index]?.y ?? 0])),
+      );
     }
     result[activeIndex] = stationary;
     return result;
