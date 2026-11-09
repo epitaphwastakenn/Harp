@@ -10,6 +10,18 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.21 · 2026-11-09
+
+> Group threads into folders inside a project, and drag threads around without the sidebar falling apart.
+
+### New
+
+- **Thread folders** — Drag a thread onto another thread of the same project to make a folder, then type its name. Drag threads onto a folder to file them, collapse it to tuck them away, and right-click it to rename or ungroup. Ungrouping returns the threads to the project and never deletes them. Move to folder is also in a thread's menu. Folders show on every connected client, and agents can file threads too.
+
+### Fixed
+
+- **Dragging threads** — Reordering threads in a project-grouped sidebar no longer scrambles the list, with rows overlapping project headers and threads landing under the wrong project.
+
 ## 2.17.20 · 2026-11-05
 
 > Harp now tells Roblox games from everything else, so other projects stop carrying Studio's tools and rules.
