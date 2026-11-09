@@ -38,7 +38,7 @@ Predicted effects must be reversible. A client can briefly predict an impact, ex
 
 ## 2. Priorities and markers
 
-Use animation priority to define which tracks may override the same joints. Keep locomotion and action tracks separate. Use marker signals for synchronized effects instead of guessing a timestamp that changes when an animation is retuned. When an animation has no markers and you cannot republish it, do not guess either: sample it in Edit with `Animator:StepAnimations` and time the effect to the measured peaks (Harp, verified 2026-10-29: `vfx-sealcode.md` section 15). In Server Authority, resolve the current track after rollback rather than assuming a cached track handle still represents the visible animation.
+Use animation priority to define which tracks may override the same joints. Keep locomotion and action tracks separate. Use marker signals for synchronized effects instead of guessing a timestamp that changes when an animation is retuned. When an animation has no markers and you cannot republish it, do not guess either: sample it in Edit with `Animator:StepAnimations` and time the effect to the measured peaks (Harp, verified 2026-10-29: `vfx-harp.md` section 15). In Server Authority, resolve the current track after rollback rather than assuming a cached track handle still represents the visible animation.
 
 ### Track control surface: Play parameters, weight, and event semantics
 
@@ -118,7 +118,7 @@ Debris:AddItem(beam, 0.35)
 
 A trail records movement between its attachments. If the attachments are destroyed or teleported unexpectedly, the visual can stretch or disappear. Remove the trail with the owning projectile or character.
 
-A hitscan tracer is the exception to "stable parts": parent both attachments to `workspace.Terrain` at world positions fixed where the shot happened. Tying the start to the moving barrel makes the tracer swing with the gun (Harp, verified 2026-10-29). Projectiles themselves render on each client, never as server-moved parts; see `vfx-sealcode.md` section 16.
+A hitscan tracer is the exception to "stable parts": parent both attachments to `workspace.Terrain` at world positions fixed where the shot happened. Tying the start to the moving barrel makes the tracer swing with the gun (Harp, verified 2026-10-29). Projectiles themselves render on each client, never as server-moved parts; see `vfx-harp.md` section 16.
 
 ## 6. Tweening
 

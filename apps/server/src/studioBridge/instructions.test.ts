@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  rojoContext,
   studioBridgeInstructions,
   studioControlsContext,
   studioSelectionContext,
@@ -55,5 +56,34 @@ describe("studioControlsContext", () => {
     expect(text).toContain("Playtests are off");
     expect(text).toContain("2 Studio places are turned off");
     expect(text).not.toContain("place:1");
+  });
+});
+
+describe("rojoContext", () => {
+  it("names each place's project and whether Rojo serves it, and nothing without Rojo", () => {
+    expect(rojoContext({ layout: "none", projects: [] })).toBeUndefined();
+    const text = rojoContext({
+      layout: "multi",
+      projects: [
+        {
+          label: "lobby",
+          file: "places/lobby/default.project.json",
+          port: 34872,
+          state: "running",
+        },
+        {
+          label: "match",
+          file: "places/match/default.project.json",
+          port: 34873,
+          state: "stopped",
+        },
+      ],
+    });
+    expect(text).toContain("source of truth");
+    expect(text).toContain("several places");
+    expect(text).toContain(
+      "- lobby: places/lobby/default.project.json, port 34872, Rojo is serving it",
+    );
+    expect(text).toContain("- match: places/match/default.project.json, port 34873, Rojo is not");
   });
 });

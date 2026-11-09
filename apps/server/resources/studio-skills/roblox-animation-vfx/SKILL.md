@@ -50,9 +50,11 @@ Load when implementing character animation, particle or beam effects, tweens, ca
 
 Two practical playbooks written by Harp from live Studio research (verified in Studio on
 2026-10-20; the VFX playbook was extended on 2026-10-29 from a user-approved rework of a production
-game's ability effects). Load them in addition to `references/full.md` when the task matches:
+game's ability effects). Load them in addition to `references/full.md` when the task matches. The
+VFX playbook is large, so it answers with its section list: load the sections the task needs
+(`references/vfx-harp.md#3` for recipes, `#5` for triggering, and so on).
 
-- `references/vfx-sealcode.md`: building, adapting, triggering and reviewing visual effects:
+- `references/vfx-harp.md`: building, adapting, triggering and reviewing visual effects:
   explosion, fire, aura, hit, slash, lightning, portal, heal, shockwave, gun tracer and smoke recipes
   with numbers, the Emit and attribute trigger pattern, client versus server, adapting toolbox packs
   (recolour and scale helpers), performance budgets, a from-scratch effect with verified texture
@@ -60,7 +62,7 @@ game's ability effects). Load them in addition to `references/full.md` when the 
   variants for the user to pick, measuring animations before timing effects, client-side
   projectiles, drain wisps, dash afterimages, charge indicators, Studio capture techniques and
   texture sourcing. Load it for any effect that must look good.
-- `references/animation-sealcode.md`: using toolbox animations (and why most third-party ids will
+- `references/animation-harp.md`: using toolbox animations (and why most third-party ids will
   not play), publishing (ask the user: Roblox Assistant or user publishes), R15 joint axes and
   ranges, building KeyframeSequences by code or with the bridge `animation` tool, a hand-made
   animation recipe, and procedural tween recipes for doors and pickups. Load it before playing,

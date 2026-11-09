@@ -14,7 +14,13 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as RobloxStudioConfig from "../roblox/RobloxStudioConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { studioControlsContext, studioSelectionContext } from "../studioBridge/instructions.ts";
+import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
+import {
+  rojoContext,
+  studioControlsContext,
+  studioSelectionContext,
+} from "../studioBridge/instructions.ts";
+import { forgetLoadedSkills } from "../studioBridge/studioSkills.ts";
 import * as StudioBridge from "../studioBridge/StudioBridge.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
@@ -44,6 +50,7 @@ export interface SealTurnInputShape {
     /** The project's root, which decides whether the thread is a Roblox project. */
     readonly workspaceRoot?: string | undefined;
     readonly project?: StudioTurnProject | undefined;
+    readonly threadId?: string | undefined;
     /** The provider conversation this turn joins, and whether it has no turns yet. */
     readonly providerThreadId?: string | undefined;
     readonly freshConversation?: boolean | undefined;
@@ -75,6 +82,8 @@ export const withImageDescription = (text: string, description: string): string 
 const isSlashCommand = (text: string, attachments: ReadonlyArray<ChatAttachment>) =>
   attachments.length === 0 && text.trimStart().startsWith("/");
 
+const isCompaction = (text: string) => /^\/compact(?:\s|$)/i.test(text.trimStart());
+
 export const layer = Layer.effect(
   SealTurnInputV2,
   Effect.gen(function* () {
@@ -83,6 +92,7 @@ export const layer = Layer.effect(
     const textGeneration = yield* TextGeneration.TextGeneration;
     const roblox = yield* RobloxStudioConfig.RobloxStudioConfig;
     const studioBridge = yield* Effect.serviceOption(StudioBridge.StudioBridge);
+    const rojoWorkspaces = yield* Effect.serviceOption(RojoWorkspaces.RojoWorkspaces);
     // The Studio instructions are long, so a provider conversation gets them once rather than on
     // every turn: when it starts, and once more after a server restart or a settings change.
     const studioDelivered = new Map<string, string>();
@@ -159,6 +169,11 @@ export const layer = Layer.effect(
     const prepare: SealTurnInputShape["prepare"] = Effect.fn("SealTurnInput.prepare")(
       function* (input) {
         if (isSlashCommand(input.text, input.attachments)) {
+          if (isCompaction(input.text)) {
+            if (input.providerThreadId !== undefined)
+              studioDelivered.delete(input.providerThreadId);
+            if (input.threadId !== undefined) forgetLoadedSkills(input.threadId);
+          }
           return { text: input.text, attachments: input.attachments, frame: (text) => text };
         }
         const current = yield* settings.getSettings.pipe(
@@ -189,6 +204,9 @@ export const layer = Layer.effect(
         yield* rememberStudioProject(current, input.project, target);
         const studio = yield* roblox.instructions(current, { ...target, cwd: input.cwd });
         const conversation = input.providerThreadId;
+        if (input.freshConversation === true && input.threadId !== undefined) {
+          forgetLoadedSkills(input.threadId);
+        }
         const sendStudio =
           studio !== undefined &&
           (input.freshConversation === true ||
@@ -219,11 +237,17 @@ export const layer = Layer.effect(
         const studioLimits = studioApplies
           ? studioControlsContext(input.studioControls)
           : undefined;
+        const rojoRoot = target.workspaceRoot;
+        const rojo =
+          studioApplies && rojoRoot !== undefined && rojoWorkspaces._tag === "Some"
+            ? rojoContext(yield* rojoWorkspaces.value.status(rojoRoot))
+            : undefined;
         const harness = [
           current.sealsInstructions.trim(),
           sendStudio && studio !== undefined ? withStudioInstructions(studio) : "",
           studioContext ?? "",
           studioLimits ?? "",
+          rojo ?? "",
         ]
           .filter((part) => part.length > 0)
           .join("\n\n");

@@ -10,11 +10,11 @@ here was re-tested in Studio or Blender yet, so every rule is marked (guideline)
 
 ## 1. Pick the route
 
-| Request                                        | Route                                                              |
-| ---------------------------------------------- | ------------------------------------------------------------------ |
-| One prop for a place                           | `full.md` "Modeling a custom mesh", plus section 3 and 6 here      |
-| "Make N more like this one", a pet or prop set | The set workflow below (sections 2 to 7)                           |
-| A whole map or scene                           | `building-sealcode.md`; model only the hero pieces kits can't give |
+| Request                                        | Route                                                          |
+| ---------------------------------------------- | -------------------------------------------------------------- |
+| One prop for a place                           | `full.md` "Modeling a custom mesh", plus section 3 and 6 here  |
+| "Make N more like this one", a pet or prop set | The set workflow below (sections 2 to 7)                       |
+| A whole map or scene                           | `building-harp.md`; model only the hero pieces kits can't give |
 
 A set always has a reference model: the user's own file (.blend, .fbx, .glb, .obj) or the first
 model you make and the user approves. Without one there is nothing to stay faithful to, so make and

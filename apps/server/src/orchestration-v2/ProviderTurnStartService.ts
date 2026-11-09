@@ -726,6 +726,7 @@ export const layer: Layer.Layer<
           cwd: resolvedRuntimePolicy.cwd ?? project?.workspaceRoot ?? process.cwd(),
           workspaceRoot: project?.workspaceRoot,
           project,
+          threadId: projection.thread.id,
           providerThreadId: providerThread.id,
           freshConversation: providerThread.nativeThreadRef === null,
           modelSelection: run.modelSelection,

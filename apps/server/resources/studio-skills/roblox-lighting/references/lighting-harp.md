@@ -10,7 +10,7 @@ benchmarks.
 
 Load this file when you must set up, change or review the look of a place. The property reference
 is in `full.md`; this file is the practical layer on top of it. Building and dressing the scene is
-`roblox-building/references/building-sealcode.md`.
+`roblox-building/references/building-harp.md`.
 
 ## 1. Ground rules
 

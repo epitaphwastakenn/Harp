@@ -41,7 +41,7 @@ Load for geometry, props, maps, and spatial onboarding via MCP or Luau.
 - `EditableImage`/`EditableMesh`: permission + memory limits.
 - Native Parts/CSG when reuse/generation is unsuitable.
 - Modeling a mesh yourself: match the place's house style, clean quad topology, no booleans on visible faces, built lettering and bevelled chips; review the wireframe before upload (full.md "Modeling a custom mesh").
-- Several models in one style ("make 10 more like this"): measure the reference, write a style card and a kit of parametric signature parts, rebuild part of the reference with the kit to check it, then one short build script per model (guideline; `references/modeling-sealcode.md`).
+- Several models in one style ("make 10 more like this"): measure the reference, write a style card and a kit of parametric signature parts, rebuild part of the reference with the kit to check it, then one short build script per model (guideline; `references/modeling-harp.md`).
 - Plan a set as a table before building: no two rows share more than two of body plan, mass, silhouette, face and signature; vary the face most; triangle bands as multiples of the reference, not exact targets (guideline).
 - Review a set by rendering every model with one camera, frame and lighting beside the reference (front, three-quarter, side, back three-quarter); numbers only point at what to look at (guideline).
 - Spend triangles on the silhouette and the focal parts, match detail with separate pieces rather than denser surfaces, and check the model reads in greyscale (guideline).
@@ -75,7 +75,7 @@ Guessing coordinates | unanchored/duplicate parts | hardcoded world positions | 
 Practical playbooks written by Harp. Load them in addition to `references/full.md` when the task
 matches:
 
-- `references/building-sealcode.md`: building scenes and maps that look good: measured character
+- `references/building-harp.md`: building scenes and maps that look good: measured character
   scale and traversal limits (steps, ledges, gaps, slopes), composition (focal point, buildings
   facing it, curved paths, three height layers), 20 audited Creator Store kits with verdicts, the
   kit audit, prop placement and modular assembly code, palette and terrain colours, terrain recipes
@@ -83,7 +83,7 @@ matches:
   optimisation pass, StreamingEnabled behaviour, and a multi-angle screenshot checklist. Load it
   for any map, level or scene that must look good.
   Written from live Studio research (verified in Studio on 2026-10-23).
-- `references/modeling-sealcode.md`: modeling props and creatures in Blender, alone or as a set in
+- `references/modeling-harp.md`: modeling props and creatures in Blender, alone or as a set in
   one style: measuring a reference, the style card and kit, the kit check, planning a set by
   diversity axes and triangle bands, one build script per model, Standard and High quality,
   equal-scale render review and lineups, and delivery. Written on 2026-10-31 from a study of a

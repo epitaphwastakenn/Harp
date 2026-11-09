@@ -10,7 +10,7 @@ benchmarks.
 Load this file when you must build, dress or review a map or scene that has to look good. The
 generic API notes (CSG, validation, folder layout, acceptance gates) are in `full.md`; this file is
 the practical layer on top of it. Lighting is its own playbook:
-`roblox-lighting/references/lighting-sealcode.md`.
+`roblox-lighting/references/lighting-harp.md`.
 
 ## 1. Pick the route first
 

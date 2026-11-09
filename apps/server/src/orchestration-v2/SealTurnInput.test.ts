@@ -14,6 +14,7 @@ import { ProjectId } from "@t3tools/contracts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { loadedSkillResources } from "../studioBridge/studioSkills.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as SealTurnInput from "./SealTurnInput.ts";
 
@@ -387,6 +388,21 @@ describe("SealTurnInput", () => {
         expect(yield* turn("conversation-3", true, "/elsewhere")).not.toContain(
           "studio_instructions",
         );
+
+        loadedSkillResources("thread-1").add("roblox-gui/SKILL.md");
+        const compacted = yield* service.prepare({
+          cwd: "/game",
+          workspaceRoot: "/game",
+          threadId: "thread-1",
+          providerThreadId: "conversation-2",
+          freshConversation: false,
+          modelSelection: mainSelection,
+          text: "/compact keep the shop work",
+          attachments: [],
+        });
+        expect(compacted.frame(compacted.text)).toBe("/compact keep the shop work");
+        expect(loadedSkillResources("thread-1").size).toBe(0);
+        expect(yield* turn("conversation-2", false)).toContain("<studio_instructions>");
       }).pipe(Effect.provide(layer));
     }),
   );

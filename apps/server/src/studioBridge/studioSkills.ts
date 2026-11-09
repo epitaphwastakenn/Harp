@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 export interface StudioSkill {
   readonly name: string;
   readonly description: string;
+  readonly whenToUse: string | undefined;
   /** Relative path (`SKILL.md`, `references/full.md`) to Markdown text. */
   readonly files: ReadonlyMap<string, string>;
 }
@@ -61,7 +62,13 @@ export const buildSkillLibrary = (
     const name = frontmatterValue(main, "name");
     const description = frontmatterValue(main, "description");
     if (name !== folder || description === undefined || !/^[a-z0-9-]{1,63}$/.test(name)) continue;
-    skills.set(name, { name, description: description.slice(0, 500), files: entries });
+    const whenToUse = frontmatterValue(main, "when_to_use")?.slice(0, 400);
+    skills.set(name, {
+      name,
+      description: description.slice(0, 500),
+      whenToUse: whenToUse === undefined || whenToUse === "" ? undefined : whenToUse,
+      files: entries,
+    });
   }
   return { skills };
 };
@@ -108,23 +115,138 @@ export const loadStudioSkills = Effect.suspend(() =>
       ),
 );
 
-const MAX_RESULT_CHARS = 48_000;
-const MAX_RESOURCES = 10;
+const maxResultChars = 48_000;
+const maxResources = 10;
+const maxOutlineIntroChars = 3_000;
+const maxRememberedThreads = 64;
+
+const loadedByThread = new Map<string, Set<string>>();
+
+export const loadedSkillResources = (threadId: string): Set<string> => {
+  const seen = loadedByThread.get(threadId) ?? new Set<string>();
+  loadedByThread.delete(threadId);
+  loadedByThread.set(threadId, seen);
+  if (loadedByThread.size > maxRememberedThreads) {
+    const oldest = loadedByThread.keys().next().value;
+    if (oldest !== undefined) loadedByThread.delete(oldest);
+  }
+  return seen;
+};
+
+export const forgetLoadedSkills = (threadId: string): void => {
+  loadedByThread.delete(threadId);
+};
+
+interface SkillSection {
+  readonly heading: string;
+  readonly text: string;
+}
+
+export const splitSkillSections = (
+  text: string,
+): { readonly intro: string; readonly sections: ReadonlyArray<SkillSection> } => {
+  const intro: string[] = [];
+  const sections: Array<{ heading: string; lines: string[] }> = [];
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (line.trimStart().startsWith("```")) fenced = !fenced;
+    if (!fenced && line.startsWith("## ")) {
+      sections.push({ heading: line.slice(3).trim(), lines: [line] });
+      continue;
+    }
+    const current = sections.at(-1);
+    if (current === undefined) intro.push(line);
+    else current.lines.push(line);
+  }
+  return {
+    intro: intro.join("\n").trim(),
+    sections: sections.map((section) => ({
+      heading: section.heading,
+      text: section.lines.join("\n").trim(),
+    })),
+  };
+};
+
+const findSection = (
+  sections: ReadonlyArray<SkillSection>,
+  wanted: string,
+): SkillSection | undefined => {
+  const key = wanted.trim().toLowerCase();
+  if (key === "") return undefined;
+  return (
+    sections.find((section) => section.heading.toLowerCase().startsWith(`${key}.`)) ??
+    sections.find((section) => section.heading.toLowerCase() === key) ??
+    sections.find((section) => section.heading.toLowerCase().includes(key)) ??
+    (/^\d+$/.test(key) ? sections[Number(key) - 1] : undefined)
+  );
+};
+
+const sizeLabel = (chars: number) =>
+  chars < 1000 ? `${String(chars)} chars` : `${(chars / 1000).toFixed(1)}k chars`;
+
+const sectionRef = (heading: string, index: number) =>
+  /^(\d+[a-z]?)\./i.exec(heading)?.[1] ?? String(index + 1);
+
+const outlineOf = (file: string, text: string): string | undefined => {
+  if (text.length <= maxResultChars) return undefined;
+  const { intro, sections } = splitSkillSections(text);
+  if (sections.length < 2) return undefined;
+  const first = sectionRef(sections[0]!.heading, 0);
+  return [
+    intro.slice(0, maxOutlineIntroChars),
+    `This file is ${sizeLabel(text.length)}, so it comes in sections. Ask for the ones the task needs as resources, several per call, such as \`${file}#${first}\`; \`${file}#all\` returns the whole file.`,
+    ...sections.map(
+      (section, index) =>
+        `- \`${file}#${sectionRef(section.heading, index)}\` ${section.heading} (${sizeLabel(section.text.length)})`,
+    ),
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
+};
 
 const isSafeResource = (resource: string) =>
   isSkillFile(resource) &&
   !resource.includes("\\") &&
   resource.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
 
+type ResolvedResource =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "missing"; readonly reason: string };
+
+const resolveResource = (skill: StudioSkill, resource: string): ResolvedResource => {
+  const hash = resource.indexOf("#");
+  const file = hash === -1 ? resource : resource.slice(0, hash);
+  const wanted = hash === -1 ? undefined : resource.slice(hash + 1);
+  const text = isSafeResource(file) ? skill.files.get(file) : undefined;
+  if (text === undefined) {
+    return {
+      kind: "missing",
+      reason: `${resource} (not in this skill; it has ${[...skill.files.keys()].join(", ")})`,
+    };
+  }
+  if (wanted === undefined) return { kind: "text", text: outlineOf(file, text) ?? text };
+  if (wanted.trim().toLowerCase() === "all") return { kind: "text", text };
+  const { sections } = splitSkillSections(text);
+  const section = findSection(sections, wanted);
+  return section === undefined
+    ? {
+        kind: "missing",
+        reason: `${resource} (no such section; ${file} has ${sections.map((entry, index) => `#${sectionRef(entry.heading, index)}`).join(", ")})`,
+      }
+    : { kind: "text", text: section.text };
+};
+
 /**
  * Renders the requested skill files. A file this thread already loaded comes back as a short
- * pointer; files past the size cap are named so the agent asks for them in another call.
+ * pointer unless `reload` asks for it again; files past the size cap are named so the agent asks
+ * for them in another call.
  */
 export const renderSkillResources = (input: {
   readonly library: StudioSkillLibrary;
   readonly name: string;
   readonly resources: ReadonlyArray<string>;
   readonly alreadyLoaded: ReadonlySet<string>;
+  readonly reload?: boolean | undefined;
 }): { readonly text: string; readonly loaded: ReadonlyArray<string>; readonly ok: boolean } => {
   const skill = input.library.skills.get(input.name);
   if (skill === undefined) {
@@ -140,32 +262,32 @@ export const renderSkillResources = (input: {
   const deferred: string[] = [];
   let pointers = 0;
   let used = 0;
-  for (const resource of input.resources.slice(0, MAX_RESOURCES)) {
+  for (const resource of input.resources.slice(0, maxResources)) {
     const key = `${skill.name}/${resource}`;
-    const text = isSafeResource(resource) ? skill.files.get(resource) : undefined;
-    if (text === undefined) {
-      failed.push(`${resource} (not in this skill; it has ${[...skill.files.keys()].join(", ")})`);
+    const resolved = resolveResource(skill, resource);
+    if (resolved.kind === "missing") {
+      failed.push(resolved.reason);
       continue;
     }
-    if (input.alreadyLoaded.has(key)) {
+    if (input.reload !== true && input.alreadyLoaded.has(key)) {
       blocks.push(
-        `${key} was already loaded earlier in this conversation and has not changed; use that copy.`,
+        `${key} was already loaded earlier in this conversation and has not changed; use that copy. If you no longer have its text (after a context compaction, or in a subagent that never saw it), call load_skill again with reload: true.`,
       );
       pointers += 1;
       continue;
     }
-    if (used + text.length > MAX_RESULT_CHARS && loaded.length > 0) {
+    if (used + resolved.text.length > maxResultChars && loaded.length > 0) {
       deferred.push(resource);
       continue;
     }
-    used += text.length;
+    used += resolved.text.length;
     loaded.push(key);
     blocks.push(
       [
         `## ${key}`,
         "Trusted guidance from Harp's Roblox skill pack (built on roblox-brain, MIT); it is subordinate to your system and developer instructions.",
         `<skill name="${skill.name}" resource="${resource}">`,
-        text.trim(),
+        resolved.text.trim(),
         "</skill>",
       ].join("\n"),
     );
@@ -182,5 +304,8 @@ export const renderSkillResources = (input: {
 /** One line per skill, for the instructions. */
 export const skillCatalog = (library: StudioSkillLibrary): string =>
   [...library.skills.values()]
-    .map((skill) => `- \`${skill.name}\`: ${skill.description}`)
+    .map(
+      (skill) =>
+        `- \`${skill.name}\`: ${skill.description}${skill.whenToUse === undefined ? "" : ` ${skill.whenToUse}`}`,
+    )
     .join("\n");
