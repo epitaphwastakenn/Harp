@@ -10,6 +10,14 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.17.22 · 2026-11-09
+
+> Harp now tells you when it couldn't check for updates, and tries again on its own.
+
+### Fixed
+
+- **Update checks that fail** — When GitHub didn't answer, Harp looked as if there was simply no update. It now warns you in the sidebar button and in Settings, and retries up to three times, five minutes apart, instead of waiting four hours for the next check.
+
 ## 2.17.21 · 2026-11-09
 
 > Group threads into folders inside a project, and drag threads around without the sidebar falling apart.
