@@ -4,6 +4,8 @@ import type { DesktopUpdateState } from "@t3tools/contracts";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateCheckError,
+  getDesktopUpdateIdleTooltip,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
   resolveDesktopUpdateButtonAction,
@@ -76,6 +78,32 @@ describe("desktop update UI helpers", () => {
       );
     },
   );
+});
+
+describe("failed update checks", () => {
+  const failedCheck: DesktopUpdateState = {
+    ...baseState,
+    status: "error",
+    message: "Couldn't reach the update server.",
+    errorContext: "check",
+    canRetry: true,
+  };
+
+  it("reports a failed check so the button can warn about it", () => {
+    expect(getDesktopUpdateCheckError(failedCheck)).toBe("Couldn't reach the update server.");
+  });
+
+  it("ignores states that are not a failed check", () => {
+    expect(getDesktopUpdateCheckError({ ...baseState, status: "up-to-date" })).toBeNull();
+    expect(getDesktopUpdateCheckError({ ...failedCheck, errorContext: "download" })).toBeNull();
+  });
+
+  it("keeps the failure visible after a background check", () => {
+    expect(getDesktopUpdateIdleTooltip(failedCheck)).toEqual({
+      title: "Check for updates",
+      detail: "Couldn't reach the update server.",
+    });
+  });
 });
 
 describe("canCheckForUpdate", () => {

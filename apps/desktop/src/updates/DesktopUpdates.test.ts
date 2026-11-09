@@ -254,7 +254,7 @@ describe("DesktopUpdates", () => {
         assert.notInclude(Object.values(loggedAnnotation).map(String).join(" "), "secret");
         assert.equal(
           state.message,
-          "Electron updater failed to check for updates on channel default.",
+          "Couldn't get update info right now. Harp will try again automatically.",
         );
         assert.notInclude(state.message ?? "", "secret");
       }),
@@ -913,6 +913,74 @@ describe("DesktopUpdates", () => {
 
         yield* TestClock.adjust("1 minute");
         assert.equal(harness.checkCount(), 2);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("retries a failed check three times, then waits for the next poll", () => {
+    const updaterError = new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({
+      channel: null,
+      cause: new Error("504"),
+    });
+    const harness = makeHarness({ checkForUpdates: Effect.fail(updaterError) });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* TestClock.adjust("15 seconds");
+        assert.equal(harness.checkCount(), 1);
+
+        yield* TestClock.adjust("5 minutes");
+        assert.equal(harness.checkCount(), 2);
+
+        yield* TestClock.adjust("10 minutes");
+        assert.equal(harness.checkCount(), 4);
+
+        yield* TestClock.adjust("30 minutes");
+        assert.equal(harness.checkCount(), 4);
+
+        yield* TestClock.adjust("195 minutes");
+        assert.equal(harness.checkCount(), 5);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("retries a failed manual check and stops once a check works", () => {
+    const updaterError = new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({
+      channel: null,
+      cause: new Error("504"),
+    });
+    let feedDown = true;
+    const harness = makeHarness({
+      checkForUpdates: Effect.suspend(() => (feedDown ? Effect.fail(updaterError) : Effect.void)),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* TestClock.adjust("15 seconds");
+        feedDown = false;
+        yield* updates.check("manual");
+        harness.emit("update-not-available");
+        yield* flushCallbacks;
+        assert.equal(harness.checkCount(), 2);
+        assert.equal((yield* updates.getState).status, "up-to-date");
+
+        yield* TestClock.adjust("20 minutes");
+        assert.equal(harness.checkCount(), 2);
+
+        feedDown = true;
+        yield* updates.check("manual");
+        assert.equal(harness.checkCount(), 3);
+        assert.equal((yield* updates.getState).errorContext, "check");
+
+        feedDown = false;
+        yield* TestClock.adjust("5 minutes");
+        assert.equal(harness.checkCount(), 4);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

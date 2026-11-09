@@ -155,12 +155,18 @@ export function getDesktopUpdateDisabledReason(
   return state.message?.trim() || "Automatic updates are not available in this build.";
 }
 
+export function getDesktopUpdateCheckError(
+  state: Pick<DesktopUpdateState, "status" | "errorContext" | "message">,
+): string | null {
+  if (state.status !== "error" || state.errorContext !== "check") return null;
+  return state.message?.trim() || "Update check failed.";
+}
+
 export function getDesktopUpdateIdleTooltip(
-  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+  state: Pick<DesktopUpdateState, "enabled" | "status" | "errorContext" | "message"> | null,
   managedDenial?: string,
 ) {
   const disabledReason = getDesktopUpdateDisabledReason(state, managedDenial);
-  return disabledReason
-    ? { title: "Updates unavailable", detail: disabledReason }
-    : { title: "Check for updates", detail: null };
+  if (disabledReason) return { title: "Updates unavailable", detail: disabledReason };
+  return { title: "Check for updates", detail: state && getDesktopUpdateCheckError(state) };
 }

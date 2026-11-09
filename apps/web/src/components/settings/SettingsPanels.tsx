@@ -38,6 +38,7 @@ import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateCheckError,
   getDesktopUpdateDisabledReason,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
@@ -371,7 +372,7 @@ function AboutVersionSection() {
     void bridge
       .checkForUpdate()
       .then((result) => {
-        if (!result.checked) {
+        if (!result.checked || getDesktopUpdateCheckError(result.state) !== null) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
@@ -411,7 +412,9 @@ function AboutVersionSection() {
   const description =
     action === "download" || action === "install"
       ? "Update available."
-      : (getDesktopUpdateDisabledReason(updateState) ?? "Current version of the application.");
+      : (getDesktopUpdateDisabledReason(updateState) ??
+        (updateState && getDesktopUpdateCheckError(updateState)) ??
+        "Current version of the application.");
 
   return (
     <>

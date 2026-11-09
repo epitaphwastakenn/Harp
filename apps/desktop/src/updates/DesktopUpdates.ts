@@ -56,6 +56,9 @@ const CHANNEL_CHANGE_RETRY_DELAY = Duration.seconds(1);
 const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
+const checkRetryInterval = "5 minutes";
+const maxCheckRetries = 3;
+const checkFailedMessage = "Couldn't get update info right now. Harp will try again automatically.";
 const PREPARED_INSTALL_CHECK_WAIT = Duration.seconds(90);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
@@ -117,7 +120,7 @@ export class DesktopUpdateChannelPersistenceError extends Schema.TaggedError<Des
 export class DesktopUpdatePollerError extends Schema.TaggedError<DesktopUpdatePollerError>()(
   "DesktopUpdatePollerError",
   {
-    poller: Schema.Literals(["startup", "poll"]),
+    poller: Schema.Literals(["startup", "poll", "retry"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -376,6 +379,7 @@ export const make = Effect.gen(function* () {
   >([]);
   const finishedUpdateActions = yield* PubSub.unbounded<UpdateAction>();
   const updaterConfiguredRef = yield* Ref.make(false);
+  const checkRetriesRef = yield* Ref.make(0);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const notAppliedVersionRef = yield* Ref.make(Option.none<string>());
   // The release a track switch's database check cleared. A build crosses to another track only
@@ -548,7 +552,7 @@ export const make = Effect.gen(function* () {
           )(function* (error) {
             const failedAt = yield* currentIsoTimestamp;
             yield* updateState((current) =>
-              reduceDesktopUpdateStateOnCheckFailure(current, error.message, failedAt),
+              reduceDesktopUpdateStateOnCheckFailure(current, checkFailedMessage, failedAt),
             );
             yield* logUpdaterError(error.message, {
               errorTag: error._tag,
@@ -865,6 +869,17 @@ export const make = Effect.gen(function* () {
     };
   });
 
+  const retryFailedCheck = Effect.gen(function* () {
+    const state = yield* Ref.get(updateStateRef);
+    if (state.status !== "error" || state.errorContext !== "check") {
+      yield* Ref.set(checkRetriesRef, 0);
+      return;
+    }
+    if ((yield* Ref.get(checkRetriesRef)) >= maxCheckRetries) return;
+    yield* Ref.update(checkRetriesRef, (retries) => retries + 1);
+    yield* checkForUpdates("retry");
+  });
+
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
       Effect.andThen(checkForUpdates("startup")),
@@ -889,6 +904,22 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdatePollerError({ poller: "poll", cause });
+        return logUpdaterError(error.message, {
+          errorTag: error._tag,
+          cause: describeUpdateErrorCause(error.cause),
+          poller: error.poller,
+        });
+      }),
+      Effect.forkScoped,
+    );
+    yield* Effect.sleep(checkRetryInterval).pipe(
+      Effect.andThen(retryFailedCheck),
+      Effect.forever,
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdatePollerError({ poller: "retry", cause });
         return logUpdaterError(error.message, {
           errorTag: error._tag,
           cause: describeUpdateErrorCause(error.cause),
