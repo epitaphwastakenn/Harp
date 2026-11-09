@@ -103,6 +103,14 @@ jobs:
       - name: Check
         run: vp check
 
+      - name: Compile the Studio plugin and skill templates
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/luau.zip" https://github.com/luau-lang/luau/releases/download/0.746/luau-ubuntu.zip
+          unzip -q -o "$RUNNER_TEMP/luau.zip" -d "$RUNNER_TEMP/luau"
+          chmod +x "$RUNNER_TEMP/luau/luau-compile"
+          find apps/server/resources/studio-plugin apps/server/resources/studio-skills \( -name '*.luau' -o -name '*.lua' \) -print0 \
+            | xargs -0 -n 1 "$RUNNER_TEMP/luau/luau-compile" --null
+
   build:
     permissions:
       contents: read

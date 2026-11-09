@@ -4,11 +4,11 @@ Harp connects agents to Roblox Studio through its own Studio plugin. Agents can 
 your open place, write scripts, playtest, move the camera, take screenshots, use Creator Store assets
 and model in Blender, while you watch and control everything from a panel inside Studio.
 
-Turn it on in **Settings → Connections → Roblox Studio**.
+Turn it on in **Settings → Roblox Studio**.
 
 ## Start
 
-1. Choose **Harp** under **Studio connection**. On Windows, Harp turns this on by itself the
+1. Choose **Harp** under **Connection**. On Windows, Harp turns this on by itself the
    first time it starts on a machine with Roblox Studio installed.
 2. Open your place in Studio. Harp installs its plugin automatically; a Studio that was already
    open loads it the next time a place opens.
@@ -36,7 +36,9 @@ Plugins tab). The panel has Prompt, Studio, Tools and Activity tabs:
   you switch off is refused, whatever the agent asks.
 - **Activity:** each action the agent takes in this Studio, with its result and duration.
 
-These switches are enforced in Studio and in Harp.
+These switches are enforced in Studio and in Harp. While one of them holds the agent back (paused,
+read-only, Luau off or a tool switched off), the place menu next to the composer says so, so a
+refused action is never a mystery.
 
 ## Which threads get it
 
@@ -44,7 +46,7 @@ Only threads in a Roblox project get the Studio tools, rules and controls, so ot
 nothing for them and Harp never has to ask. A project counts as Roblox when any of these is true:
 
 - The folder or one directly under it has a Rojo `*.project.json`, a place or model file, Roblox
-  tooling such as `wally.toml` or `rokit.toml`, or an empty `.sealcode-roblox` file.
+  tooling such as `wally.toml` or `rokit.toml`, or an empty `.harp-roblox` file (`.sealcode-roblox` still works).
 - The project has a Roblox game icon, or "Roblox" in its name.
 - A place open in Studio has the project's name, or the folder is nearly empty while Studio is
   connected. Harp remembers this, so the project stays a Roblox project after Studio closes.
@@ -74,6 +76,24 @@ tools to every thread, except projects set to **Not a Roblox game**.
 
 Every tool call follows the thread's usual approval rules. Agents load Harp's Roblox skills
 (design, building, scripting, networking, data and more) when a task needs them.
+
+## Rojo
+
+In a workspace with Rojo project files, your files are the scripts' source of truth and Harp works
+that way too:
+
+- **One place or several.** Harp finds every place project in the workspace (up to three folders
+  deep, such as `places/lobby/default.project.json`), names each by its folder, and keeps the ports
+  your project file or editor tasks already use.
+- **One click per server.** The place menu next to the composer, and the same row in the thread
+  details panel, list each project with a switch that starts or stops `rojo serve` for it. **Start
+  all** runs every place of a multi-place workspace. A server you started yourself shows as serving
+  and is left alone. Connect the Rojo plugin in each Studio window to its port as usual.
+- **Edits go to files.** When an agent edits a script that Rojo syncs, Harp writes the file and
+  lets Rojo update Studio (or updates Studio too when Rojo is not serving), so the change appears
+  in the thread's diff and checkpoints. Scripts that are not in files are still edited in Studio.
+
+Harp looks for `rojo` on your PATH and in the Rokit, Aftman, Foreman and Cargo tool folders.
 
 ## Limit what the agent does in a thread
 
@@ -117,6 +137,9 @@ name it your way.
 
 ## AI model generation
 
-**Also connect Roblox's own MCP** (on by default) gives agents the Roblox Assistant's tools: AI model,
-mesh, texture and material generation, and publishing. Agents prefer Blender jobs and good Creator
+**Also connect Roblox's own MCP** (on by default) gives agents the Roblox Assistant's tools that Harp
+has no equivalent for: AI model, mesh, texture and material generation, avatar setup and publishing.
+Its tools for reading, editing, running code, playtests and screenshots are left out while Harp's
+own are connected, so agents see one tool for each job. Turn the switch off and nothing of Roblox's
+is loaded; choose **Roblox's own Studio MCP** as the connection and all of its tools are. Agents prefer Blender jobs and good Creator
 Store assets, and use AI generation when you ask for it or nothing better fits.

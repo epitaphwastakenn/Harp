@@ -38,11 +38,14 @@ your open place, and you watch and steer it from a panel inside Studio:
   read-only, or switch off any single tool.
 - **Updates without restarts.** The plugin updates itself in place when Harp updates, and agents
   close old Studio windows instead of piling new ones up.
-- **31 Roblox skills.** Luau and types, architecture, networking and security, DataStores, UI design,
+- **29 Roblox skills.** Luau and types, architecture, networking and security, DataStores, UI design,
   game design, monetization, performance, lighting, audio, physics, NPC AI, localization, analytics and
   a publish checklist, loaded only when a task needs them.
-- **Rojo aware.** When your workspace has a Rojo project, script edits are saved to your files.
-- **Roblox's own Studio MCP** can run next to Harp's for mesh, texture and material generation.
+- **Rojo built in.** Harp finds the Rojo projects in your workspace, one place or several, and starts
+  or stops each Rojo server with one click. Script edits are saved to your files, so they show up in
+  diffs and checkpoints like any other change.
+- **Roblox's own Studio MCP** can run next to Harp's for mesh, texture and material generation, with
+  the tools Harp already has left out.
 
 Only Roblox projects get the Studio tools, so other projects don't pay for them. See
 [Roblox Studio](./docs/user/roblox-studio.md).
@@ -104,7 +107,7 @@ Then install and sign in to at least one agent:
 - **OpenCode:** install [OpenCode](https://opencode.ai) and run `opencode auth login`
 - **CommandCode:** install its `commandcode` CLI and sign in
 
-For Roblox, open **Settings → Connections → Roblox Studio** and choose **Harp**. The Studio plugin installs itself.
+For Roblox, open **Settings → Roblox Studio** and choose **Harp** under **Connection**. The Studio plugin installs itself.
 
 ### Run from source
 
