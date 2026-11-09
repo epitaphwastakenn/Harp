@@ -10,6 +10,18 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.18.1 · 2026-11-09
+
+> Harp opens faster: its window is on screen in about half a second.
+
+### Improved
+
+- **Faster launch** — The window now loads while Harp's server starts instead of after it, showing the Harp logo until everything is ready. In our measurements the window appeared after 0.5 seconds instead of about 2, and the thread list about half a second sooner.
+- **Faster command lookups on Windows** — Finding an agent's program on your PATH took up to a third of a second each time. It now takes a few hundredths.
+- **Settings open sooner** — The Settings screen is loaded in the background after launch, not on the first click.
+- **Roblox Studio status** — The place menu and the Roblox Studio settings page no longer wait for Blender to answer before showing.
+- **Quieter start** — The check of your PowerShell profile no longer competes with the launch.
+
 ## 2.18.0 · 2026-11-09
 
 > Rojo is built in: Harp finds your places, starts their Rojo servers in one click, and saves script edits to your files.
