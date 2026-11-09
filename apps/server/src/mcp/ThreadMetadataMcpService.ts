@@ -63,8 +63,18 @@ function metadataCommand(input: {
   readonly commandId: CommandId;
   readonly threadId: ThreadId;
   readonly update: ThreadMetadataMcpUpdateInput;
-}): Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }> {
+}): Extract<
+  OrchestrationV2Command,
+  { readonly type: "thread.metadata.update" | "thread.folder.set" }
+> {
   switch (input.update.action) {
+    case "set_folder":
+      return {
+        type: "thread.folder.set",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        folder: input.update.folder ?? null,
+      };
     case "rename":
       return {
         type: "thread.metadata.update",
@@ -88,7 +98,7 @@ function resultFromThread(input: {
   readonly sequence: number;
   readonly thread: Pick<
     OrchestrationV2AppThread,
-    "id" | "title" | "titleRegeneration" | "linkedPullRequest" | "updatedAt"
+    "id" | "title" | "folder" | "titleRegeneration" | "linkedPullRequest" | "updatedAt"
   >;
 }): ThreadMetadataMcpUpdateResult {
   return {
@@ -97,6 +107,7 @@ function resultFromThread(input: {
     commandId: input.commandId,
     sequence: input.sequence,
     title: input.thread.title,
+    folder: input.thread.folder ?? null,
     titleRegeneration:
       input.thread.titleRegeneration === undefined || input.thread.titleRegeneration === null
         ? null

@@ -42,6 +42,7 @@ import {
 import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
+import { ThreadFolderName } from "./threadFolder.ts";
 import {
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
@@ -527,6 +528,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
+  folder: Schema.optional(Schema.NullOr(Schema.String)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1947,6 +1949,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.tags-updated",
+      "thread.folder-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.metadata-updated",
@@ -2202,6 +2205,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
+  folder: Schema.optional(Schema.NullOr(Schema.String)),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
@@ -2834,6 +2838,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.tags-updated",
+      "thread.folder-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
@@ -3073,6 +3078,12 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     tag: ThreadTag,
     tagged: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.folder.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    folder: Schema.NullOr(ThreadFolderName),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pin.reorder"),
@@ -3636,6 +3647,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getNativeChildWork: "orchestration.getNativeChildWork",
   stopWorkflow: "orchestration.stopWorkflow",
   forceStopThread: "orchestration.forceStopThread",
+  renameThreadFolder: "orchestration.renameThreadFolder",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeShell: "orchestration.subscribeShell",
@@ -4043,6 +4055,35 @@ export const OrchestrationV2ForceStopThreadResult = Schema.Struct({
 });
 export type OrchestrationV2ForceStopThreadResult = typeof OrchestrationV2ForceStopThreadResult.Type;
 
+export const OrchestrationV2RenameThreadFolderInput = Schema.Struct({
+  commandId: CommandId,
+  projectId: ProjectId,
+  folder: Schema.String,
+  /** The new name, or null to dissolve the folder and hand its threads back to the project. */
+  newFolder: Schema.NullOr(ThreadFolderName),
+});
+export type OrchestrationV2RenameThreadFolderInput =
+  typeof OrchestrationV2RenameThreadFolderInput.Type;
+
+export const OrchestrationV2RenameThreadFolderResult = Schema.Struct({
+  threadIds: Schema.Array(ThreadId),
+});
+export type OrchestrationV2RenameThreadFolderResult =
+  typeof OrchestrationV2RenameThreadFolderResult.Type;
+
+export class OrchestrationV2RenameThreadFolderError extends Schema.TaggedError<OrchestrationV2RenameThreadFolderError>()(
+  "OrchestrationV2RenameThreadFolderError",
+  {
+    projectId: ProjectId,
+    folder: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to change thread folder '${this.folder}'.`;
+  }
+}
+
 export class OrchestrationV2ForceStopThreadError extends Schema.TaggedError<OrchestrationV2ForceStopThreadError>()(
   "OrchestrationV2ForceStopThreadError",
   {
@@ -4295,6 +4336,10 @@ export const OrchestrationV2RpcSchemas = {
   forceStopThread: {
     input: OrchestrationV2ForceStopThreadInput,
     output: OrchestrationV2ForceStopThreadResult,
+  },
+  renameThreadFolder: {
+    input: OrchestrationV2RenameThreadFolderInput,
+    output: OrchestrationV2RenameThreadFolderResult,
   },
   getWorkflowScript: {
     input: OrchestrationV2GetWorkflowScriptInput,

@@ -44,6 +44,7 @@ import {
   setThreadStudioControls,
   pinThread,
   reorderPinnedThread,
+  setThreadFolder,
   reorderActiveThread,
   setThreadAutoSettle,
   settleThread,
@@ -183,6 +184,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderPin: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-pin",
       execute: reorderPinnedThread,
+      scheduler,
+      concurrency,
+    }),
+    setFolder: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-folder",
+      execute: setThreadFolder,
       scheduler,
       concurrency,
     }),
@@ -447,6 +454,10 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderPin: optimistic.wrap(commands.reorderPin, (thread, input) => ({
       ...thread,
       pinOrderKey: input.orderKey,
+    })),
+    setFolder: optimistic.wrap(commands.setFolder, (thread, input) => ({
+      ...thread,
+      folder: input.folder,
     })),
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,

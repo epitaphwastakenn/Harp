@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+import { ThreadFolderName } from "./threadFolder.ts";
+
 import {
   CommandId,
   IsoDateTime,
@@ -40,19 +42,34 @@ const ThreadMetadataClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLe
   )
   .annotate({ description: "Stable idempotency key to reuse when retrying this mutation." });
 
-export const ThreadMetadataMcpAction = Schema.Literals(["rename", "regenerate_title"]);
+export const ThreadMetadataMcpAction = Schema.Literals([
+  "rename",
+  "regenerate_title",
+  "set_folder",
+]);
 export type ThreadMetadataMcpAction = typeof ThreadMetadataMcpAction.Type;
 
 export const ThreadMetadataMcpUpdateInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   action: ThreadMetadataMcpAction,
   title: Schema.optional(ThreadMetadataTitle),
+  folder: Schema.optional(
+    Schema.NullOr(ThreadFolderName).annotate({
+      description:
+        "Sidebar folder inside the thread's project; null moves the thread back to the project. Required only when action is set_folder.",
+    }),
+  ),
   clientRequestId: Schema.optional(ThreadMetadataClientRequestId),
 }).check(
   Schema.makeFilter((input) =>
     (input.action === "rename") === (input.title !== undefined)
       ? true
-      : "rename requires title; regenerate_title does not accept one.",
+      : "rename requires title; the other actions do not accept one.",
+  ),
+  Schema.makeFilter((input) =>
+    (input.action === "set_folder") === (input.folder !== undefined)
+      ? true
+      : "set_folder requires folder; the other actions do not accept one.",
   ),
 );
 export type ThreadMetadataMcpUpdateInput = typeof ThreadMetadataMcpUpdateInput.Type;
@@ -63,6 +80,7 @@ export const ThreadMetadataMcpUpdateResult = Schema.Struct({
   commandId: CommandId,
   sequence: NonNegativeInt,
   title: Schema.String,
+  folder: Schema.NullOr(Schema.String),
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   updatedAt: IsoDateTime,

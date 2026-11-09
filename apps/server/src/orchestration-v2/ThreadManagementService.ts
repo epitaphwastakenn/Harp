@@ -16,6 +16,9 @@ import {
   OrchestrationV2StopWorkflowError,
   type OrchestrationV2StopWorkflowInput,
   OrchestrationV2ForceStopThreadError,
+  OrchestrationV2RenameThreadFolderError,
+  type OrchestrationV2RenameThreadFolderInput,
+  type OrchestrationV2RenameThreadFolderResult,
   type OrchestrationV2ForceStopThreadInput,
   type OrchestrationV2ForceStopThreadResult,
   type ModelSelection,
@@ -470,6 +473,13 @@ export interface ThreadManagementServiceShape {
   readonly forceStopThread: (
     input: OrchestrationV2ForceStopThreadInput,
   ) => Effect.Effect<OrchestrationV2ForceStopThreadResult, OrchestrationV2ForceStopThreadError>;
+  /** Renames a folder, or dissolves it with a null name, across all the project's threads. */
+  readonly renameThreadFolder: (
+    input: OrchestrationV2RenameThreadFolderInput,
+  ) => Effect.Effect<
+    OrchestrationV2RenameThreadFolderResult,
+    OrchestrationV2RenameThreadFolderError
+  >;
   readonly awaitBackgroundTasks: (input: {
     readonly threadId: ThreadId;
     readonly taskIds: ReadonlyArray<string>;
@@ -1109,6 +1119,33 @@ const make = Effect.gen(function* () {
     return { type: "interrupt_requested", run: interruptibleRun, dispatch } as const;
   });
 
+  const renameThreadFolder: ThreadManagementServiceShape["renameThreadFolder"] = Effect.fn(
+    "ThreadManagementService.renameThreadFolder",
+  )(function* (input) {
+    const failure = (cause: unknown) =>
+      new OrchestrationV2RenameThreadFolderError({
+        projectId: input.projectId,
+        folder: input.folder,
+        cause,
+      });
+    const snapshots = yield* Effect.forEach(["active", "archive"] as const, (location) =>
+      orchestrator.getShellSnapshot({ location, projectId: input.projectId }),
+    ).pipe(Effect.mapError(failure));
+    const threadIds = snapshots
+      .flatMap((snapshot) => snapshot.threads)
+      .filter((thread) => thread.deletedAt === null && thread.folder === input.folder)
+      .map((thread) => thread.id);
+    yield* Effect.forEach(threadIds, (threadId) =>
+      orchestrator.dispatch({
+        type: "thread.folder.set",
+        commandId: CommandId.make(`${input.commandId}:${threadId}`),
+        threadId,
+        folder: input.newFolder,
+      }),
+    ).pipe(Effect.mapError(failure));
+    return { threadIds };
+  });
+
   const forceStopThread: ThreadManagementServiceShape["forceStopThread"] = Effect.fn(
     "ThreadManagementService.forceStopThread",
   )(
@@ -1546,6 +1583,7 @@ const make = Effect.gen(function* () {
     stopDelegatedTasks,
     stopWorkflow,
     forceStopThread,
+    renameThreadFolder,
     awaitBackgroundTasks,
     getThreadEventSequence: orchestrator.getThreadEventSequence,
     recoverDelegatedTask: orchestrator.recoverDelegatedTask,

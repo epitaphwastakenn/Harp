@@ -264,6 +264,7 @@ describe("remote thread lifecycle commands", () => {
     ["setAutoSettle", { enabled: false }, { autoSettleDisabledAt: expect.any(Object) }],
     ["reorderPin", { orderKey: "b" }, { pinOrderKey: "b" }],
     ["reorderActive", { orderKey: "b" }, { activeOrderKey: "b" }],
+    ["setFolder", { folder: "UI" }, { folder: "UI" }],
   ] as const;
 
   it.effect.each(actions)(
@@ -299,6 +300,7 @@ describe("remote thread lifecycle commands", () => {
             enabled: false,
             orderKey: "a",
             snoozedUntil: "2099-01-01T00:00:00.000Z",
+            folder: null,
             ...input,
           },
         });

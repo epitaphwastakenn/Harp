@@ -106,6 +106,10 @@ export interface ReorderPinnedThreadInput extends ThreadCommandInput {
   readonly orderKey: string;
 }
 
+export interface SetThreadFolderInput extends ThreadCommandInput {
+  readonly folder: string | null;
+}
+
 export interface ReorderActiveThreadInput extends ThreadCommandInput {
   readonly orderKey: string;
 }
@@ -498,6 +502,17 @@ export const reorderPinnedThread = Effect.fn("EnvironmentCommands.reorderPinnedT
     commandId,
     threadId: input.threadId,
     orderKey: input.orderKey,
+  });
+});
+
+export const setThreadFolder = Effect.fn("EnvironmentCommands.setThreadFolder")(function* (
+  input: SetThreadFolderInput,
+) {
+  return yield* dispatch({
+    type: "thread.folder.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    folder: input.folder,
   });
 });
 

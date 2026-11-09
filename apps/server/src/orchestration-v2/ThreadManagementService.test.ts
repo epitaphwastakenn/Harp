@@ -269,6 +269,66 @@ it.effect("waitForThread follows a restart continuation instead of the cut run",
   }),
 );
 
+it.effect("renameThreadFolder reaches archived threads and leaves other folders alone", () =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:thread-management:folder");
+    const shell = (id: string, folder: string | null, deletedAt: string | null = null) => ({
+      id: ThreadId.make(id),
+      folder,
+      deletedAt,
+    });
+    const snapshots = {
+      active: [shell("active-ui", "UI"), shell("active-bugs", "Bugs"), shell("loose", null)],
+      archive: [shell("archived-ui", "UI"), shell("deleted-ui", "UI", "2026-01-01T00:00:00.000Z")],
+    };
+    const dispatched: Array<OrchestrationV2Command> = [];
+    const layerTest = ThreadManagementService.layer.pipe(
+      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+      Layer.provide(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          getShellSnapshot: (input) =>
+            Effect.succeed({
+              threads: snapshots[input?.location === "archive" ? "archive" : "active"],
+            } as never),
+          dispatch: (command) =>
+            Effect.sync(() => {
+              dispatched.push(command as OrchestrationV2Command);
+              return {} as never;
+            }),
+        }),
+      ),
+      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(layerReceiptsTest),
+    );
+    const service = yield* ThreadManagementService.ThreadManagementService.pipe(
+      Effect.provide(layerTest),
+    );
+
+    const result = yield* service.renameThreadFolder({
+      commandId: CommandId.make("rename-ui"),
+      projectId,
+      folder: "UI",
+      newFolder: null,
+    });
+
+    expect(result.threadIds).toEqual(["active-ui", "archived-ui"]);
+    expect(dispatched).toEqual([
+      {
+        type: "thread.folder.set",
+        commandId: "rename-ui:active-ui",
+        threadId: "active-ui",
+        folder: null,
+      },
+      {
+        type: "thread.folder.set",
+        commandId: "rename-ui:archived-ui",
+        threadId: "archived-ui",
+        folder: null,
+      },
+    ]);
+  }),
+);
+
 it.effect("waitForThread can wait past an ended run for the thread's delegated work", () =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("project:thread-management:wait-delegated");

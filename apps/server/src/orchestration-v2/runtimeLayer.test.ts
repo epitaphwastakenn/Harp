@@ -2553,6 +2553,25 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         DateTime.toEpochMillis(taggedShell.updatedAt),
         DateTime.toEpochMillis(untaggedShell.updatedAt),
       );
+      for (const [step, folder] of [
+        ["file", "UI"],
+        ["refile", "Bugs"],
+        ["take-out", null],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.folder.set",
+          commandId: CommandId.make(`runtime-layer-lifecycle-folder-${step}`),
+          threadId,
+          folder,
+        });
+        const shell = shellOf(yield* orchestrator.getShellSnapshot());
+        assert.equal(shell.folder ?? null, folder, step);
+        // Filing a thread is not activity either.
+        assert.equal(
+          DateTime.toEpochMillis(shell.updatedAt),
+          DateTime.toEpochMillis(untaggedShell.updatedAt),
+        );
+      }
 
       const preAutoProjection = yield* orchestrator.getThreadProjection(threadId);
       const staleAutoSettle = yield* orchestrator
