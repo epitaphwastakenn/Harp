@@ -8,6 +8,7 @@ import {
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
+  sidebarGroupHeaderId,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -21,6 +22,12 @@ const thread = (key: string, section: SidebarSection): SidebarListItem => ({
   section,
 });
 const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
+const projectHeader = (key: string): SidebarListItem => ({
+  kind: "group",
+  group: "project",
+  id: sidebarGroupHeaderId("project", key),
+  key,
+});
 const pinnedHeader = marker("pinned-header");
 const divider = marker("pinned-divider");
 const settledHeader = marker("settled-header");
@@ -36,11 +43,13 @@ function layout(
   let top = 100;
   const rects = items.map((item) => {
     const height =
-      item.kind === "thread"
-        ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
-        : item.marker === "pinned-header" || item.marker === "pinned-divider"
-          ? 0
-          : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
+      item.kind === "group"
+        ? 32 * scale
+        : item.kind === "thread"
+          ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
+          : item.marker === "pinned-header" || item.marker === "pinned-divider"
+            ? 0
+            : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
     return rect;
@@ -679,6 +688,74 @@ describe("sidebar drag projection", () => {
     );
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
+  });
+});
+
+describe("drag preview with project headers", () => {
+  const depthsHeader = sidebarGroupHeaderId("project", "depths");
+  const telinhaHeader = sidebarGroupHeaderId("project", "telinha");
+  const items = [
+    pinnedHeader,
+    divider,
+    projectHeader("sugary"),
+    thread("s1", "active"),
+    thread("s2", "active"),
+    projectHeader("depths"),
+    thread("d1", "active"),
+    thread("d2", "active"),
+    projectHeader("telinha"),
+    thread("t1", "active"),
+    settledHeader,
+    marker("settled-placeholder"),
+  ];
+  const grouped = ["s1", "s2", "d1", "d2", "t1"];
+
+  it("holds every row and header still while the drag stays in Active", () => {
+    const result = preview(
+      {
+        items,
+        settledOrder: [],
+        activeOrder: grouped,
+        activeGroupHeaderIds: [depthsHeader],
+        settledExpanded: false,
+      },
+      "d1",
+      "d1",
+    );
+    for (const item of items.slice(2, -2)) {
+      expect(result.get(sidebarListItemId(item))?.y, sidebarListItemId(item)).toBe(0);
+    }
+  });
+
+  it("carries the headers along when a row above them leaves Active", () => {
+    const result = preview(
+      { items, settledOrder: ["s1"], activeOrder: grouped, settledExpanded: false },
+      "s1",
+      sidebarMarkerId("settled-header"),
+    );
+    expect(result.get("s2")?.y).toBe(-83);
+    expect(result.get(depthsHeader)?.y).toBe(-83);
+    expect(result.get("d1")?.y).toBe(-83);
+    expect(result.get(telinhaHeader)?.y).toBe(-83);
+  });
+
+  it("opens a returning row's slot above the next project's header", () => {
+    const fromPinned = [pinnedHeader, thread("d9", "pinned"), ...items.slice(1)];
+    const result = preview(
+      {
+        items: fromPinned,
+        settledOrder: [],
+        activeOrder: ["s1", "s2", "d1", "d2", "d9", "t1"],
+        activeGroupHeaderIds: [depthsHeader],
+        settledExpanded: false,
+      },
+      "d9",
+      "t1",
+    );
+    expect(result.get(depthsHeader)?.y).toBe(-83);
+    expect(result.get("d2")?.y).toBe(-83);
+    expect(result.get(telinhaHeader)?.y).toBe(0);
+    expect(result.get("t1")?.y).toBe(0);
   });
 });
 

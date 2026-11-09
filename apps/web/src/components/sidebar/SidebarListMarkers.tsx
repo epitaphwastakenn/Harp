@@ -1,7 +1,7 @@
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { type ReactNode, useLayoutEffect } from "react";
+import { type ComponentProps, type ReactNode, useLayoutEffect } from "react";
 import { cn } from "~/lib/utils";
 import {
   animateSidebarLayoutChanges,
@@ -9,6 +9,34 @@ import {
   type SidebarListMarker,
 } from "../Sidebar.logic";
 import { SIDEBAR_SORTABLE_DRAG_DISABLED } from "./SidebarThreadRow";
+
+/**
+ * A row of the sortable list that takes transforms but is never picked up, so
+ * group headers travel with the rows around them during a drag.
+ */
+export function SortableSidebarGroupItem({
+  sortableId,
+  style,
+  ...props
+}: ComponentProps<"li"> & { sortableId: string }) {
+  const { setNodeRef, transform, transition } = useSortable({
+    id: sortableId,
+    disabled: SIDEBAR_SORTABLE_DRAG_DISABLED,
+    animateLayoutChanges: animateSidebarLayoutChanges,
+  });
+  return (
+    <li
+      {...props}
+      ref={setNodeRef}
+      style={{
+        ...style,
+        transform: CSS.Translate.toString(transform),
+        transition,
+        visibility: transform?.scaleY === 0 ? "hidden" : undefined,
+      }}
+    />
+  );
+}
 
 function SortableSidebarMarker(props: {
   marker: SidebarListMarker;

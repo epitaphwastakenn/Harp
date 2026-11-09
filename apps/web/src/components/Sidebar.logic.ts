@@ -227,9 +227,22 @@ export function sidebarMarkerId(marker: SidebarListMarker): string {
 
 export type SidebarListItem =
   | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
-  | { readonly kind: "marker"; readonly marker: SidebarListMarker };
+  | { readonly kind: "marker"; readonly marker: SidebarListMarker }
+  | {
+      readonly kind: "group";
+      readonly group: SidebarGroupHeaderKind;
+      readonly id: string;
+      readonly key: string;
+    };
+
+export type SidebarGroupHeaderKind = "project" | "folder" | "divider";
+
+export function sidebarGroupHeaderId(group: SidebarGroupHeaderKind, key: string): string {
+  return `sidebar-group-${group}-${key}`;
+}
 
 export function sidebarListItemId(item: SidebarListItem): string {
+  if (item.kind === "group") return item.id;
   return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
 }
 
@@ -276,7 +289,8 @@ export function resolveSidebarDropTarget(
         item.marker === "settled-header"
       )
         break;
-    } else if (currentSection === "pinned") pinnedOrder.push(item.key);
+    } else if (item.kind === "group") continue;
+    else if (currentSection === "pinned") pinnedOrder.push(item.key);
     else activeOrder.push(item.key);
   }
   return { section, pinnedOrder, activeOrder };
