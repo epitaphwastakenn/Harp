@@ -450,7 +450,7 @@ effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
             stat: (filePath) =>
               Effect.sync(() => {
                 probed.push(filePath);
-                return { type: "Directory" } as FileSystem.File.Info;
+                return { type: "Directory", mtime: Option.none() } as FileSystem.File.Info;
               }),
           }),
         ),
@@ -468,7 +468,11 @@ effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
       });
 
       // Windows PATH directories can be case-sensitive; preserve both spellings.
-      expect(probed).toHaveLength(8);
+      const candidates = probed.filter((filePath) => filePath.toLowerCase() !== "c:\\bin");
+      expect(candidates).toHaveLength(8);
+      expect(new Set(candidates.map((filePath) => filePath.slice(0, 6)))).toEqual(
+        new Set(["C:\\bin", "C:\\BIN"]),
+      );
     }),
   );
 

@@ -976,6 +976,7 @@ export interface DesktopBridge {
    * Renderer `window.focus()` cannot raise an Electron window, and on Wayland
    * only the main process can spend a notification click's activation token.
    */
+  awaitBackendReady?: () => Promise<void>;
   revealWindow: () => Promise<void>;
   /**
    * The OS locale as a BCP-47 tag, which the renderer cannot read for itself:

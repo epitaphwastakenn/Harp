@@ -8,6 +8,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
 
 import * as GlobalMcpManager from "../mcp/GlobalMcpManager.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -91,15 +92,32 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       );
 
+  const checking = new Set<string>();
+  const scope = yield* Scope.Scope;
+
   const cachedVersion = Effect.fn("RobloxStudioStatus.cachedVersion")(function* (
     executable: string,
   ) {
     const now = yield* Clock.currentTimeMillis;
     const cached = versions.get(executable);
-    if (cached !== undefined && now - cached.at < VERSION_CACHE_MS) return cached.version;
-    const version = yield* blenderVersion(executable);
-    versions.set(executable, { version, at: now });
-    return version;
+    if (
+      (cached === undefined || now - cached.at >= VERSION_CACHE_MS) &&
+      !checking.has(executable)
+    ) {
+      checking.add(executable);
+      yield* blenderVersion(executable).pipe(
+        Effect.flatMap((version) =>
+          Clock.currentTimeMillis.pipe(
+            Effect.map((at) => {
+              versions.set(executable, { version, at });
+            }),
+          ),
+        ),
+        Effect.ensuring(Effect.sync(() => checking.delete(executable))),
+        Effect.forkIn(scope),
+      );
+    }
+    return { version: cached?.version, checked: cached !== undefined };
   });
 
   const detectProject: RobloxStudioStatusService["Service"]["detectProject"] = Effect.fn(
@@ -125,16 +143,17 @@ const make = Effect.gen(function* () {
 
     // The bridge's `blender` tool exists whenever Harp mode is on.
     const executable = blenderExecutableFor(roblox, environment);
-    const version =
+    const known =
       roblox.mode === "sealcode" && executable !== undefined
         ? yield* cachedVersion(executable)
-        : undefined;
+        : { version: undefined, checked: false };
+    const version = known.version;
     const blenderProblem =
       roblox.mode !== "sealcode"
         ? undefined
         : executable === undefined
           ? "Blender was not found. Choose blender.exe in Settings."
-          : version === undefined
+          : version === undefined && known.checked
             ? `${executable} did not answer --version as Blender.`
             : undefined;
     const launch = blenderMcpLaunchFor(roblox, environment);

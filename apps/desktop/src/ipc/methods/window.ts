@@ -32,6 +32,7 @@ import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../../electron/ElectronMenu.ts";
@@ -418,6 +419,16 @@ export const pasteAsText = DesktopIpc.makeIpcMethod({
     ) {
       focused.paste();
     }
+  }),
+});
+
+export const awaitBackendReady = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.AWAIT_BACKEND_READY_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.awaitBackendReady")(function* () {
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    yield* desktopWindow.awaitBackendReady;
   }),
 });
 

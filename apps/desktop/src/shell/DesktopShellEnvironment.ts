@@ -4,6 +4,7 @@ import {
   setWindowsPath,
 } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -115,6 +116,7 @@ const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const OPTIONAL_WINDOWS_SHELLS: ReadonlySet<string> = new Set(["pwsh.exe"]);
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+const BACKGROUND_REFRESH_DELAY = Duration.seconds(12);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
 
@@ -625,6 +627,10 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   const backgroundFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
+  const refreshWanted = yield* Deferred.make<void>();
+  const afterLaunch = Deferred.await(refreshWanted).pipe(
+    Effect.timeoutOrElse({ duration: BACKGROUND_REFRESH_DELAY, orElse: () => Effect.void }),
+  );
   const installIntoProcess: DesktopShellEnvironment["Service"]["installIntoProcess"] =
     yield* Effect.cached(
       installShellEnvironment({
@@ -636,7 +642,7 @@ export const make = Effect.gen(function* () {
           path: environment.path.join(environment.stateDir, WINDOWS_SHELL_CACHE_FILE),
         },
         runInBackground: (effect) =>
-          Effect.forkIn(effect, scope).pipe(
+          Effect.forkIn(Effect.andThen(afterLaunch, effect), scope).pipe(
             Effect.flatMap((fiber) => Ref.set(backgroundFiber, Option.some(fiber))),
           ),
       }).pipe(
@@ -648,7 +654,8 @@ export const make = Effect.gen(function* () {
 
   return DesktopShellEnvironment.of({
     installIntoProcess,
-    backgroundRefresh: Ref.get(backgroundFiber).pipe(
+    backgroundRefresh: Deferred.succeed(refreshWanted, undefined).pipe(
+      Effect.andThen(Ref.get(backgroundFiber)),
       Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: Fiber.join })),
     ),
   });

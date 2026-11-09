@@ -7,8 +7,10 @@ import "./index.css";
 import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { scheduleIdle } from "./lib/scheduleIdle";
 
 const router = startAppServices();
+const settingsRouteIds = ["/_chat/settings", "/_chat/settings/general"] as const;
 
 let chunkLoadFailed = false;
 let reloadScheduled = false;
@@ -37,6 +39,11 @@ export const startup = router
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>{app}</React.StrictMode>,
     );
+    scheduleIdle(() => {
+      for (const id of settingsRouteIds) {
+        void router.loadRouteChunk(router.routesById[id])?.catch(() => undefined);
+      }
+    });
   })
   .catch((error: unknown) => {
     if (reloadScheduled) return;

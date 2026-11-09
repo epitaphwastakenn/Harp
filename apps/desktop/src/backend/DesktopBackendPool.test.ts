@@ -80,6 +80,7 @@ function layerPool(
           showConnectingSplash: Effect.void,
           handleBackendReady: () => Effect.void,
           handleBackendNotReady: Effect.void,
+          awaitBackendReady: Effect.void,
           notifyLocalEnvironmentsChanged:
             topologyNotifications === undefined
               ? Effect.void

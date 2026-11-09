@@ -100,6 +100,7 @@ function layerDesktopWindow(
     showConnectingSplash: Effect.void,
     handleBackendReady: () => Effect.void,
     handleBackendNotReady: Effect.void,
+    awaitBackendReady: Effect.void,
     notifyLocalEnvironmentsChanged: Effect.void,
     flushMainWindowBounds: input.flushMainWindowBounds ?? Effect.void,
     prepareCaptureReveal: Effect.void,

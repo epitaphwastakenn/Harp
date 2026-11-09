@@ -1,5 +1,6 @@
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -114,6 +115,7 @@ export class DesktopWindow extends Context.Service<
     readonly showConnectingSplash: Effect.Effect<void>;
     readonly handleBackendReady: (httpBaseUrl: URL) => Effect.Effect<void, DesktopWindowError>;
     readonly handleBackendNotReady: Effect.Effect<void>;
+    readonly awaitBackendReady: Effect.Effect<void>;
     /** Tells renderers to re-read getLocalEnvironmentBootstraps. */
     readonly notifyLocalEnvironmentsChanged: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
@@ -346,6 +348,7 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const backendReadyRef = yield* Ref.make(false);
+  const backendReadyGate = yield* Ref.make(yield* Deferred.make<void>());
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const heldMainRef = yield* Ref.make<Option.Option<HeldMainWindow>>(Option.none());
   // Releasing the held window and creating a window must not interleave, or a second main window opens.
@@ -467,7 +470,15 @@ export const make = Effect.gen(function* () {
     };
     if (input.deferLoad) {
       yield* electronWindow.hold(window);
-      yield* Ref.set(heldMainRef, Option.some({ window, load: loadApplication }));
+      yield* Ref.set(
+        heldMainRef,
+        Option.some({
+          window,
+          load: () => {
+            if (!pageRequested || window.webContents.isCrashed()) loadApplication();
+          },
+        }),
+      );
     }
     if (yield* Ref.get(desktopState.quitting)) {
       yield* electronWindow.destroyAll;
@@ -895,7 +906,7 @@ export const make = Effect.gen(function* () {
       void runPromise(Effect.andThen(electronWindow.reveal(window), dismissConnectingSplash));
     });
 
-    if (!input.deferLoad) loadApplication();
+    if (!input.deferLoad || !environment.isDevelopment) loadApplication();
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });
     }
@@ -1103,12 +1114,21 @@ export const make = Effect.gen(function* () {
     showConnectingSplash,
     handleBackendReady: Effect.fn("desktop.window.handleBackendReady")(function* (httpBaseUrl) {
       yield* Ref.set(backendReadyRef, true);
+      yield* Ref.get(backendReadyGate).pipe(
+        Effect.flatMap((gate) => Deferred.succeed(gate, undefined)),
+      );
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
       yield* createMainIfBackendReady;
     }),
-    handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
-      Effect.withSpan("desktop.window.handleBackendNotReady"),
-    ),
+    handleBackendNotReady: Effect.gen(function* () {
+      if (yield* Ref.getAndSet(backendReadyRef, false)) {
+        yield* Ref.set(backendReadyGate, yield* Deferred.make<void>());
+      }
+    }).pipe(Effect.withSpan("desktop.window.handleBackendNotReady")),
+    awaitBackendReady: Effect.gen(function* () {
+      if (!(yield* waitingForBackend)) return;
+      yield* Deferred.await(yield* Ref.get(backendReadyGate));
+    }).pipe(Effect.withSpan("desktop.window.awaitBackendReady")),
     // Runs inside backend stop finalizers, which a window already torn down must not abort.
     notifyLocalEnvironmentsChanged: Effect.suspend(() =>
       electronWindow.sendAll(LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANGED_CHANNEL),

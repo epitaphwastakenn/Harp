@@ -547,6 +547,23 @@ export const withPathDirectoryListings =
     return yield* effect.pipe(Effect.provideService(PathDirectoryListings, listings));
   });
 
+const PROCESS_PATH_DIRECTORY_LISTINGS_MAX = 1024;
+const processPathDirectoryListings = new Map<string, PathDirectoryListing>();
+
+const processPathDirectoryListing = Effect.fnUntraced(function* (
+  directory: string,
+): Effect.fn.Return<PathDirectoryListing, never, FileSystem.FileSystem> {
+  const known = processPathDirectoryListings.get(directory);
+  if (known?.names && known.modified === (yield* directoryMtime(directory))) return known;
+  const listing = yield* listPathDirectory(directory);
+  if (typeof listing.modified !== "number") return { modified: listing.modified, names: undefined };
+  if (processPathDirectoryListings.size >= PROCESS_PATH_DIRECTORY_LISTINGS_MAX) {
+    processPathDirectoryListings.clear();
+  }
+  processPathDirectoryListings.set(directory, listing);
+  return listing;
+});
+
 // An injected resolver or locator may answer differently for the same search, so its
 // entries are kept apart from every other resolver's.
 let spawnResolverCacheIdCount = 0;
@@ -648,7 +665,9 @@ const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlat
 
   const listings = yield* PathDirectoryListings;
   for (const pathEntry of pathEntries) {
-    let listing = listings && (yield* Cache.get(listings, pathEntry));
+    let listing = listings
+      ? yield* Cache.get(listings, pathEntry)
+      : yield* processPathDirectoryListing(pathEntry);
     if (listings && listing?.names && listing.modified !== (yield* directoryMtime(pathEntry))) {
       yield* Cache.invalidate(listings, pathEntry);
       listing = yield* Cache.get(listings, pathEntry);
