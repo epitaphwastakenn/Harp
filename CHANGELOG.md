@@ -10,6 +10,32 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.18.0 · 2026-11-09
+
+> Rojo is built in: Harp finds your places, starts their Rojo servers in one click, and saves script edits to your files.
+
+### New
+
+- **Rojo servers in one click** — Harp finds the Rojo projects in a workspace, whether it holds one place or several, and lists each one in the place menu next to the composer. A switch starts or stops `rojo serve` for it, and Start all runs every place of a multi-place workspace. Ports come from the project file or your editor tasks, and a server you started yourself is left alone.
+- **Script edits go to your files** — In a Rojo workspace, an agent's edit to a synced script is written to the file and Rojo updates Studio, so the change shows up in diffs and checkpoints. Agents are told which project belongs to which place and whether its server is running.
+- **Roblox Studio in setup** — The welcome wizard and the empty home screen now say whether Studio is connected, and let you start working in the open place right away.
+
+### Improved
+
+- **One tool for each job** — With Roblox's own MCP connected beside Harp's, its tools that repeat Harp's (reading, editing, running code, playtests, screenshots) are left out. Generation, avatar setup and publishing stay. Turn Roblox's MCP off and nothing changes for Harp's tools.
+- **Skills that trigger on symptoms** — The skill list agents see now includes each skill's "use this when" phrases, such as lost data or UI cut off on a phone.
+- **Large skill files load by section** — The four biggest playbooks answer with their section list, and agents load only the sections a task needs.
+- **Roblox docs lookup** — A name typed in the wrong case is corrected, an unknown name answers with the closest matches or the classes that have that member, and pages are kept on disk so lookups work offline.
+- **Studio limits are visible** — When the Studio panel has the agent paused, read-only, with Luau off or a tool switched off, the place menu says so.
+- **Smaller tool results** — Studio tool results use fewer tokens.
+- **Faster script search in big places** — Searching scripts and running Luau no longer walk the whole place each time.
+
+### Fixed
+
+- **Skills after a compaction** — After a context compaction, or in a subagent, loading a skill again answered "already loaded" and gave no text. Skills now reload, and the Studio instructions are sent again after a compaction.
+- **Skill link** — The server data skill pointed to a file that lives in another skill.
+- **Settings path in the docs** — The guides now point to Settings → Roblox Studio.
+
 ## 2.17.22 · 2026-11-09
 
 > Harp now tells you when it couldn't check for updates, and tries again on its own.
