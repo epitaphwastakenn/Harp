@@ -1,10 +1,13 @@
 import { workspaceAreaProps } from "../lib/workspaceFocus";
-import { MessageSquareDashedIcon, PlusIcon } from "lucide-react";
+import { BlocksIcon, MessageSquareDashedIcon, PlusIcon } from "lucide-react";
 
 import { openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { useScratchProject } from "../hooks/useScratchProject";
+import { studioOpenPlace, studioSetupNote } from "../onboarding/studioSetup.logic";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironmentQuery } from "../state/query";
+import { serverEnvironment } from "../state/server";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { HarpMascot } from "./mascot/HarpMascot";
@@ -16,6 +19,16 @@ export function NoProjectsHero() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const scratchTargetEnvironmentId = scratchEnvironmentId(primaryEnvironmentId);
+  const studio = useEnvironmentQuery(
+    scratchTargetEnvironmentId === null
+      ? null
+      : serverEnvironment.robloxStudioStatus({
+          environmentId: scratchTargetEnvironmentId,
+          input: {},
+        }),
+  );
+  const openPlace = studioOpenPlace(studio.data);
+  const studioNote = openPlace === undefined ? studioSetupNote(studio.data) : null;
 
   return (
     <RouteInset
@@ -34,14 +47,29 @@ export function NoProjectsHero() {
               <EmptyDescription>
                 {scratchTargetEnvironmentId === null
                   ? "Add a project to start your first thread."
-                  : "Add a project, or start without one."}
+                  : openPlace !== undefined
+                    ? `${openPlace} is open in Roblox Studio. Start working in it, or add a project folder.`
+                    : (studioNote?.text ?? "Add a project, or start without one.")}
               </EmptyDescription>
               <div className="mt-6 flex justify-center gap-2">
-                <Button size="sm" onClick={() => openCommandPalette({ open: "add-project" })}>
+                {scratchTargetEnvironmentId !== null && openPlace !== undefined ? (
+                  <Button
+                    size="sm"
+                    onClick={() => void startScratchThread(scratchTargetEnvironmentId)}
+                  >
+                    <BlocksIcon className="size-4" />
+                    Work in Studio
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant={openPlace === undefined ? "default" : "outline"}
+                  onClick={() => openCommandPalette({ open: "add-project" })}
+                >
                   <PlusIcon className="size-4" />
                   Add project
                 </Button>
-                {scratchTargetEnvironmentId === null ? null : (
+                {scratchTargetEnvironmentId === null || openPlace !== undefined ? null : (
                   <Button
                     size="sm"
                     variant="outline"

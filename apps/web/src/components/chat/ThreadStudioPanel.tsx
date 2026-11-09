@@ -80,6 +80,7 @@ export function ThreadStudioPanel(props: {
               environmentId={props.environmentId}
               controls={controls}
               onChange={change}
+              projectId={shell?.projectId}
             />
           </MenuPopup>
         </Menu>

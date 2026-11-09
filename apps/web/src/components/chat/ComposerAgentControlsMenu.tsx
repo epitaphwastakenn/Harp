@@ -1,4 +1,4 @@
-import type { EnvironmentId, OrchestrationV2StudioControls } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2StudioControls, ProjectId } from "@t3tools/contracts";
 import { playtestsAllowed, type StudioControlsChange } from "@t3tools/shared/studioControls";
 import { useLocation } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
@@ -9,6 +9,7 @@ import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { StatusDot } from "../ui/status-dot";
 import { ComposerControl } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
+import { RojoServersMenu } from "./RojoServersMenu";
 import {
   studioPlaceChange,
   studioPlaceDetail,
@@ -23,6 +24,7 @@ export interface AgentControlsBinding {
   readonly environmentId: EnvironmentId;
   readonly controls: OrchestrationV2StudioControls | undefined;
   readonly onChange: (change: StudioControlsChange) => void;
+  readonly projectId?: ProjectId | undefined;
 }
 
 export function useStudioMenuState(hidden = false) {
@@ -103,6 +105,9 @@ export function AgentControlsMenuContent(props: AgentControlsBinding) {
           </span>
         </MenuCheckboxItem>
       </div>
+      {props.projectId === undefined ? null : (
+        <RojoServersMenu environmentId={props.environmentId} projectId={props.projectId} />
+      )}
     </div>
   );
 }
@@ -133,6 +138,7 @@ export const ComposerAgentControlsMenu = memo(function ComposerAgentControlsMenu
           environmentId={props.environmentId}
           controls={props.controls}
           onChange={props.onChange}
+          projectId={props.projectId}
         />
       </MenuPopup>
     </Menu>

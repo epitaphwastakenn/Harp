@@ -233,7 +233,7 @@ function RobloxStudioSettings() {
         {roblox.mode === "off" ? null : (
           <SettingsRow
             title="Projects"
-            description="Threads outside these projects do not get the Studio tools or instructions. A Roblox project has a Rojo project, a place or model file, Roblox tooling such as wally.toml, or a .sealcode-roblox file in its root."
+            description="Threads outside these projects do not get the Studio tools or instructions. A Roblox project has a Rojo project, a place or model file, Roblox tooling such as wally.toml, or a .harp-roblox file in its root."
             control={
               <Select
                 value={roblox.scope}
@@ -299,7 +299,7 @@ function RobloxStudioSettings() {
             description={
               status?.officialMcpAvailable === false
                 ? "Roblox Studio's mcp.bat was not found on this machine."
-                : "Adds Roblox's mesh, texture and material generation beside Harp's tools."
+                : "Adds Roblox's mesh, texture and material generation beside Harp's tools. The tools Harp already has are left out."
             }
             control={
               <Switch

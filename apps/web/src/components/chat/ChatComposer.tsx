@@ -2974,7 +2974,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onSelectAgentPreset={applyAgentPresetStable}
       agentControls={
         onStudioControlsChange
-          ? { environmentId, controls: studioControls, onChange: onStudioControlsChange }
+          ? {
+              environmentId,
+              controls: studioControls,
+              onChange: onStudioControlsChange,
+              projectId: activeProjectId ?? undefined,
+            }
           : undefined
       }
       attachButton={

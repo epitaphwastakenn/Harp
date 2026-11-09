@@ -115,4 +115,20 @@ describe("studioTargetSummary", () => {
     expect(studioPlaceTone(row!)).toBe("muted");
     expect(studioPlaceChange(row!, true)).toEqual({ includePlaces: ["place:Old"] });
   });
+
+  it("says when Studio's own panel is holding the agent back", () => {
+    const rows = studioPlaceRows(
+      [
+        { ...edit("place:1", "Lobby"), readOnly: true },
+        { ...edit("place:2", "Arena"), toolsOff: 2 },
+      ],
+      undefined,
+    );
+    expect(rows.map(studioPlaceDetail)).toEqual([
+      "2 tools switched off in Studio",
+      "Read-only in Studio's Harp panel",
+    ]);
+    expect(studioPlaceTone(rows[1]!)).toBe("warning");
+    expect(studioTargetSummary(rows, undefined).tone).toBe("warning");
+  });
 });

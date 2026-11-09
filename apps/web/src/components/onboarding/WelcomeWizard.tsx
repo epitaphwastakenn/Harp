@@ -58,10 +58,12 @@ import {
   type EnvironmentPresentation,
   useEnvironments,
   usePrimaryEnvironment,
+  usePrimaryEnvironmentId,
 } from "../../state/environments";
 import { resolveOnboardingSetup } from "../../onboarding/targetEnvironment.logic";
 import { useProjectScans } from "../../onboarding/useProjectScans";
 import { projectEnvironment } from "../../state/projects";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import {
   readEnvironmentScope,
@@ -80,7 +82,9 @@ import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.log
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { HarpGlyph } from "../HarpMark";
+import { studioSetupNote } from "../../onboarding/studioSetup.logic";
 import { Alert, AlertDescription } from "../ui/alert";
+import { StatusDot } from "../ui/status-dot";
 import { Button } from "../ui/button";
 import { CommandBlock } from "../CommandBlock";
 import { Checkbox } from "../ui/checkbox";
@@ -614,6 +618,7 @@ function AgentsStep({
           ))}
         </div>
       </ScrollArea>
+      <StudioSetupLine />
       <div className="mt-6 flex items-center justify-between gap-3">
         {onAddComputer ? (
           <Button variant="ghost" onClick={onAddComputer}>
@@ -1703,6 +1708,25 @@ function ImportRowMeta({
       <span className="text-right">{threadCount}</span>
       <span className="text-right whitespace-nowrap">{age}</span>
     </span>
+  );
+}
+
+function StudioSetupLine() {
+  const environmentId = usePrimaryEnvironmentId();
+  const studio = useEnvironmentQuery(
+    environmentId === null
+      ? null
+      : serverEnvironment.robloxStudioStatus({ environmentId, input: {} }),
+  );
+  const note = studioSetupNote(studio.data);
+  if (note === null) return null;
+  return (
+    <p className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
+      <span className="mt-2 inline-flex">
+        <StatusDot size="md" tone={note.tone} />
+      </span>
+      {note.text}
+    </p>
   );
 }
 
