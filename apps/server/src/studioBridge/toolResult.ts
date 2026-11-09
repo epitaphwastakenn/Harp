@@ -40,7 +40,7 @@ export const jsonResult = (
   options: { readonly isError?: boolean; readonly suffix?: string } = {},
 ): StudioToolResult => {
   const cleaned = stripInternal(value);
-  let text = JSON.stringify(cleaned, null, 1);
+  let text = JSON.stringify(cleaned);
   if (options.suffix !== undefined) text = `${text}\n\n${options.suffix}`;
   const isError = options.isError ?? isFailurePayload(cleaned);
   if (text.length > StudioLimits.maxResultChars) {

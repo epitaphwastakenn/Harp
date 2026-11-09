@@ -35,7 +35,13 @@ import {
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
 import { GlobalMcpStatus, GlobalMcpStatusUpdatedEvent, McpServerId } from "./mcp.ts";
-import { RobloxProjectDetection, RobloxStudioAlert, RobloxStudioStatus } from "./robloxStudio.ts";
+import {
+  RobloxProjectDetection,
+  RobloxStudioAlert,
+  RobloxStudioStatus,
+  RojoControlInput,
+  RojoWorkspaceStatus,
+} from "./robloxStudio.ts";
 import {
   ServerVoiceTranscriptionInput,
   ServerVoiceTranscriptionResult,
@@ -473,6 +479,8 @@ export const WS_METHODS = {
   serverReconnectMcp: "server.reconnectMcp",
   serverGetRobloxStudioStatus: "server.getRobloxStudioStatus",
   serverDetectRobloxProject: "server.detectRobloxProject",
+  serverGetRojoStatus: "server.getRojoStatus",
+  serverControlRojo: "server.controlRojo",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -1377,6 +1385,18 @@ export const WsServerDetectRobloxProjectRpc = Rpc.make(WS_METHODS.serverDetectRo
   error: EnvironmentAuthorizationError,
 });
 
+const WsServerGetRojoStatusRpc = Rpc.make(WS_METHODS.serverGetRojoStatus, {
+  payload: Schema.Struct({ projectId: ProjectId }),
+  success: RojoWorkspaceStatus,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerControlRojoRpc = Rpc.make(WS_METHODS.serverControlRojo, {
+  payload: RojoControlInput,
+  success: RojoWorkspaceStatus,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsSubscribeMcpStatusRpc = Rpc.make(WS_METHODS.subscribeMcpStatus, {
   payload: Schema.Struct({}),
   success: GlobalMcpStatusUpdatedEvent,
@@ -1918,6 +1938,8 @@ export const SealCodeWsRpcGroup = RpcGroup.make(
   WsServerGetMcpStatusesRpc,
   WsServerGetRobloxStudioStatusRpc,
   WsServerDetectRobloxProjectRpc,
+  WsServerGetRojoStatusRpc,
+  WsServerControlRojoRpc,
   WsServerReconnectMcpRpc,
   WsSubscribeMcpStatusRpc,
   WsSubscribeRobloxStudioAlertsRpc,

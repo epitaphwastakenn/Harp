@@ -114,6 +114,7 @@ import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as GlobalMcpManager from "./mcp/GlobalMcpManager.ts";
 import { McpToolVisibility } from "./mcp/McpToolVisibility.ts";
 import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
+import * as RojoWorkspaces from "./roblox/RojoWorkspaces.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
 import * as VoiceTranscription from "./voiceTranscription.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
@@ -1223,6 +1224,8 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
     const mcpToolVisibility = yield* McpToolVisibility;
     const robloxStudioStatus = yield* RobloxStudioStatus.RobloxStudioStatusService;
     const robloxProjects = yield* ProjectService.ProjectService;
+    const rojoWorkspaces = yield* RojoWorkspaces.RojoWorkspaces;
+    const noRojo = { layout: "none", rojoFound: false, projects: [] } as const;
     const studioBridge = yield* StudioBridge.StudioBridge;
     const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
     return ServerSealCodeWsRpcGroup.of({
@@ -1258,6 +1261,18 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
         return Option.isNone(project)
           ? ({ applies: false, reason: "no-signal" } as const)
           : yield* robloxStudioStatus.detectProject(project.value);
+      }),
+      [WS_METHODS.serverGetRojoStatus]: Effect.fn("ws.getRojoStatus")(function* ({ projectId }) {
+        const project = yield* robloxProjects.getById(projectId).pipe(Effect.orDie);
+        return Option.isNone(project)
+          ? noRojo
+          : yield* rojoWorkspaces.status(project.value.workspaceRoot);
+      }),
+      [WS_METHODS.serverControlRojo]: Effect.fn("ws.controlRojo")(function* (input) {
+        const project = yield* robloxProjects.getById(input.projectId).pipe(Effect.orDie);
+        return Option.isNone(project)
+          ? noRojo
+          : yield* rojoWorkspaces.control(project.value.workspaceRoot, input);
       }),
       [WS_METHODS.voiceTranscribe]: (input) => voiceTranscription.transcribe(input),
       [WS_METHODS.subscribeRobloxStudioAlerts]: (_input) => studioBridge.alerts,

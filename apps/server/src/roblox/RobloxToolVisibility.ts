@@ -1,4 +1,4 @@
-import type { ServerSettings as ServerSettingsContract } from "@t3tools/contracts";
+import type { ProjectId, ServerSettings as ServerSettingsContract } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -11,8 +11,13 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as StudioBridge from "../studioBridge/StudioBridge.ts";
-import { policyFromControls, studioControlsMetaKey } from "../studioBridge/studioControls.ts";
 import {
+  policyFromControls,
+  studioControlsMetaKey,
+  studioWorkspaceMetaKey,
+} from "../studioBridge/studioControls.ts";
+import {
+  hiddenOfficialTools,
   OFFICIAL_SERVER_ID,
   RobloxStudioConfig,
   robloxProjectTarget,
@@ -41,6 +46,7 @@ const visibilityLayer = Layer.effect(
         Stream.changesWith(
           (left, right) =>
             left.robloxStudio.scope === right.robloxStudio.scope &&
+            left.robloxStudio.officialMcpAlongside === right.robloxStudio.officialMcpAlongside &&
             robloxProjectModes(left) === robloxProjectModes(right),
         ),
         Stream.drop(1),
@@ -76,6 +82,7 @@ const visibilityLayer = Layer.effect(
             : robloxProjectTarget(current, project, yield* openPlaces),
         );
       }, noneHidden),
+      hiddenTools: settings.getSettings.pipe(Effect.map(hiddenOfficialTools), noneHidden),
     };
   }),
 );
@@ -84,21 +91,32 @@ const callPolicyLayer = Layer.effect(
   McpCallPolicy,
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
+    const projects = yield* ProjectService.ProjectService;
+    const workspaceRootOf = (projectId: ProjectId) =>
+      projects.getById(projectId).pipe(
+        Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot),
+        Effect.orElseSucceed(() => undefined),
+      );
     return {
       forCall: Effect.fn("McpCallPolicy.forCall")(function* ({ thread, serverId }) {
         if (serverId !== STUDIO_BRIDGE_SERVER_ID) return { _tag: "Allow" } as const;
-        return yield* threads.getThreadShell(thread.threadId).pipe(
-          Effect.map((shell) =>
-            shell === null
-              ? ({
-                  _tag: "Refuse",
-                  message: "Harp could not find this thread, so the Studio call was refused.",
-                } as const)
-              : ({
-                  _tag: "Allow",
-                  meta: { [studioControlsMetaKey]: policyFromControls(shell.studioControls) },
-                } as const),
-          ),
+        return yield* Effect.gen(function* () {
+          const shell = yield* threads.getThreadShell(thread.threadId);
+          if (shell === null) {
+            return {
+              _tag: "Refuse",
+              message: "Harp could not find this thread, so the Studio call was refused.",
+            } as const;
+          }
+          const workspaceRoot = yield* workspaceRootOf(shell.projectId);
+          return {
+            _tag: "Allow",
+            meta: {
+              [studioControlsMetaKey]: policyFromControls(shell.studioControls),
+              ...(workspaceRoot === undefined ? {} : { [studioWorkspaceMetaKey]: workspaceRoot }),
+            },
+          } as const;
+        }).pipe(
           Effect.orElseSucceed(
             () =>
               ({

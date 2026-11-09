@@ -1,7 +1,11 @@
 import * as Effect from "effect/Effect";
 
 import { STUDIO_BRIDGE_BUILD } from "./StudioBridge.ts";
-import { parseStudioControlsMeta, studioControlsMetaKey } from "./studioControls.ts";
+import {
+  parseStudioControlsMeta,
+  studioControlsMetaKey,
+  studioWorkspaceMetaKey,
+} from "./studioControls.ts";
 import type { StudioToolContext, StudioToolDefinition } from "./StudioTools.ts";
 import type { StudioToolResult } from "./toolResult.ts";
 
@@ -102,7 +106,10 @@ export const handleMcpMessage = (
         const threadId =
           typeof meta[THREAD_META_KEY] === "string" ? meta[THREAD_META_KEY] : undefined;
         const controls = parseStudioControlsMeta(meta[studioControlsMetaKey]);
-        return reply(yield* tools.call(record.name, args, { threadId, controls }));
+        const workspace = meta[studioWorkspaceMetaKey];
+        const workspaceRoot =
+          typeof workspace === "string" && workspace !== "" ? workspace : undefined;
+        return reply(yield* tools.call(record.name, args, { threadId, controls, workspaceRoot }));
       }
       default:
         return id === undefined

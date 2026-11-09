@@ -8,11 +8,13 @@ import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 
 import { blenderExecutableFor, RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
+import { applyScriptEdits, type ScriptEdit } from "../roblox/rojoProjects.ts";
+import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { parseObj, runBlenderJob } from "./blenderJobs.ts";
 import { assetDetails, assetThumbnail, searchStore } from "./creatorStore.ts";
 import { downscaleRgba, encodePng } from "./png.ts";
-import { lookupRobloxDocs } from "./robloxDocs.ts";
+import { lookupRobloxDocs, makeDocsFetcher } from "./robloxDocs.ts";
 import {
   closeStudio,
   findStudioExecutable,
@@ -20,7 +22,7 @@ import {
   listStudioWindows,
   normalizePlaceName,
 } from "./studioProcesses.ts";
-import { loadStudioSkills, renderSkillResources } from "./studioSkills.ts";
+import { loadedSkillResources, loadStudioSkills, renderSkillResources } from "./studioSkills.ts";
 import { StudioEndpoints, type StudioRole } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 import { playtestGate, type StudioControlsPolicy } from "./studioControls.ts";
@@ -45,6 +47,7 @@ export type StudioRisk = "read" | "mutation" | "irreversible";
 export interface StudioToolContext {
   readonly threadId?: string | undefined;
   readonly controls?: StudioControlsPolicy | undefined;
+  readonly workspaceRoot?: string | undefined;
 }
 
 type Args = Record<string, unknown>;
@@ -153,6 +156,19 @@ const addressOf = (args: Args) => ({
   ...(str(args.instanceRef) === undefined ? {} : { instanceRef: str(args.instanceRef) }),
 });
 
+const scriptEditsOf = (value: unknown): ReadonlyArray<ScriptEdit> | undefined => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20) return undefined;
+  const edits: ScriptEdit[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return undefined;
+    if (typeof entry.old_string !== "string" || typeof entry.new_string !== "string") {
+      return undefined;
+    }
+    edits.push({ oldString: entry.old_string, newString: entry.new_string, line: num(entry.line) });
+  }
+  return edits;
+};
+
 const LINE_RANGE = /^(?:\d+|\d+-\d+|\d+-|-\d+)$/;
 
 /** Maps a bridge failure to a structured result the model can act on. */
@@ -200,18 +216,15 @@ export class StudioTools extends Context.Service<
   }
 >()("t3/studioBridge/StudioTools") {}
 
-const SKILL_CACHE_THREADS = 64;
-
 const make = Effect.gen(function* () {
   const bridge = yield* StudioBridge.StudioBridge;
   const robloxConfig = yield* RobloxStudioConfig;
+  const rojo = yield* RojoWorkspaces.RojoWorkspaces;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   const hostEnv = yield* HostProcess.Environment;
   const skills = yield* loadStudioSkills;
-  // Skill files each thread already received, so a repeat request costs a line, not the file.
-  const loadedSkills = new Map<string, Set<string>>();
 
   /** Calls one endpoint on the routed peer; the plugin's answer comes back as data. */
   const call = (input: {
@@ -345,6 +358,180 @@ const make = Effect.gen(function* () {
     bridge
       .peersOf(instanceId)
       .pipe(Effect.map((peers) => peers.filter((peer) => peer.role !== "edit")));
+
+  const readWholeScript = (tool: string, args: Args, context: StudioToolContext) =>
+    call({
+      tool,
+      args,
+      context,
+      endpoint: StudioEndpoints.getScriptSource,
+      data: { ...addressOf(args), lineRange: "1-", check: true },
+    }).pipe(
+      Effect.map(({ payload }) =>
+        isRecord(payload) && !isFailurePayload(payload) && typeof payload.rawSource === "string"
+          ? {
+              path: str(payload.path),
+              text: payload.rawSource,
+              revision: str(payload.revision),
+              syntaxError: payload.syntaxError,
+            }
+          : undefined,
+      ),
+      Effect.orElseSucceed(() => undefined),
+    );
+
+  const locateRojoFile = Effect.fn("StudioTools.locateRojoFile")(function* (
+    context: StudioToolContext,
+    args: Args,
+    script: { readonly path: string | undefined; readonly text: string },
+  ) {
+    {
+      const root = context.workspaceRoot;
+      if (root === undefined || script.path === undefined) return undefined;
+      if ((yield* rojo.projects(root)).length === 0) return undefined;
+      const place = yield* placeOf(args).pipe(Effect.orElseSucceed(() => undefined));
+      return yield* rojo.locateScript({
+        root,
+        instancePath: script.path,
+        placeId: place !== undefined && place.placeId > 0 ? place.placeId : undefined,
+        placeName: place?.placeName,
+        studioSource: script.text,
+      });
+    }
+  });
+
+  const withRojoFile = Effect.fn("StudioTools.withRojoFile")(function* (
+    payload: unknown,
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    {
+      if (!isRecord(payload) || isFailurePayload(payload)) return payload;
+      const located = yield* locateRojoFile(context, args, {
+        path: str(payload.path),
+        text: typeof payload.rawSource === "string" ? payload.rawSource : "",
+      });
+      if (located === undefined) return payload;
+      return located.kind === "ambiguous"
+        ? { ...payload, rojoFiles: located.files }
+        : {
+            ...payload,
+            file: located.relative,
+            rojo: "Rojo syncs this script from that file, which is its source of truth: changes go to the file (edit_script and set_script_source write it for you).",
+          };
+    }
+  });
+
+  const writeThroughRojo = Effect.fn("StudioTools.writeThroughRojo")(function* (
+    tool: string,
+    args: Args,
+    context: StudioToolContext,
+    compute: (fileText: string) => ReturnType<typeof applyScriptEdits>,
+  ) {
+    {
+      if (context.workspaceRoot === undefined) return undefined;
+      const script = yield* readWholeScript(tool, args, context);
+      if (script === undefined) return undefined;
+      const located = yield* locateRojoFile(context, args, script);
+      if (located === undefined) return undefined;
+      if (located.kind === "ambiguous") {
+        return errorResult(
+          "rojo_file_ambiguous",
+          `Rojo syncs this script from a file, and ${String(located.files.length)} files could be it: ${located.files.join(", ")}. Edit the right file directly.`,
+        );
+      }
+      const place = yield* placeOf(args).pipe(Effect.orElseSucceed(() => undefined));
+      if (place?.toggles.readOnly === true) {
+        return errorResult(
+          "read_only",
+          "The user set Studio's Harp panel to read-only, so changes are refused.",
+        );
+      }
+      const expected = str(args.expectedRevision);
+      if (expected !== undefined && expected !== script.revision) {
+        return errorResult(
+          "source_revision_conflict",
+          "Source revision conflict; the script changed after it was read. Read it again and retry.",
+          { expectedRevision: expected, actualRevision: script.revision, path: script.path },
+        );
+      }
+      const original = yield* fileSystem
+        .readFileString(located.absolute)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      if (original === undefined) return undefined;
+      const fileText = original.replaceAll("\r\n", "\n");
+      const studioText = script.text.replaceAll("\r\n", "\n");
+      const next = compute(fileText);
+      if (!next.ok) {
+        return errorResult(
+          "edit_failed",
+          fileText === studioText
+            ? next.reason
+            : `${located.relative} (synced to Studio by Rojo) differs from what Studio holds, and the edit does not apply to the file: ${next.reason}. Read the file and edit it directly.`,
+          { file: located.relative },
+        );
+      }
+      const saved = yield* fileSystem
+        .writeFileString(
+          located.absolute,
+          original.includes("\r\n") ? next.text.replaceAll("\n", "\r\n") : next.text,
+        )
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!saved) {
+        return errorResult("file_write_failed", `Could not write ${located.relative}.`);
+      }
+      const studioHolds = (wanted: string) =>
+        readWholeScript(tool, args, context).pipe(
+          Effect.map((read) => read !== undefined && read.text.replaceAll("\r\n", "\n") === wanted),
+        );
+      const synced =
+        next.text === studioText ||
+        (located.serving && (yield* waitUntil(studioHolds(next.text), 4000)));
+      let studio: string;
+      let syntaxError: unknown;
+      if (synced) {
+        studio = `Rojo updated Studio from the file (${located.project.label}, port ${String(located.project.port)}).`;
+        syntaxError = (yield* readWholeScript(tool, args, context))?.syntaxError;
+      } else {
+        const current = yield* readWholeScript(tool, args, context);
+        const direct = yield* call({
+          tool,
+          args,
+          context,
+          endpoint: StudioEndpoints.setScriptSource,
+          data: { ...addressOf(args), source: next.text, expectedRevision: current?.revision },
+        }).pipe(
+          Effect.map(({ payload }) => payload),
+          Effect.orElseSucceed(() => undefined),
+        );
+        const reason = located.serving
+          ? `Rojo did not update Studio within 4 s (is its Studio plugin connected to port ${String(located.project.port)}?)`
+          : `Rojo is not serving ${located.project.label}`;
+        studio =
+          isRecord(direct) && !isFailurePayload(direct)
+            ? `${reason}, so Studio was written directly too.`
+            : `${reason}, and writing Studio directly failed: Studio still holds the old text until Rojo syncs.`;
+        syntaxError = isRecord(direct) ? direct.syntaxError : undefined;
+      }
+      return jsonResult({
+        success: true,
+        path: script.path,
+        file: located.relative,
+        savedTo: "file",
+        studio,
+        verification: `Wrote ${located.relative}; this file is the script's source of truth.`,
+        ...(isRecord(syntaxError)
+          ? {
+              syntaxError,
+              message: `Written, but it does not compile: fix line ${String(syntaxError.line)} before playtesting.`,
+            }
+          : {}),
+      });
+    }
+  });
 
   const playtest = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -1454,12 +1641,40 @@ const make = Effect.gen(function* () {
         }
         expected = str(payload.revision);
       }
+      const source = args.source;
+      const throughRojo = yield* writeThroughRojo(
+        "set_script_source",
+        { ...args, expectedRevision: expected },
+        context,
+        () => ({ ok: true, text: source.replaceAll("\r\n", "\n") }),
+      );
+      if (throughRojo !== undefined) return throughRojo;
       return yield* scriptWrite("set_script_source", StudioEndpoints.setScriptSource, () => ({
         ...addressOf(args),
         source: args.source,
         expectedRevision: expected,
       }))(args, context);
     }).pipe(Effect.catch((error) => Effect.succeed(requestFailure(error))));
+
+  const editScript = Effect.fn("StudioTools.editScript")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    {
+      const throughRojo = yield* writeThroughRojo("edit_script", args, context, (fileText) => {
+        const edits = scriptEditsOf(args.edits);
+        return edits === undefined
+          ? { ok: false, reason: "edits must hold 1 to 20 replacements" }
+          : applyScriptEdits(fileText, edits);
+      });
+      if (throughRojo !== undefined) return throughRojo;
+      return yield* scriptWrite("edit_script", StudioEndpoints.editScript, (input) => ({
+        ...addressOf(input),
+        edits: Array.isArray(input.edits) ? input.edits.slice(0, 21) : [],
+        expectedRevision: str(input.expectedRevision),
+      }))(args, context);
+    }
+  });
 
   const connected = (_args: Args): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -1554,23 +1769,15 @@ const make = Effect.gen(function* () {
       // Without a thread id (a client calling the bridge directly) calls cannot be told apart,
       // so every load returns the full text rather than a pointer to another conversation's.
       const thread = context.threadId;
-      const seen =
-        thread === undefined ? new Set<string>() : (loadedSkills.get(thread) ?? new Set<string>());
+      const seen = thread === undefined ? new Set<string>() : loadedSkillResources(thread);
       const rendered = renderSkillResources({
         library: skills,
         name,
         resources,
         alreadyLoaded: seen,
+        reload: bool(args.reload),
       });
-      if (thread !== undefined) {
-        for (const key of rendered.loaded) seen.add(key);
-        loadedSkills.delete(thread);
-        loadedSkills.set(thread, seen);
-      }
-      if (loadedSkills.size > SKILL_CACHE_THREADS) {
-        const oldest = loadedSkills.keys().next().value;
-        if (oldest !== undefined) loadedSkills.delete(oldest);
-      }
+      for (const key of rendered.loaded) seen.add(key);
       return {
         content: [{ type: "text", text: rendered.text }],
         ...(rendered.ok ? {} : { isError: true }),
@@ -2399,6 +2606,9 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const docsCacheRoot = robloxConfig.environment.docsCacheRoot;
+  const docsFetcher = makeDocsFetcher(docsCacheRoot === "" ? undefined : docsCacheRoot);
+
   const robloxDocs = (args: Args): Effect.Effect<StudioToolResult> => {
     const name = str(args.name);
     if (name === undefined) {
@@ -2417,7 +2627,9 @@ const make = Effect.gen(function* () {
         errorResult("invalid_arguments", "kind must be class, enum, datatype, library or global."),
       );
     }
-    return Effect.promise(() => lookupRobloxDocs({ name, kind, member: str(args.member) })).pipe(
+    return Effect.promise(() =>
+      lookupRobloxDocs({ name, kind, member: str(args.member) }, docsFetcher),
+    ).pipe(
       Effect.map((found) =>
         found.ok ? jsonResult(found.value) : errorResult(found.error, found.message),
       ),
@@ -2429,12 +2641,13 @@ const make = Effect.gen(function* () {
       name: "load_skill",
       title: "Load Roblox skill",
       description:
-        "Loads a Roblox skill (guidance for UI, data, networking, building and more) from the catalog in your instructions: SKILL.md by default, or resource / resources (up to 10 paths such as references/full.md) when the skill points to them.",
+        "Loads a Roblox skill (guidance for UI, data, networking, building and more) from the catalog in your instructions: SKILL.md by default, or resource / resources (up to 10 paths such as references/full.md) when the skill points to them. A large file answers with its section list; ask for sections as references/full.md#3. A file this conversation already loaded comes back as a one-line pointer: pass reload true when you no longer have its text (after a context compaction, or in a subagent).",
       inputSchema: object(
         {
           name: { type: "string", enum: [...skills.skills.keys()] },
           resource: { type: "string" },
           resources: { type: "array", items: { type: "string" } },
+          reload: { type: "boolean", description: "Send the full text again." },
         },
         ["name"],
       ),
@@ -2570,46 +2783,6 @@ const make = Effect.gen(function* () {
       ),
     },
     {
-      name: "create_instances",
-      title: "Create instances",
-      description:
-        'Creates up to 200 instances in one undoable step; all are built detached and attached only if every one succeeds. parent is a path or "$<id>" of an earlier item in the same call.',
-      inputSchema: object(
-        {
-          instances: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                className: { type: "string" },
-                parent: { type: "string" },
-                name: { type: "string" },
-                id: { type: "string", description: "Lets later items use $<id> as parent." },
-                properties: { type: "object" },
-                attributes: { type: "object" },
-                tags: { type: "array", items: { type: "string" } },
-              },
-              required: ["className", "parent"],
-            },
-          },
-          ...instanceIdProperty,
-        },
-        ["instances"],
-      ),
-      risk: "mutation",
-      run: forward(
-        "create_instances",
-        StudioEndpoints.createInstances,
-        (args) => ({
-          instances: Array.isArray(args.instances) ? args.instances.slice(0, 200) : [],
-        }),
-        {
-          summary: (args) =>
-            `${String(Array.isArray(args.instances) ? args.instances.length : 0)} instance(s)`,
-        },
-      ),
-    },
-    {
       name: "delete_instances",
       title: "Delete instances",
       description:
@@ -2654,11 +2827,20 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        return forward("get_script_source", StudioEndpoints.getScriptSource, () => ({
-          ...addressOf(args),
-          lineRange: range,
-          numbered: true,
-        }))(args, context);
+        return call({
+          tool: "get_script_source",
+          args,
+          context,
+          endpoint: StudioEndpoints.getScriptSource,
+          data: { ...addressOf(args), lineRange: range, numbered: true },
+        }).pipe(
+          Effect.flatMap(({ payload }) =>
+            outdatedPlugin(payload) !== undefined
+              ? Effect.succeed(outdatedPlugin(payload)!)
+              : withRojoFile(payload, args, context).pipe(Effect.map(jsonResult)),
+          ),
+          Effect.catch((error) => Effect.succeed(requestFailure(error))),
+        );
       },
     },
     {
@@ -2704,11 +2886,7 @@ const make = Effect.gen(function* () {
         ["edits"],
       ),
       risk: "mutation",
-      run: scriptWrite("edit_script", StudioEndpoints.editScript, (args) => ({
-        ...addressOf(args),
-        edits: Array.isArray(args.edits) ? args.edits.slice(0, 21) : [],
-        expectedRevision: str(args.expectedRevision),
-      })),
+      run: editScript,
     },
     {
       name: "grep_scripts",
@@ -3450,7 +3628,7 @@ const make = Effect.gen(function* () {
       name: "get_roblox_docs",
       title: "Roblox docs",
       description:
-        "Looks up the Roblox engine API reference for a class (BasePart, Humanoid), enum (EasingStyle), datatype (CFrame), library (task, string) or global (print): its summary and one line per property, method, event or item. Pass member for one member in full, with parameters, returns and security (inherited members are found too). Case-sensitive names; kind is only needed when a name could be two things. Read it before using an API you are unsure of.",
+        "Looks up the Roblox engine API reference for a class (BasePart, Humanoid), enum (EasingStyle), datatype (CFrame), library (task, string) or global (print): its summary and one line per property, method, event or item. Pass member for one member in full, with parameters, returns and security (inherited members are found too). A name typed in the wrong case is corrected, and an unknown one answers with the closest names or the classes that have a member of that name. kind is only needed when a name could be two things. Read it before using an API you are unsure of.",
       inputSchema: object(
         {
           name: { type: "string", description: "Exact name, such as Animator or EasingStyle." },

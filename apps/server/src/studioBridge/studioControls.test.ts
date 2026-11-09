@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
+import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { STUDIO_PROTOCOL_VERSION } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
@@ -22,6 +23,7 @@ const layer = StudioTools.layer.pipe(
   Layer.provideMerge(StudioBridge.layer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+  Layer.provide(RojoWorkspaces.layerNone),
   Layer.provide(NodeServices.layer),
 );
 

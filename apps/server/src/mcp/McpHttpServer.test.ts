@@ -931,6 +931,7 @@ it.effect("serves the global MCP gateway to thread credentials only", () =>
           Layer.succeed(McpToolVisibility, {
             hiddenServers: () => Effect.succeed(new Set<string>()),
             hiddenServersForProject: () => Effect.succeed(new Set<string>()),
+            hiddenTools: Effect.succeed(new Set<string>()),
             changes: Stream.empty,
           }),
         ),
@@ -1149,7 +1150,8 @@ it.effect(
         const studio = entryFor("studio", "playtest");
         const official = entryFor("roblox-studio-official", "start_stop_play");
         const other = entryFor("other", "ping");
-        const entries = [studio, official, other];
+        const duplicate = entryFor("other", "duplicate");
+        const entries = [studio, official, other, duplicate];
         const catalog: GlobalMcpManager.McpToolCatalog = {
           tools: entries,
           byCanonicalName: new Map(entries.map((entry) => [entry.canonicalName, entry])),
@@ -1178,6 +1180,7 @@ it.effect(
             Layer.succeed(McpToolVisibility, {
               hiddenServers: () => Effect.succeed(new Set(["roblox-studio-official"])),
               hiddenServersForProject: () => Effect.succeed(new Set<string>()),
+              hiddenTools: Effect.succeed(new Set(["other:duplicate"])),
               changes: Stream.empty,
             }),
           ),
@@ -1237,6 +1240,9 @@ it.effect(
 
         const hidden = yield* call(official.canonicalName);
         expect(hidden).toMatchObject({ result: { isError: true } });
+        expect(yield* call(duplicate.canonicalName)).toMatchObject({
+          result: { isError: true, content: [{ text: "Unknown MCP tool." }] },
+        });
         const refused = yield* call(other.canonicalName);
         expect(refused).toMatchObject({
           result: { isError: true, content: [{ text: "Not for this thread." }] },

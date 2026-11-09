@@ -1566,6 +1566,16 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       refreshIntervalMs: 5_000,
     }),
+    rojoStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:rojo-status",
+      tag: WS_METHODS.serverGetRojoStatus,
+      staleTimeMs: 0,
+      refreshIntervalMs: 5_000,
+    }),
+    controlRojo: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:control-rojo",
+      tag: WS_METHODS.serverControlRojo,
+    }),
     reconnectMcp: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:reconnect-mcp",
       tag: WS_METHODS.serverReconnectMcp,

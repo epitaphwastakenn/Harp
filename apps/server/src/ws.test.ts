@@ -103,6 +103,7 @@ import * as GlobalMcpManager from "./mcp/GlobalMcpManager.ts";
 import { McpToolVisibility } from "./mcp/McpToolVisibility.ts";
 import * as ProjectDiffIndex from "./orchestration-v2/ProjectDiffIndex.ts";
 import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
+import * as RojoWorkspaces from "./roblox/RojoWorkspaces.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
 import * as VoiceTranscription from "./voiceTranscription.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
@@ -603,6 +604,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(McpToolVisibility)({}),
   Layer.mock(ProjectDiffIndex.ProjectDiffIndex)({}),
   Layer.mock(RobloxStudioStatus.RobloxStudioStatusService)({}),
+  RojoWorkspaces.layerNone,
   Layer.mock(StudioBridge.StudioBridge)({}),
   Layer.mock(VoiceTranscription.VoiceTranscription)({}),
 );

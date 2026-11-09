@@ -5,6 +5,7 @@
 local RunService = game:GetService("RunService")
 
 local Util = require(script.Parent.Parent.Util)
+local ScriptIndex = require(script.Parent.Parent.ScriptIndex)
 
 local Luau = {}
 
@@ -16,14 +17,12 @@ local MAX_OUTPUT_LINES = 400
 
 local function snapshotSources()
 	local sources = {}
-	Util.walk(nil, function(instance)
-		if instance:IsA("LuaSourceContainer") then
-			local ok, source = pcall(function()
-				return instance.Source
-			end)
-			if ok then
-				sources[instance] = source
-			end
+	ScriptIndex.each(nil, false, function(instance)
+		local ok, source = pcall(function()
+			return instance.Source
+		end)
+		if ok then
+			sources[instance] = source
 		end
 		return false
 	end)

@@ -47,6 +47,12 @@ export const studioBridgeStatus = (
     placeName: peer.placeName,
     isRunning: peer.isRunning,
     pluginVersion: peer.build,
+    ...(peer.toggles.paused ? { paused: true } : {}),
+    ...(peer.toggles.readOnly ? { readOnly: true } : {}),
+    ...(peer.toggles.allowLuau ? {} : { luauOff: true }),
+    ...(peer.toggles.disabledTools.length > 0
+      ? { toolsOff: peer.toggles.disabledTools.length }
+      : {}),
   })),
 });
 

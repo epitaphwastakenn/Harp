@@ -140,6 +140,8 @@ describe("listing helpers", () => {
   it("does not mistake a TypeScript config for a Rojo project", () => {
     expect(isRobloxProjectListing(["tsconfig.project.json"])).toBe(false);
     expect(isRobloxProjectListing(["game.project.json"])).toBe(true);
+    expect(isRobloxProjectListing([".harp-roblox"])).toBe(true);
+    expect(isRobloxProjectListing([".sealcode-roblox"])).toBe(true);
   });
 
   it("skips hidden and dependency folders and caps the scan", () => {

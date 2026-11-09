@@ -49,7 +49,6 @@ const STUDIO_TOOLS: Readonly<Record<string, readonly [title: string, detail?: De
   search_objects: ["Search", (args) => text(args.query)],
   get_instance_properties: ["Read properties of", target],
   set_properties: ["Set properties on", target],
-  create_instances: ["Create", (args) => count(args.instances, "instance")],
   delete_instances: ["Delete", (args) => count(args.paths, "instance")],
   build_instances: ["Build", (args) => leaf(args.path)],
   get_script_source: ["Read script", target],

@@ -28,7 +28,6 @@ return {
 		title = "Build and edit",
 		tools = {
 			{ "set_properties", "Set properties" },
-			{ "create_instances", "Create instances" },
 			{ "delete_instances", "Delete instances" },
 			{ "build_instances", "Atomic builds" },
 		},

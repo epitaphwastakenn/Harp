@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { cleanDocText, lookupRobloxDocs, type DocsFetcher } from "./robloxDocs.ts";
+import { buildNameIndex, cleanDocText, lookupRobloxDocs, type DocsFetcher } from "./robloxDocs.ts";
 
 const PAGES: Readonly<Record<string, string>> = {
   "classes/Animator": `
@@ -180,6 +180,29 @@ describe("lookupRobloxDocs", () => {
     const missing = await lookupRobloxDocs({ name: "Animator", member: "Zzz" }, fetcher);
     expect(missing).toMatchObject({ ok: false, error: "member_not_found" });
     expect((missing as { message: string }).message).toContain("LoadAnimation");
+  });
+
+  it("corrects a name typed in another case and suggests near names and owning classes", async () => {
+    const index = buildNameIndex({
+      Classes: [
+        { Name: "Animator", Members: [{ Name: "LoadAnimation" }] },
+        { Name: "AnimationTrack", Members: [{ Name: "Play" }] },
+        { Name: "Sound", Members: [{ Name: "Play" }] },
+      ],
+      Enums: [{ Name: "EasingStyle" }],
+    });
+    const named: DocsFetcher = { ...fetcher, fetchNames: async () => index };
+    expect(await lookupRobloxDocs({ name: "animator" }, named)).toMatchObject({
+      ok: true,
+      value: { name: "Animator" },
+    });
+    const typo = await lookupRobloxDocs({ name: "Animatr" }, named);
+    expect(typo).toMatchObject({ ok: false, error: "not_found" });
+    expect((typo as { message: string }).message).toContain("Did you mean Animator");
+    const member = await lookupRobloxDocs({ name: "Play" }, named);
+    expect((member as { message: string }).message).toContain(
+      "Play is a member of AnimationTrack, Sound",
+    );
   });
 
   it("reports a failing fetch instead of throwing", async () => {

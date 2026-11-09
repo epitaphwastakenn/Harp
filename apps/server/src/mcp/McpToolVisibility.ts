@@ -11,8 +11,11 @@ export interface McpToolVisibilityShape {
     thread: Pick<McpThreadCaller, "threadId">,
   ) => Effect.Effect<ReadonlySet<string>>;
   readonly hiddenServersForProject: (projectId: ProjectId) => Effect.Effect<ReadonlySet<string>>;
+  readonly hiddenTools: Effect.Effect<ReadonlySet<string>>;
   readonly changes: Stream.Stream<void>;
 }
+
+export const mcpToolKey = (serverId: string, toolName: string) => `${serverId}:${toolName}`;
 
 export class McpToolVisibility extends Context.Service<McpToolVisibility, McpToolVisibilityShape>()(
   "t3/mcp/McpToolVisibility",

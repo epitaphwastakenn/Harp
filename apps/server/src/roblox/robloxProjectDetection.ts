@@ -1,7 +1,7 @@
 import type { RobloxProjectDetection, RobloxProjectMode } from "@t3tools/contracts";
 
 const robloxFile =
-  /^(?:(?!tsconfig\.).+\.project\.json|.+\.rbxlx?|.+\.rbxmx?|wally\.toml|pesde\.toml|aftman\.toml|rokit\.toml|foreman\.toml|selene\.toml|\.sealcode-roblox)$/i;
+  /^(?:(?!tsconfig\.).+\.project\.json|.+\.rbxlx?|.+\.rbxmx?|wally\.toml|pesde\.toml|aftman\.toml|rokit\.toml|foreman\.toml|selene\.toml|\.sealcode-roblox|\.harp-roblox)$/i;
 
 const otherStackFile =
   /^(?:package\.json|pnpm-workspace\.yaml|deno\.jsonc?|cargo\.toml|go\.mod|pyproject\.toml|requirements\.txt|gemfile|composer\.json|pom\.xml|build\.gradle(?:\.kts)?|cmakelists\.txt|makefile|mix\.exs|project\.godot|.+\.uproject|.+\.sln|.+\.csproj|.+\.xcodeproj)$/i;

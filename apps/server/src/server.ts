@@ -71,6 +71,7 @@ import * as StudioPluginInstaller from "./studioBridge/StudioPluginInstaller.ts"
 import * as StudioPrompt from "./studioBridge/StudioPrompt.ts";
 import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as RobloxToolVisibility from "./roblox/RobloxToolVisibility.ts";
+import * as RojoWorkspaces from "./roblox/RojoWorkspaces.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as SecretResolver from "./secrets/SecretResolver.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
@@ -585,6 +586,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // The bridge's registry sits below orchestration: turn framing reads the Studio selection.
   Layer.provideMerge(StudioBridge.layer),
   Layer.provideMerge(RobloxStudioConfig.layer),
+  Layer.provideMerge(RojoWorkspaces.layer),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(
     Layer.mergeAll(ProjectStore.layer, ThreadSearch.layer, ProjectDiffIndex.layer),

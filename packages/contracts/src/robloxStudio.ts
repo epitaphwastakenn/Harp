@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { ProjectId } from "./baseSchemas.ts";
 import { GlobalMcpStatus } from "./mcp.ts";
 import { RobloxStudioMode } from "./settings.ts";
 
@@ -12,6 +13,10 @@ export const RobloxStudioPlace = Schema.Struct({
   placeName: Schema.optionalKey(Schema.String),
   isRunning: Schema.optionalKey(Schema.Boolean),
   pluginVersion: Schema.optionalKey(Schema.String),
+  paused: Schema.optionalKey(Schema.Boolean),
+  readOnly: Schema.optionalKey(Schema.Boolean),
+  luauOff: Schema.optionalKey(Schema.Boolean),
+  toolsOff: Schema.optionalKey(Schema.Number),
 });
 export type RobloxStudioPlace = typeof RobloxStudioPlace.Type;
 
@@ -80,3 +85,31 @@ export const RobloxStudioStatus = Schema.Struct({
   }),
 });
 export type RobloxStudioStatus = typeof RobloxStudioStatus.Type;
+
+export const RojoServerState = Schema.Literals(["stopped", "starting", "running", "failed"]);
+export type RojoServerState = typeof RojoServerState.Type;
+
+export const RojoProjectStatus = Schema.Struct({
+  file: Schema.String,
+  label: Schema.String,
+  kind: Schema.Literals(["place", "model"]),
+  port: Schema.Number,
+  state: RojoServerState,
+  startedByHarp: Schema.Boolean,
+  message: Schema.optionalKey(Schema.String),
+});
+export type RojoProjectStatus = typeof RojoProjectStatus.Type;
+
+export const RojoWorkspaceStatus = Schema.Struct({
+  layout: Schema.Literals(["none", "single", "multi"]),
+  rojoFound: Schema.Boolean,
+  projects: Schema.Array(RojoProjectStatus),
+});
+export type RojoWorkspaceStatus = typeof RojoWorkspaceStatus.Type;
+
+export const RojoControlInput = Schema.Struct({
+  projectId: ProjectId,
+  action: Schema.Literals(["start", "stop"]),
+  file: Schema.optionalKey(Schema.String),
+});
+export type RojoControlInput = typeof RojoControlInput.Type;

@@ -3,6 +3,7 @@ import type { OrchestrationV2StudioControls } from "@t3tools/contracts";
 import { errorResult, type StudioToolResult } from "./toolResult.ts";
 
 export const studioControlsMetaKey = "sealcode/studioControls";
+export const studioWorkspaceMetaKey = "sealcode/workspaceRoot";
 
 export interface StudioExcludedPlace {
   readonly placeKey: string;

@@ -5,6 +5,7 @@
 local ScriptEditorService = game:GetService("ScriptEditorService")
 
 local Util = require(script.Parent.Parent.Util)
+local ScriptIndex = require(script.Parent.Parent.ScriptIndex)
 
 local Scripts = {}
 
@@ -139,6 +140,11 @@ function Scripts.get(args)
 	result.source = table.concat(out, "\n")
 	if not args.numbered and first == 1 and last == #lines then
 		result.rawSource = text
+	end
+	if args.check then
+		for key, value in syntaxCheck(text, container.Name) do
+			result[key] = value
+		end
 	end
 	return result
 end
@@ -334,10 +340,7 @@ function Scripts.grep(args)
 	local total = 0
 	local searched = 0
 	local truncated = false
-	Util.walk(root, function(instance)
-		if not instance:IsA("LuaSourceContainer") then
-			return false
-		end
+	ScriptIndex.each(root, true, function(instance)
 		searched += 1
 		local lines = splitLines(sourceOf(instance))
 		local matches = {}

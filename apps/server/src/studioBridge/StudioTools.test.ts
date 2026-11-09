@@ -6,6 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
+import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { STUDIO_PROTOCOL_VERSION } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
@@ -16,6 +17,7 @@ const layer = StudioTools.layer.pipe(
   Layer.provideMerge(StudioBridge.layer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+  Layer.provide(RojoWorkspaces.layerNone),
   Layer.provide(NodeServices.layer),
 );
 
@@ -439,5 +441,102 @@ describe("Studio panel catalog", () => {
       const listed = [...catalog.matchAll(/\{ "([a-z_]+)", "/gu)].map((match) => match[1]);
       expect(listed.toSorted()).toEqual(tools.list.map((tool) => tool.name).toSorted());
     }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("script tools in a Rojo workspace", () => {
+  const rojoLayer = StudioTools.layer.pipe(
+    Layer.provideMerge(StudioBridge.layer),
+    Layer.provide(ServerSettingsService.layerTest()),
+    Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+    Layer.provide(RojoWorkspaces.layer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  const makeWorkspace = Effect.fn("makeWorkspace")(function* (source: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "harp-rojo-tools-" });
+    yield* fs.makeDirectory(`${root}/src/server`, { recursive: true });
+    yield* fs.writeFileString(
+      `${root}/default.project.json`,
+      JSON.stringify({
+        name: "game",
+        servePort: 45871,
+        tree: { $className: "DataModel", ServerScriptService: { $path: "src/server" } },
+      }),
+    );
+    yield* fs.writeFileString(`${root}/src/server/Main.server.luau`, source);
+    return root;
+  });
+
+  it.effect("saves an edit to the synced file and keeps Studio the same", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace("print('a')\r\nprint('z')\r\n");
+      let studio = "print('a')\nprint('z')\n";
+      const plugin = yield* fakePlugin((endpoint, data) => {
+        if (endpoint === "set-script-source") {
+          studio = data.source;
+          return { success: true, revision: "r2" };
+        }
+        return { path: "game.ServerScriptService.Main", rawSource: studio, revision: "r1" };
+      });
+      const result = yield* tools.call(
+        "edit_script",
+        {
+          path: "game.ServerScriptService.Main",
+          edits: [{ old_string: "print('a')", new_string: "print('b')" }],
+        },
+        { workspaceRoot: root },
+      );
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(textOf(result))).toMatchObject({
+        success: true,
+        file: "src/server/Main.server.luau",
+        savedTo: "file",
+      });
+      expect(yield* fs.readFileString(`${root}/src/server/Main.server.luau`)).toBe(
+        "print('b')\r\nprint('z')\r\n",
+      );
+      expect(studio).toBe("print('b')\nprint('z')\n");
+      expect(plugin.calls.some((call) => call.endpoint === "edit-script")).toBe(false);
+
+      const read = yield* tools.call(
+        "get_script_source",
+        { path: "game.ServerScriptService.Main" },
+        { workspaceRoot: root },
+      );
+      expect(JSON.parse(textOf(read))).toMatchObject({ file: "src/server/Main.server.luau" });
+
+      const stale = yield* tools.call(
+        "set_script_source",
+        { path: "game.ServerScriptService.Main", source: "x", expectedRevision: "old" },
+        { workspaceRoot: root },
+      );
+      expect(stale.isError).toBe(true);
+      expect(textOf(stale)).toContain("source_revision_conflict");
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+
+  it.effect("leaves scripts that are not in files to Studio", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace("print('a')\n");
+      const plugin = yield* fakePlugin((endpoint) =>
+        endpoint === "edit-script"
+          ? { success: true, path: "game.Workspace.Door.Script", revision: "r2" }
+          : { path: "game.Workspace.Door.Script", rawSource: "print(1)", revision: "r2" },
+      );
+      const result = yield* tools.call(
+        "edit_script",
+        { path: "game.Workspace.Door.Script", edits: [{ old_string: "1", new_string: "2" }] },
+        { workspaceRoot: root },
+      );
+      expect(textOf(result)).toContain("verified revision r2");
+      expect(plugin.calls.some((call) => call.endpoint === "edit-script")).toBe(true);
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
   );
 });

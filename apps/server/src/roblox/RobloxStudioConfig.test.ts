@@ -10,6 +10,7 @@ import * as ServerConfig from "../config.ts";
 import {
   BLENDER_MCP_SERVER_ID,
   blenderExecutableFor,
+  hiddenOfficialTools,
   layer as robloxStudioConfigLayer,
   managedServersFor,
   OFFICIAL_SERVER_ID,
@@ -24,6 +25,7 @@ const environment: RobloxStudioEnvironment = {
   officialMcpPath: "C:\\Users\\me\\AppData\\Local\\Roblox\\mcp.bat",
   studioInstalled: true,
   blenderJobsRoot: "/state/blender-jobs",
+  docsCacheRoot: "",
   detectedBlender: "C:\\Blender\\blender.exe",
   detectedBlenderMcp: undefined,
 };
@@ -92,6 +94,31 @@ describe("managedServersFor", () => {
       command: "my-blender",
       args: ["--x"],
     });
+  });
+});
+
+describe("hiddenOfficialTools", () => {
+  const settings = (patch: Partial<RobloxStudioSettings>, mcpServers = {}) => ({
+    ...withRoblox(patch),
+    mcpServers,
+  });
+
+  it("hides the tools Harp already has only while both servers run", () => {
+    const beside = hiddenOfficialTools(settings({ mode: "sealcode", officialMcpAlongside: true }));
+    expect(beside.has("roblox-studio-official:execute_luau")).toBe(true);
+    expect(beside.has("roblox-studio-official:generate_mesh")).toBe(false);
+    expect(hiddenOfficialTools(settings({ mode: "official" })).size).toBe(0);
+    expect(
+      hiddenOfficialTools(settings({ mode: "sealcode", officialMcpAlongside: false })).size,
+    ).toBe(0);
+  });
+
+  it("leaves a server the user configured under the same id alone", () => {
+    const own = settings(
+      { mode: "sealcode", officialMcpAlongside: true },
+      { [OFFICIAL_SERVER_ID]: {} },
+    );
+    expect(hiddenOfficialTools(own as never).size).toBe(0);
   });
 });
 

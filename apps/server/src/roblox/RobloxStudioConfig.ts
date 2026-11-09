@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
+import { mcpToolKey } from "../mcp/McpToolVisibility.ts";
 import { studioBridgeInstructions } from "../studioBridge/instructions.ts";
 import { loadStudioSkills, skillCatalog } from "../studioBridge/studioSkills.ts";
 import { DEFAULT_STUDIO_BRIDGE_PORT } from "../studioBridge/protocol.ts";
@@ -34,6 +35,38 @@ export const MANAGED_SERVER_IDS: ReadonlySet<string> = new Set([
   BLENDER_MCP_SERVER_ID,
 ]);
 
+const officialDuplicateTools: ReadonlyArray<string> = [
+  "execute_luau",
+  "run_code",
+  "run_script_in_play_mode",
+  "get_console_output",
+  "get_studio_state",
+  "get_studio_mode",
+  "insert_asset",
+  "insert_model",
+  "inspect_instance",
+  "list_roblox_studios",
+  "multi_edit",
+  "screen_capture",
+  "script_grep",
+  "script_read",
+  "script_search",
+  "search_asset",
+  "search_game_tree",
+  "start_stop_play",
+  "user_keyboard_input",
+  "user_mouse_input",
+];
+
+export const hiddenOfficialTools = (
+  settings: Pick<ServerSettings, "robloxStudio" | "mcpServers">,
+): ReadonlySet<string> =>
+  settings.robloxStudio.mode === "sealcode" &&
+  settings.robloxStudio.officialMcpAlongside &&
+  settings.mcpServers[OFFICIAL_SERVER_ID] === undefined
+    ? new Set(officialDuplicateTools.map((tool) => mcpToolKey(OFFICIAL_SERVER_ID, tool)))
+    : new Set();
+
 /** Where Harp's own Studio bridge listens, and the token its MCP endpoint wants. */
 export interface StudioBridgeEndpoint {
   readonly port: number;
@@ -45,6 +78,7 @@ export interface RobloxStudioEnvironment {
   readonly officialMcpPath: string | undefined;
   readonly studioInstalled: boolean;
   readonly blenderJobsRoot: string;
+  readonly docsCacheRoot: string;
   /** Found in the usual install folders; a configured path wins over it. */
   readonly detectedBlender: string | undefined;
   /** The `mcp-for-blender` executable the official MCP for Blender installer makes, when present. */
@@ -206,6 +240,7 @@ const disabledEnvironment: RobloxStudioEnvironment = {
   officialMcpPath: undefined,
   studioInstalled: false,
   blenderJobsRoot: "",
+  docsCacheRoot: "",
   detectedBlender: undefined,
   detectedBlenderMcp: undefined,
 };
@@ -348,6 +383,7 @@ const make = Effect.gen(function* () {
     officialMcpPath: officialAvailable ? officialMcpPath : undefined,
     studioInstalled,
     blenderJobsRoot: path.join(config.stateDir, "blender-jobs"),
+    docsCacheRoot: path.join(config.stateDir, "roblox-docs"),
     detectedBlender: yield* detectBlender().pipe(Effect.orElseSucceed(() => undefined)),
     detectedBlenderMcp,
   };

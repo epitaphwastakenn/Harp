@@ -7,7 +7,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as GlobalMcpManager from "./GlobalMcpManager.ts";
 import { McpCallPolicy } from "./McpCallPolicy.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { McpToolVisibility } from "./McpToolVisibility.ts";
+import { McpToolVisibility, mcpToolKey } from "./McpToolVisibility.ts";
 
 /**
  * Providers connect to the user's configured MCP servers through this one endpoint instead of
@@ -90,9 +90,14 @@ const post = HttpRouter.add(
         const catalog = yield* manager.getCatalog;
         const visibility = yield* McpToolVisibility;
         const hidden = yield* visibility.hiddenServers(invocation.thread);
+        const hiddenTools = yield* visibility.hiddenTools;
         return reply({
           tools: catalog.tools
-            .filter((entry) => !hidden.has(entry.serverId))
+            .filter(
+              (entry) =>
+                !hidden.has(entry.serverId) &&
+                !hiddenTools.has(mcpToolKey(entry.serverId, entry.upstreamToolName)),
+            )
             .map((entry) => ({
               name: entry.canonicalName,
               title: entry.tool.title,
@@ -126,8 +131,12 @@ const post = HttpRouter.add(
         const entry = (yield* manager.getCatalog).byCanonicalName.get(params.name);
         let meta: Readonly<Record<string, unknown>> | undefined;
         if (entry !== undefined) {
-          const hidden = yield* (yield* McpToolVisibility).hiddenServers(invocation.thread);
-          if (hidden.has(entry.serverId)) {
+          const visibility = yield* McpToolVisibility;
+          const hidden = yield* visibility.hiddenServers(invocation.thread);
+          if (
+            hidden.has(entry.serverId) ||
+            (yield* visibility.hiddenTools).has(mcpToolKey(entry.serverId, entry.upstreamToolName))
+          ) {
             return reply({
               isError: true,
               content: [{ type: "text", text: "Unknown MCP tool." }],

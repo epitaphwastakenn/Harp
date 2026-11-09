@@ -1,4 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalFetch:off globalErrorInEffectCatch:off preferSchemaOverJson:off
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+
 import { parse } from "yaml";
 
 /**
@@ -301,31 +304,262 @@ export const summarizeDoc = (kind: DocsKind, doc: Record<string, unknown>) => {
   };
 };
 
+export interface DocsNameIndex {
+  readonly classes: ReadonlyArray<string>;
+  readonly enums: ReadonlyArray<string>;
+  readonly members: Readonly<Record<string, ReadonlyArray<string>>>;
+}
+
 export interface DocsFetcher {
   /** The YAML text of a page, or undefined when the repository has no such page. */
   readonly fetchPage: (folder: string, name: string) => Promise<string | undefined>;
+  readonly fetchNames?: () => Promise<DocsNameIndex | undefined>;
 }
+
+const namesUrl =
+  "https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Mini-API-Dump.json";
+const diskTtlMs = 7 * 24 * 60 * 60_000;
+const maxOwnersPerMember = 12;
 
 const cache = new Map<string, { readonly at: number; readonly text: string | undefined }>();
 
-export const httpDocsFetcher: DocsFetcher = {
-  fetchPage: async (folder, name) => {
-    const url = `${RAW_BASE}/${folder}/${name}.yaml`;
-    const hit = cache.get(url);
-    if (hit !== undefined && Date.now() - hit.at < CACHE_TTL_MS) return hit.text;
-    const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-    if (response.status === 404) {
-      cache.set(url, { at: Date.now(), text: undefined });
-      return undefined;
+const readDisk = async (
+  file: string | undefined,
+): Promise<{ readonly text: string; readonly fresh: boolean } | undefined> => {
+  if (file === undefined) return undefined;
+  try {
+    const [text, info] = await Promise.all([NodeFSP.readFile(file, "utf8"), NodeFSP.stat(file)]);
+    return { text, fresh: Date.now() - info.mtimeMs < diskTtlMs };
+  } catch {
+    return undefined;
+  }
+};
+
+const writeDisk = async (file: string | undefined, text: string): Promise<void> => {
+  if (file === undefined) return;
+  try {
+    await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+    await NodeFSP.writeFile(file, text);
+  } catch {
+    return;
+  }
+};
+
+export const buildNameIndex = (dump: unknown): DocsNameIndex | undefined => {
+  if (!isRecord(dump)) return undefined;
+  const members: Record<string, string[]> = {};
+  const classes: string[] = [];
+  for (const entry of asList(dump.Classes)) {
+    const name = asString(entry.Name);
+    if (name === "") continue;
+    classes.push(name);
+    for (const member of asList(entry.Members)) {
+      const key = asString(member.Name).toLowerCase();
+      if (key === "") continue;
+      const owners = (members[key] ??= []);
+      if (owners.length < maxOwnersPerMember && !owners.includes(name)) owners.push(name);
     }
-    if (!response.ok) {
-      throw new Error(`The docs repository answered HTTP ${String(response.status)} for ${url}.`);
+  }
+  const enums = asList(dump.Enums)
+    .map((entry) => asString(entry.Name))
+    .filter((name) => name !== "");
+  return classes.length === 0 ? undefined : { classes, enums, members };
+};
+
+const decodeNameIndex = (text: string): DocsNameIndex | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) &&
+      Array.isArray(parsed.classes) &&
+      Array.isArray(parsed.enums) &&
+      isRecord(parsed.members)
+      ? (parsed as unknown as DocsNameIndex)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const loadNames = async (cacheDir: string | undefined): Promise<DocsNameIndex | undefined> => {
+  const file = cacheDir === undefined ? undefined : NodePath.join(cacheDir, "api-names.json");
+  const disk = await readDisk(file);
+  const saved = disk === undefined ? undefined : decodeNameIndex(disk.text);
+  if (disk?.fresh === true && saved !== undefined) return saved;
+  try {
+    const response = await fetch(namesUrl, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) return saved;
+    const index = buildNameIndex(await response.json());
+    if (index === undefined) return saved;
+    await writeDisk(file, JSON.stringify(index));
+    return index;
+  } catch {
+    return saved;
+  }
+};
+
+export const makeDocsFetcher = (cacheDir?: string): DocsFetcher => {
+  let names: Promise<DocsNameIndex | undefined> | undefined;
+  return {
+    fetchPage: async (folder, name) => {
+      const url = `${RAW_BASE}/${folder}/${name}.yaml`;
+      const hit = cache.get(url);
+      if (hit !== undefined && Date.now() - hit.at < CACHE_TTL_MS) return hit.text;
+      const remember = (text: string | undefined) => {
+        if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
+        cache.set(url, { at: Date.now(), text });
+        return text;
+      };
+      const file =
+        cacheDir !== undefined && /^[\w.]+$/u.test(name)
+          ? NodePath.join(cacheDir, folder, `${name}.yaml`)
+          : undefined;
+      const disk = await readDisk(file);
+      if (disk?.fresh === true) return remember(disk.text);
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+      } catch (cause) {
+        if (disk !== undefined) return disk.text;
+        throw cause;
+      }
+      if (response.status === 404) return remember(undefined);
+      if (!response.ok) {
+        if (disk !== undefined) return disk.text;
+        throw new Error(`The docs repository answered HTTP ${String(response.status)} for ${url}.`);
+      }
+      const text = await response.text();
+      await writeDisk(file, text);
+      return remember(text);
+    },
+    fetchNames: async () => {
+      names ??= loadNames(cacheDir);
+      const index = await names;
+      if (index === undefined) names = undefined;
+      return index;
+    },
+  };
+};
+
+export const httpDocsFetcher: DocsFetcher = makeDocsFetcher();
+
+const datatypeNames = [
+  "Axes",
+  "BrickColor",
+  "CFrame",
+  "CatalogSearchParams",
+  "Color3",
+  "ColorSequence",
+  "ColorSequenceKeypoint",
+  "Content",
+  "DateTime",
+  "DockWidgetPluginGuiInfo",
+  "Enum",
+  "EnumItem",
+  "Faces",
+  "FloatCurveKey",
+  "Font",
+  "Instance",
+  "NumberRange",
+  "NumberSequence",
+  "NumberSequenceKeypoint",
+  "OverlapParams",
+  "PathWaypoint",
+  "PhysicalProperties",
+  "Random",
+  "Ray",
+  "RaycastParams",
+  "RaycastResult",
+  "RBXScriptConnection",
+  "RBXScriptSignal",
+  "Rect",
+  "Region3",
+  "Region3int16",
+  "RotationCurveKey",
+  "SharedTable",
+  "TweenInfo",
+  "UDim",
+  "UDim2",
+  "Vector2",
+  "Vector2int16",
+  "Vector3",
+  "Vector3int16",
+];
+const libraryNames = [
+  "bit32",
+  "buffer",
+  "coroutine",
+  "debug",
+  "math",
+  "os",
+  "string",
+  "table",
+  "task",
+  "utf8",
+  "vector",
+];
+
+const editDistance = (left: string, right: string): number => {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = previous[0]!;
+    previous[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const above = previous[column]!;
+      previous[column] = Math.min(
+        above + 1,
+        previous[column - 1]! + 1,
+        diagonal + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+      diagonal = above;
     }
-    const text = await response.text();
-    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
-    cache.set(url, { at: Date.now(), text });
-    return text;
-  },
+  }
+  return previous[right.length]!;
+};
+
+const namesOfKind = (index: DocsNameIndex | undefined, kind: DocsKind | undefined) => {
+  const all: Record<Exclude<DocsKind, "global">, ReadonlyArray<string>> = {
+    class: index?.classes ?? [],
+    enum: index?.enums ?? [],
+    datatype: datatypeNames,
+    library: libraryNames,
+  };
+  return kind === undefined || kind === "global" ? Object.values(all).flat() : all[kind];
+};
+
+const canonicalDocName = (
+  index: DocsNameIndex | undefined,
+  name: string,
+  kind: DocsKind | undefined,
+): string | undefined => {
+  const lower = name.toLowerCase();
+  const same = namesOfKind(index, kind).filter((candidate) => candidate.toLowerCase() === lower);
+  return same.length === 1 && same[0] !== name ? same[0] : undefined;
+};
+
+const suggestDocNames = (
+  index: DocsNameIndex | undefined,
+  name: string,
+  kind: DocsKind | undefined,
+): { readonly similar: ReadonlyArray<string>; readonly memberOf: ReadonlyArray<string> } => {
+  const lower = name.toLowerCase();
+  const scored = namesOfKind(index, kind)
+    .map((candidate) => {
+      const other = candidate.toLowerCase();
+      const distance = editDistance(lower, other);
+      const contains = lower.length >= 3 && (other.includes(lower) || lower.includes(other));
+      return { candidate, score: contains ? Math.min(distance, 2) : distance };
+    })
+    .filter((entry) => entry.score <= Math.max(2, Math.floor(lower.length / 4)))
+    .toSorted(
+      (left, right) =>
+        left.score - right.score ||
+        left.candidate.length - right.candidate.length ||
+        left.candidate.localeCompare(right.candidate),
+    );
+  return {
+    similar: scored.slice(0, 8).map((entry) => entry.candidate),
+    memberOf: index?.members[lower]?.slice(0, 8) ?? [],
+  };
 };
 
 const parsePage = (text: string): Record<string, unknown> | undefined => {
@@ -344,11 +578,24 @@ export type DocsLookup =
   | { readonly ok: true; readonly value: Record<string, unknown> }
   | { readonly ok: false; readonly error: string; readonly message: string };
 
-const notFound = (name: string, kind: DocsKind | undefined): DocsLookup => ({
-  ok: false,
-  error: "not_found",
-  message: `No ${kind ?? "class, enum, datatype, library or global"} named ${name} in the Roblox engine reference. Names are case-sensitive (BasePart, EasingStyle, Vector3, task); members go in member, not in name.`,
-});
+const notFound = (
+  name: string,
+  kind: DocsKind | undefined,
+  index: DocsNameIndex | undefined,
+): DocsLookup => {
+  const { similar, memberOf } = suggestDocNames(index, name, kind);
+  const hints = [
+    similar.length > 0 ? `Did you mean ${similar.join(", ")}?` : undefined,
+    memberOf.length > 0
+      ? `${name} is a member of ${memberOf.join(", ")}: pass that class as name and ${name} as member.`
+      : undefined,
+  ].filter((hint) => hint !== undefined);
+  return {
+    ok: false,
+    error: "not_found",
+    message: `No ${kind ?? "class, enum, datatype, library or global"} named ${name} in the Roblox engine reference. ${hints.length > 0 ? hints.join(" ") : "Names look like BasePart, EasingStyle, Vector3 or task; members go in member, not in name."}`,
+  };
+};
 
 /** Finds a page by kind, or by trying each kind when none is given. */
 const loadPage = async (
@@ -422,7 +669,14 @@ const lookup = async (
       wholeGlobal = found.whole;
     }
   }
-  if (page === undefined) return notFound(name, input.kind);
+  if (page === undefined) {
+    const index = await fetcher.fetchNames?.().catch(() => undefined);
+    const canonical = canonicalDocName(index, name, input.kind);
+    if (canonical !== undefined && input.kind !== "global") {
+      page = await loadPage(fetcher, canonical, input.kind);
+    }
+    if (page === undefined) return notFound(name, input.kind, index);
+  }
 
   const wantedMember = member ?? (wholeGlobal ? undefined : name);
   if (wantedMember === undefined) {
