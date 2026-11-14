@@ -194,11 +194,11 @@ describe("PullRequestWatchService", () => {
     Effect.gen(function* () {
       const missing = new PullRequestUnavailableError({
         reason: "cli-missing",
-        provider: SourceControlProviderKind.make("gitlab"),
-        requirement: "Install glab on the T3 server's PATH.",
+        provider: SourceControlProviderKind.make("github"),
+        requirement: "Install gh on the T3 server's PATH.",
       });
       const harness = yield* makeHarness({ readFailure: missing });
-      const target = { url: "https://gitlab.example.com/team/project/-/merge_requests/42" };
+      const target = { url: "https://github.com/team/project/pull/42" };
       const error = yield* harness.setWatching(true, target).pipe(Effect.flip);
       expect(error).toEqual(missing);
       expect(yield* Ref.get(harness.commands)).toEqual([]);

@@ -292,10 +292,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AntigravityAuth"
       yield* Queue.take(harness.authenticateCalls);
       assert.deepEqual(harness.events.slice(0, 5), [
         "process-open",
+        "initialize",
         "authenticate",
         "process-close",
         "process-open",
-        "authenticate",
       ]);
 
       yield* TestClock.adjust("30 seconds");

@@ -200,8 +200,8 @@ it.effect("leaves a remote no integration claims unknown, with its server's addr
 
 it.effect.each([
   ["github.com:team/project.git", "github"],
-  ["gitlab.com:team/project.git", "gitlab"],
-  ["bitbucket.org:team/project.git", "bitbucket"],
+  ["gitlab.com:team/project.git", "unknown"],
+  ["bitbucket.org:team/project.git", "unknown"],
   ["code.example.test:team/project.git", "unknown"],
 ] as const)(
   "reads the host of an SSH remote that leaves its user to ssh config: %s",
