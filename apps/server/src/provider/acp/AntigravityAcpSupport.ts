@@ -8,11 +8,12 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -34,6 +35,7 @@ import {
   makeAntigravityHarnessNoticeFilter,
   normalizeAntigravitySessionUpdate,
 } from "./AntigravityProtocol.ts";
+import packageJson from "../../../package.json" with { type: "json" };
 
 export interface AntigravityAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
@@ -54,7 +56,8 @@ export interface AntigravityAcpRuntimeInput extends Omit<
   readonly onStderrText?: (text: string) => void;
   /** Serve `fs/read_text_file` for runtimes whose native reader is not qualified. */
   readonly clientFileReads?: boolean;
-  /** The installed version, known before `initialize`; it picks the file reader. */
+  readonly clientCapabilities?: AcpSessionRuntime.AcpSessionRuntimeOptions["clientCapabilities"];
+  /** The installed version, known before `initialize`; it picks the file reader and client name. */
   readonly runtimeVersion?: string | null;
   /** Conversational sessions only; helpers and probes leave the system prompt untouched. */
   readonly sessionSystemPromptAppend?: string;
@@ -95,13 +98,24 @@ export function isQualifiedAntigravityRelease(version: string | null | undefined
   return version?.trim() === "1.4.5";
 }
 
+// `agy acp` 1.5.1 offers every model to every ACP client; older runtimes allowlist editors.
+const OPEN_MODEL_ACCESS_RELEASE = [1, 5, 1] as const;
+
 /**
  * 1.4.5 appends `systemPrompt.append` to its system instructions on new, load and resume, and
  * keeps none of it between processes, so every activation sends it again.
  */
 export const antigravityAppendsSystemPrompt = (
   initializeResult: EffectAcpSchema.InitializeResponse,
-) => isQualifiedAntigravityRelease(initializeResult.agentInfo?.version);
+) => {
+  if (isQualifiedAntigravityRelease(initializeResult.agentInfo?.version)) return true;
+  const extension = initializeResult.agentCapabilities?._meta?.antigravity;
+  return (
+    Predicate.isObject(extension) &&
+    Predicate.isObject(extension.systemPrompt) &&
+    extension.systemPrompt.append === true
+  );
+};
 
 export function antigravitySessionMeta(
   initializeResult: EffectAcpSchema.InitializeResponse,
@@ -118,12 +132,20 @@ export function antigravitySessionMeta(
   return Object.keys(antigravity).length === 0 ? undefined : { antigravity };
 }
 
+/** Older releases offer non-Gemini models only to allowlisted clients such as Zed. */
+export function antigravityClientInfo(version: string | null | undefined) {
+  const parsed = parseAntigravityVersion(version);
+  return parsed !== undefined && compareVersions(parsed, OPEN_MODEL_ACCESS_RELEASE) >= 0
+    ? { name: "t3-code", title: "Harp", version: packageJson.version }
+    : { name: "zed", version: "0.0.0" };
+}
+
 export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(function* (
   input: AntigravityAcpRuntimeInput,
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > {
   const harnessNotices = makeAntigravityHarnessNoticeFilter();
   const handleStderr = makeAntigravityStderrHandler(
@@ -140,11 +162,11 @@ export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(
       // adapter flavor): Antigravity's own cancel waits for the current step.
       ownDetachedProcessGroup: true,
       processGroupPlatform: input.processGroupPlatform ?? (yield* HostProcess.Platform),
-      // The agent offers non-Gemini models only to allowlisted clients such as Zed.
-      clientInfo: { name: "zed", version: "0.0.0" },
+      clientInfo: antigravityClientInfo(input.runtimeVersion),
       sessionMeta: (initializeResult) =>
         antigravitySessionMeta(initializeResult, input.sessionSystemPromptAppend),
       clientCapabilities: {
+        ...input.clientCapabilities,
         // Advertising writes swaps the agent's diff edits for whole-file client_edit_file.
         fs: {
           readTextFile:
@@ -186,6 +208,15 @@ export function antigravityPermissionMode(runtimeMode: RuntimeMode): string {
     case "approval-required":
       return "default";
   }
+}
+
+/**
+ * The agy CLI rejects the managed runtime's `yolo` and `auto_edit`. It stays in `default`, where
+ * it asks before acting and T3 answers from the live runtime policy, so permission changes apply
+ * on the next turn without a restart.
+ */
+export function antigravityCliSessionMode(modeId: string): string {
+  return modeId === "yolo" || modeId === "auto_edit" ? "default" : modeId;
 }
 
 /** The runtime mode an Antigravity session mode grants; the inverse of `antigravityPermissionMode`. */

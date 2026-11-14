@@ -1,39 +1,31 @@
-import type {
-  ModelSelection,
-  ProviderInstanceId,
-  ProviderInteractionMode,
-  RuntimeMode,
-} from "@t3tools/contracts";
+import type { ModelSelection, ProviderInstanceId, RuntimeMode } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
-import { BotIcon, PencilRulerIcon } from "lucide-react";
 import { type ComponentProps, memo } from "react";
 
-import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
+import { ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
-import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { runtimeModeConfig } from "./runtimeModeConfig";
 import { useComposerMenuState } from "./useComposerMenuState";
 
-export type RuntimeModeOption = { mode: RuntimeMode } & (typeof runtimeModeConfig)[RuntimeMode];
+export type RuntimeModeOption = {
+  mode: RuntimeMode;
+  disabledReason?: string;
+} & (typeof runtimeModeConfig)[RuntimeMode];
 const supervisedRuntimeModeOption = {
   mode: "approval-required" as const,
   ...runtimeModeConfig["approval-required"],
 };
 export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
-  showInteractionModeToggle: boolean;
-  interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   size?: "sm" | "xs";
   hidden?: boolean;
-  onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const size = props.size ?? "sm";
@@ -43,111 +35,65 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
     props.runtimeModeOptions.find((option) => option.mode === props.runtimeMode) ??
     supervisedRuntimeModeOption;
   const RuntimeModeIcon = runtimeModeOption.icon;
-  const interactionModeTooltip =
-    props.interactionMode === "plan"
-      ? "Plan mode. Click to switch to Build"
-      : "Build mode. Click to switch to Plan";
-
-  const interactionModeToggle = props.showInteractionModeToggle ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <ComposerControl
-            size={size}
-            className="shrink-0 whitespace-nowrap"
-            aria-pressed={props.interactionMode === "plan"}
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            aria-label={interactionModeTooltip}
-          />
-        }
-      >
-        {props.interactionMode === "plan" ? (
-          <ComposerControlIcon
-            icon={PencilRulerIcon}
-            size={size}
-            className="text-current opacity-100"
-          />
-        ) : (
-          <ComposerControlIcon
-            icon={BotIcon}
-            size={size}
-            opticalSize={size === "xs" ? "default" : "large"}
-          />
-        )}
-        <span data-composer-control-label className="sr-only sm:not-sr-only">
-          {props.interactionMode === "plan" ? "Plan" : "Build"}
-        </span>
-      </TooltipTrigger>
-      <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
-    </Tooltip>
-  ) : null;
-
   return (
-    <>
-      <Tooltip>
-        <Select
-          open={open}
-          onOpenChange={setOpen}
-          value={props.runtimeMode}
-          onValueChange={(value) => props.onRuntimeModeChange(value!)}
+    <Tooltip>
+      <Select
+        open={open}
+        onOpenChange={setOpen}
+        value={props.runtimeMode}
+        onValueChange={(value) => props.onRuntimeModeChange(value!)}
+      >
+        <TooltipTrigger
+          render={
+            <ComposerSelectControl
+              data-composer-shortcut="composer.mode"
+              size={size}
+              aria-label="Permissions"
+              data-runtime-mode={runtimeModeOption.mode}
+            />
+          }
         >
-          <TooltipTrigger
-            render={
-              <ComposerSelectControl
-                data-composer-shortcut="composer.mode"
-                size={size}
-                aria-label="Permissions"
-                data-runtime-mode={runtimeModeOption.mode}
-              />
-            }
-          >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-            <SelectValue data-composer-control-label>{runtimeModeOption.label}</SelectValue>
-          </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {props.runtimeModeOptions.map((option) => {
-              const OptionIcon = option.icon;
-              return (
-                <SelectItem
-                  key={option.mode}
-                  value={option.mode}
-                  hideIndicator
-                  className="min-w-64"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span
-                        className="inline-flex items-center gap-1.5 font-medium"
-                        data-runtime-mode={option.mode}
-                      >
-                        <OptionIcon className="size-3.5 shrink-0" />
-                        {option.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {option.description}
-                      </span>
-                    </div>
+          <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+          <SelectValue data-composer-control-label>{runtimeModeOption.label}</SelectValue>
+        </TooltipTrigger>
+        <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+          {props.runtimeModeOptions.map((option) => {
+            const OptionIcon = option.icon;
+            return (
+              <SelectItem
+                key={option.mode}
+                value={option.mode}
+                hideIndicator
+                disabled={option.disabledReason !== undefined}
+                className="min-w-64"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="grid min-w-0 flex-1 gap-0.5">
+                    <span
+                      className="inline-flex items-center gap-1.5 font-medium"
+                      data-runtime-mode={option.mode}
+                    >
+                      <OptionIcon className="size-3.5 shrink-0" />
+                      {option.label}
+                    </span>
+                    <span className="text-muted-foreground text-xs leading-4">
+                      {option.disabledReason ?? option.description}
+                    </span>
                   </div>
-                </SelectItem>
-              );
-            })}
-          </SelectPopup>
-        </Select>
-        <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
-      </Tooltip>
-
-      {interactionModeToggle}
-    </>
+                </div>
+              </SelectItem>
+            );
+          })}
+        </SelectPopup>
+      </Select>
+      <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
+    </Tooltip>
   );
 });
 
 export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
   canOperateThread: boolean;
-  activeContextWindow: ContextWindowSnapshot | null;
-  reserveContextWindowMeter: boolean;
-  activeThreadModelDisplayName: string | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -158,11 +104,10 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   } | null;
   isRunning: boolean;
   canInterrupt: boolean;
+  runId: string | null;
   followUpBehavior: "queue" | "steer";
   canSteer: boolean;
   alternateShortcutLabel: string | null;
-  showPlanFollowUpPrompt: boolean;
-  promptHasText: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
   isEnvironmentUnavailable: boolean;
@@ -174,11 +119,8 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   onResume: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
-  onImplementPlanInNewThread: () => void;
-  onCompactContext?: (() => void) | undefined;
-  compactDisabled: boolean;
-  compactDisabledReason: string | null;
   compactBeforeSendTokens: number | null;
+  hideCompactToggle?: boolean;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
   showVoiceButton?: boolean;
@@ -190,37 +132,16 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
 }) {
   return (
     <>
-      {props.activeContextWindow ? (
-        <ContextWindowMeter
-          usage={props.activeContextWindow}
-          modelDisplayName={props.activeThreadModelDisplayName}
-          onCompact={props.onCompactContext}
-          compactDisabled={props.compactDisabled}
-          compactDisabledReason={props.compactDisabledReason}
-        />
-      ) : props.reserveContextWindowMeter ? (
-        <ContextWindowMeterPlaceholder />
-      ) : null}
-      {props.showVoiceButton ? (
-        <ComposerVoiceButton
-          disabled={props.voiceDisabled ?? false}
-          isRecording={props.isVoiceRecording === true}
-          isTranscribing={props.isVoiceTranscribing === true}
-          durationLabel={props.voiceDurationLabel ?? "0:00"}
-          onClick={() => props.onToggleVoice?.()}
-        />
-      ) : null}
       <ComposerPrimaryActions
         compact={props.compact}
         canOperateThread={props.canOperateThread}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
         canInterrupt={props.canInterrupt}
+        runId={props.runId}
         followUpBehavior={props.followUpBehavior}
         canSteer={props.canSteer}
         alternateShortcutLabel={props.alternateShortcutLabel}
-        showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
-        promptHasText={props.promptHasText}
         isSendBusy={props.isSendBusy}
         sendDisabledReason={props.sendDisabledReason}
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
@@ -233,11 +154,21 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         onResume={props.onResume}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
-        onImplementPlanInNewThread={props.onImplementPlanInNewThread}
         compactBeforeSendTokens={props.compactBeforeSendTokens}
+        hideCompactToggle={props.hideCompactToggle ?? false}
         keepFullHistory={props.keepFullHistory}
         onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-      />
+      >
+        {props.showVoiceButton ? (
+          <ComposerVoiceButton
+            disabled={props.voiceDisabled ?? false}
+            isRecording={props.isVoiceRecording === true}
+            isTranscribing={props.isVoiceTranscribing === true}
+            durationLabel={props.voiceDurationLabel ?? "0:00"}
+            onClick={() => props.onToggleVoice?.()}
+          />
+        ) : null}
+      </ComposerPrimaryActions>
     </>
   );
 });

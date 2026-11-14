@@ -1,5 +1,5 @@
 import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, StarIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   ProviderDriverKind,
   type ProviderInstanceId,
@@ -146,7 +146,13 @@ export function ProviderModelsSection({
   const scrollToSlugRef = useRef<string | null>(null);
   const hiddenModelSet = new Set(hiddenModels);
   const favoriteModelSet = new Set(favoriteModels);
-  const displayModels = groupModelsForDisplay(models, {
+  const reportedSlugs = new Set(models.map((model) => model.slug));
+  // A favorite the provider no longer reports (disabled, signed out, model removed)
+  // still needs a row, or its star could never be cleared.
+  const unreportedFavoriteModels = favoriteModels.flatMap((slug): ServerProviderModel[] =>
+    reportedSlugs.has(slug) ? [] : [{ slug, name: slug, isCustom: false, capabilities: null }],
+  );
+  const displayModels = groupModelsForDisplay([...models, ...unreportedFavoriteModels], {
     favoriteModels: favoriteModelSet,
     hiddenModels: hiddenModelSet,
     modelOrder,
@@ -443,7 +449,7 @@ export function ProviderModelsSection({
   );
 }
 
-function ProviderModelRow({
+const ProviderModelRow = memo(function ProviderModelRow({
   model,
   isHidden,
   isFavorite,
@@ -629,4 +635,4 @@ function ProviderModelRow({
       </Tooltip>
     </div>
   );
-}
+});

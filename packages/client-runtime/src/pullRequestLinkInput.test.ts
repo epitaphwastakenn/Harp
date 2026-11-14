@@ -85,6 +85,14 @@ describe("resolveLinkPullRequestInput", () => {
 });
 
 describe("parsePullRequestReference", () => {
+  it.each([
+    "https://github.acme.test/acme/web/pull/42",
+    "https://git.corp.example/acme/web/pull/42/files?diff=split",
+  ])("accepts GitHub Enterprise Server pull request URL %s", (url) => {
+    expect(parsePullRequestReference(url)).toBe(url);
+    expect(parsePullRequestReference(`gh pr checkout ${url}`)).toBe(url);
+  });
+
   it("accepts gh pr checkout commands with raw numbers", () => {
     expect(parsePullRequestReference("gh pr checkout 42")).toBe("42");
   });

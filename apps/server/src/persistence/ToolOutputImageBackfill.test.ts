@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -97,5 +98,8 @@ it.effect("moves stored tool output images into files once, in projections and e
     assert.deepEqual(yield* ToolOutputImageBackfill.externalizeStoredImages(images), {
       rewrittenRows: 0,
     });
-  }).pipe(Effect.provide(Layer.merge(Sqlite.layerMemory, NodeServices.layer)), Effect.scoped),
+  }).pipe(
+    Effect.provide(Layer.mergeAll(Sqlite.layerMemory, NodeServices.layer, NodeCrypto.layer)),
+    Effect.scoped,
+  ),
 );

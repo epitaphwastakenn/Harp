@@ -1,6 +1,7 @@
 import {
   buildEnvironmentCaptureCommand,
   listLoginShellCandidates,
+  readUserLoginShell,
   setWindowsPath,
 } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
@@ -75,6 +76,8 @@ export class DesktopShellEnvironment extends Context.Service<
     readonly installIntoProcess: Effect.Effect<boolean>;
     // Completes once the profile probe that follows a cached install has finished.
     readonly backgroundRefresh: Effect.Effect<void>;
+    /** Whether the user's own login shell, not a fallback, gave the PATH a new terminal gets. */
+    readonly awaitUserShellDiscovery: Effect.Effect<boolean>;
   }
 >()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
 
@@ -116,6 +119,8 @@ const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const OPTIONAL_WINDOWS_SHELLS: ReadonlySet<string> = new Set(["pwsh.exe"]);
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+// A profile can be slow only while the machine boots; one longer wait covers it.
+const SLOW_LOGIN_SHELL_TIMEOUT = Duration.seconds(20);
 const BACKGROUND_REFRESH_DELAY = Duration.seconds(12);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
@@ -260,9 +265,13 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   readonly args: ReadonlyArray<string>;
   readonly timeout: Duration.Duration;
   readonly shell?: boolean;
-}): Effect.fn.Return<string, never, ChildProcessSpawner.ChildProcessSpawner> {
+}): Effect.fn.Return<
+  string,
+  DesktopShellEnvironmentCommandTimeoutError,
+  ChildProcessSpawner.ChildProcessSpawner
+> {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const output = yield* Effect.scoped(
+  const fiber = yield* Effect.scoped(
     Effect.gen(function* () {
       const child = yield* spawner.spawn(
         ChildProcess.make(input.command, input.args, {
@@ -303,33 +312,51 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
       DesktopShellEnvironmentCommandError: (error) =>
         logShellEnvironmentCommandError(error).pipe(Effect.as("")),
     }),
+    Effect.forkDetach,
+  );
+  const output = yield* Fiber.join(fiber).pipe(
     Effect.timeoutOption(input.timeout),
+    // Interrupting awaits the child's exit, which a shell stuck in the kernel never reaches.
+    Effect.ensuring(Fiber.interrupt(fiber).pipe(Effect.forkDetach)),
   );
   if (Option.isSome(output)) {
     return output.value;
   }
 
-  const error = new DesktopShellEnvironmentCommandTimeoutError({
+  return yield* new DesktopShellEnvironmentCommandTimeoutError({
     probe: input.probe,
     executable: executableName(input.command),
     argumentCount: input.args.length,
     timeoutMs: Duration.toMillis(input.timeout),
   });
-  yield* logShellEnvironmentCommandError(error);
-  return "";
 });
+
+const orEmptyOnTimeout = <R>(
+  effect: Effect.Effect<string, DesktopShellEnvironmentCommandTimeoutError, R>,
+): Effect.Effect<string, never, R> =>
+  effect.pipe(
+    Effect.catchTags({
+      DesktopShellEnvironmentCommandTimeoutError: (error) =>
+        logShellEnvironmentCommandError(error).pipe(Effect.as("")),
+    }),
+  );
 
 const readLoginShellEnvironment = (
   shell: string,
   names: ReadonlyArray<string>,
-): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  timeout: Duration.Duration,
+): Effect.Effect<
+  EnvironmentPatch,
+  DesktopShellEnvironmentCommandTimeoutError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
   names.length === 0
     ? Effect.succeed({})
     : runCommandOutput({
         probe: "login-shell",
         command: shell,
         args: ["-ilc", buildEnvironmentCaptureCommand(shell, names)],
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
 const readLaunchctlPath = runCommandOutput({
@@ -337,7 +364,7 @@ const readLaunchctlPath = runCommandOutput({
   command: "/bin/launchctl",
   args: ["getenv", "PATH"],
   timeout: LAUNCHCTL_TIMEOUT,
-}).pipe(Effect.map(trimNonEmpty));
+}).pipe(orEmptyOnTimeout, Effect.map(trimNonEmpty));
 
 // Only an install that is positively absent is skipped; an unreadable entry still gets a try.
 const isOnPath = Effect.fn("desktop.shellEnvironment.isOnPath")(function* (
@@ -385,7 +412,7 @@ const readWindowsProfileEnvironment = Effect.fn(
       command,
       args,
       timeout: LOGIN_SHELL_TIMEOUT,
-    });
+    }).pipe(orEmptyOnTimeout);
     const environment = extractEnvironment(output, WINDOWS_PROFILE_ENV_NAMES);
     if (Object.keys(environment).length > 0) {
       return environment;
@@ -504,19 +531,41 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
   function* (
     config: ShellEnvironmentConfig,
   ): Effect.fn.Return<
-    void,
+    boolean,
     never,
     ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
   > {
     const fileSystem = yield* FileSystem.FileSystem;
     const shellEnvironment: EnvironmentPatch = {};
+    const userShells = [config.env.SHELL?.trim(), readUserLoginShell()];
 
+    let answeredBy: string | undefined;
+    let waitedForSlowShell = false;
     for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
+      const read = (timeout: Duration.Duration) =>
+        readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES, timeout);
       Object.assign(
         shellEnvironment,
-        yield* readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES),
+        yield* read(LOGIN_SHELL_TIMEOUT).pipe(
+          Effect.catchTags({
+            DesktopShellEnvironmentCommandTimeoutError: (error) => {
+              const retry = !waitedForSlowShell;
+              waitedForSlowShell = true;
+              return logShellEnvironmentCommandError(error).pipe(
+                Effect.andThen(retry ? read(SLOW_LOGIN_SHELL_TIMEOUT) : Effect.succeed({})),
+              );
+            },
+          }),
+          Effect.catchTags({
+            DesktopShellEnvironmentCommandTimeoutError: (error) =>
+              logShellEnvironmentCommandError(error).pipe(Effect.as({})),
+          }),
+        ),
       );
-      if (shellEnvironment.PATH) break;
+      if (shellEnvironment.PATH) {
+        answeredBy = shell;
+        break;
+      }
     }
 
     const launchctlPath =
@@ -601,23 +650,35 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
         }
       }
     }
+
+    return Option.isSome(trimNonEmpty(shellEnvironment.PATH)) && userShells.includes(answeredBy);
   },
 );
+
+/** `fromUserShell` is false when only a fallback shell answered, whose PATH can miss folders. */
+interface ShellDiscovery {
+  readonly prepared: boolean;
+  readonly fromUserShell: boolean;
+}
 
 const installShellEnvironment = (
   config: ShellEnvironmentConfig,
 ): Effect.Effect<
-  boolean,
+  ShellDiscovery,
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 > => {
   if (config.platform === "win32") {
-    return installWindowsEnvironment(config);
+    return installWindowsEnvironment(config).pipe(
+      Effect.map((prepared) => ({ prepared, fromUserShell: prepared })),
+    );
   }
   if (config.platform === "darwin" || config.platform === "linux") {
-    return installPosixEnvironment(config).pipe(Effect.as(true));
+    return installPosixEnvironment(config).pipe(
+      Effect.map((fromUserShell) => ({ prepared: true, fromUserShell })),
+    );
   }
-  return Effect.succeed(false);
+  return Effect.succeed({ prepared: false, fromUserShell: false });
 };
 
 /** @public */
@@ -631,29 +692,29 @@ export const make = Effect.gen(function* () {
   const afterLaunch = Deferred.await(refreshWanted).pipe(
     Effect.timeoutOrElse({ duration: BACKGROUND_REFRESH_DELAY, orElse: () => Effect.void }),
   );
-  const installIntoProcess: DesktopShellEnvironment["Service"]["installIntoProcess"] =
-    yield* Effect.cached(
-      installShellEnvironment({
-        env: process.env,
-        platform: environment.platform,
-        path: environment.path,
-        windowsCache: {
-          directory: environment.stateDir,
-          path: environment.path.join(environment.stateDir, WINDOWS_SHELL_CACHE_FILE),
-        },
-        runInBackground: (effect) =>
-          Effect.forkIn(Effect.andThen(afterLaunch, effect), scope).pipe(
-            Effect.flatMap((fiber) => Ref.set(backgroundFiber, Option.some(fiber))),
-          ),
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.withSpan("desktop.shellEnvironment.installIntoProcess"),
-      ),
-    );
+  const discovery = yield* Effect.cached(
+    installShellEnvironment({
+      env: process.env,
+      platform: environment.platform,
+      path: environment.path,
+      windowsCache: {
+        directory: environment.stateDir,
+        path: environment.path.join(environment.stateDir, WINDOWS_SHELL_CACHE_FILE),
+      },
+      runInBackground: (effect) =>
+        Effect.forkIn(Effect.andThen(afterLaunch, effect), scope).pipe(
+          Effect.flatMap((fiber) => Ref.set(backgroundFiber, Option.some(fiber))),
+        ),
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.withSpan("desktop.shellEnvironment.installIntoProcess"),
+    ),
+  );
 
   return DesktopShellEnvironment.of({
-    installIntoProcess,
+    installIntoProcess: discovery.pipe(Effect.map(({ prepared }) => prepared)),
+    awaitUserShellDiscovery: discovery.pipe(Effect.map(({ fromUserShell }) => fromUserShell)),
     backgroundRefresh: Deferred.succeed(refreshWanted, undefined).pipe(
       Effect.andThen(Ref.get(backgroundFiber)),
       Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: Fiber.join })),

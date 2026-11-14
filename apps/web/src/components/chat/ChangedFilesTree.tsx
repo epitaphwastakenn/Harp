@@ -16,15 +16,15 @@ import {
   ChevronsUpDownIcon,
   EllipsisIcon,
   FileDiffIcon,
+  FolderClosedIcon,
+  FolderIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { Folder, FolderClosed } from "lucide";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
-import { MorphIcon } from "~/components/MorphIcon";
 import { observeResize } from "~/lib/observeResize";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
@@ -217,10 +217,11 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           style={indent}
           onClick={() => toggleDirectory(node.path)}
         >
-          <MorphIcon
-            className="size-3.5 shrink-0 text-icon-muted"
-            icon={isExpanded ? Folder : FolderClosed}
-          />
+          {isExpanded ? (
+            <FolderIcon className="size-3.5 shrink-0 text-icon-muted" />
+          ) : (
+            <FolderClosedIcon className="size-3.5 shrink-0 text-icon-muted" />
+          )}
           <span className="truncate text-xs text-muted-foreground group-hover:text-foreground">
             {node.name}
           </span>

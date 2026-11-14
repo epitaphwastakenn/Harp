@@ -1,4 +1,8 @@
-import type { PullRequestCheck } from "@t3tools/contracts";
+import type {
+  PullRequestCheck,
+  PullRequestCheckStatus,
+  PullRequestChecksState,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -36,7 +40,18 @@ function isAtLeastAsNew(candidate: string | null, kept: string | null): boolean 
   );
 }
 
-function sortChecks(checks: ReadonlyArray<PullRequestCheck>): ReadonlyArray<PullRequestCheck> {
+export function rollupCheckStatuses(
+  statuses: ReadonlyArray<PullRequestCheckStatus>,
+): PullRequestChecksState | null {
+  if (statuses.length === 0) return null;
+  if (statuses.includes("failure") || statuses.includes("cancelled")) return "failing";
+  if (statuses.includes("pending") || statuses.includes("action-required")) return "pending";
+  return statuses.includes("success") ? "passing" : null;
+}
+
+export function sortChecks(
+  checks: ReadonlyArray<PullRequestCheck>,
+): ReadonlyArray<PullRequestCheck> {
   return checks.toSorted(
     (a, b) =>
       Number(b.status === "failure" || b.status === "cancelled") -

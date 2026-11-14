@@ -6,6 +6,7 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
+  MenuShortcut,
   MenuRadioGroup,
   MenuRadioItem,
   MenuGroup,
@@ -38,6 +39,7 @@ export interface PreviewMoreMenuActions {
   readonly clearCache: () => void;
   readonly openDevTools?: () => void;
   readonly toggleNativePictureInPicture?: () => void;
+  readonly find?: () => void;
 }
 
 interface Props {
@@ -49,6 +51,7 @@ interface Props {
   onToggleDeviceToolbar: () => void;
   nativePictureInPicture: boolean;
   profileName: string | undefined;
+  findShortcutLabel?: string | null;
   move?: { readonly label: string; readonly onMove: () => void };
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
@@ -84,6 +87,7 @@ export function PreviewMoreMenu({
   onToggleDeviceToolbar,
   nativePictureInPicture,
   profileName,
+  findShortcutLabel,
   move,
   onOpenInBrowser,
   onCapture,
@@ -122,6 +126,12 @@ export function PreviewMoreMenu({
           <MenuItem onClick={onOpenInBrowser}>Open in system browser</MenuItem>
         ) : null}
         {hasPageActions ? <MenuSeparator /> : null}
+        {actions.find ? (
+          <MenuItem onClick={actions.find} disabled={disabled}>
+            Find on page
+            {findShortcutLabel ? <MenuShortcut>{findShortcutLabel}</MenuShortcut> : null}
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={actions.hardReload} disabled={disabled}>
           Hard reload
         </MenuItem>

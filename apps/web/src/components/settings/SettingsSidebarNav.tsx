@@ -16,7 +16,9 @@ import {
   Settings2Icon,
   XIcon,
 } from "lucide-react";
+import { resolveEventKeys } from "@t3tools/shared/keybindings";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import { msg, T, useGT, useMessages } from "gt-react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -40,6 +42,7 @@ import {
 } from "./settingsSearch";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 import { validateSettingsScopeSearch } from "./settingsScope";
+import { handleSettingsSectionKeyDown } from "./settingsSectionNavigation";
 
 const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
@@ -64,11 +67,11 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   items: ReadonlyArray<SettingsPath>;
 }> = [
   {
-    label: "App",
+    label: msg("App"),
     items: ["/settings/general", "/settings/appearance", "/settings/keybindings"],
   },
   {
-    label: "Agents",
+    label: msg("Agents"),
     items: [
       "/settings/providers",
       "/settings/roblox-studio",
@@ -76,9 +79,9 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/scheduled-tasks",
     ],
   },
-  { label: "Code", items: ["/settings/source-control", "/settings/projects"] },
+  { label: msg("Code"), items: ["/settings/source-control", "/settings/projects"] },
   {
-    label: "Data",
+    label: msg("Data"),
     items: ["/settings/storage", "/settings/archived", "/settings/connections"],
   },
 ];
@@ -89,23 +92,29 @@ function SettingsSectionIcon({ to }: { to: SettingsPath }) {
 }
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
+  const gt = useGT();
+  const m = useMessages();
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = validateSettingsScopeSearch(currentSearch);
   const navGroups = SETTINGS_NAV_GROUPS.map((group) => ({
-    label: group.label,
+    label: m(group.label),
     items: group.items
       .filter((to) => to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch))
-      .map((to) => ({ to, label: SETTINGS_SECTION_LABELS[to], icon: SETTINGS_SECTION_ICONS[to] })),
+      .map((to) => ({
+        to,
+        label: m(SETTINGS_SECTION_LABELS[to]),
+        icon: SETTINGS_SECTION_ICONS[to],
+      })),
   })).filter((group) => group.items.length > 0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   // Below md the nav is an icon rail; searching expands it over the page.
   const [compactSearchOpen, setCompactSearchOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
-  const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
-  const results = searchSettings(query, searchableItems);
+  const searchableItems = useAvailableSettingsSearchItems();
+  const results = searchSettings(query, searchableItems, m);
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
   const maxResultIndex = Math.max(results.length - 1, 0);
@@ -125,13 +134,17 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
+      const eventKeys = resolveEventKeys(event);
       const isFindShortcut =
-        event.key.toLowerCase() === "f" &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        !event.shiftKey;
+        eventKeys.has("f") && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
+      // Shift is allowed only when the layout types "/" with it (German Shift+7); Shift on
+      // the physical Slash key types "?" or "," instead.
       const isSlashShortcut =
-        event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey;
+        eventKeys.has("/") &&
+        (event.key === "/" || !event.shiftKey) &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey;
       if (!isFindShortcut && !isSlashShortcut) return;
 
       const target = event.target;
@@ -251,8 +264,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 onBlur={() => {
                   if (!isSearching) setCompactSearchOpen(false);
                 }}
-                placeholder="Search"
-                aria-label="Search settings"
+                placeholder={gt("Search")}
+                aria-label={gt("Search settings")}
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={isSearching && hasResults}
@@ -270,7 +283,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   size="icon-micro"
                   variant="ghost-muted"
                   className="shrink-0"
-                  aria-label="Clear settings search"
+                  aria-label={gt("Clear settings search")}
                   onClick={() => {
                     clearSearch();
                     searchInputRef.current?.focus();
@@ -287,14 +300,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No settings found
+                <T>No settings found</T>
               </p>
             ) : null}
             {isSearching ? (
               <SidebarMenu
                 id={hasResults ? "settings-search-results" : undefined}
                 role={hasResults ? "listbox" : undefined}
-                aria-label={hasResults ? "Settings search results" : undefined}
+                aria-label={hasResults ? gt("Settings search results") : undefined}
               >
                 {results.map((item, index) => (
                   <SidebarMenuItem key={item.id} role="presentation">
@@ -312,10 +325,10 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                       <SettingsSectionIcon to={item.to} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-sidebar-foreground">
-                          {item.title}
+                          {m(item.title)}
                         </span>
                         <span className="block truncate text-2xs text-sidebar-muted-foreground">
-                          {SETTINGS_SECTION_LABELS[item.to]}
+                          {m(SETTINGS_SECTION_LABELS[item.to])}
                         </span>
                       </span>
                     </SidebarMenuButton>
@@ -328,7 +341,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   <SidebarMenu className="md:hidden">
                     <SidebarMenuItem>
                       <SidebarMenuButton
-                        aria-label="Search settings"
+                        aria-label={gt("Search settings")}
                         onClick={() => setCompactSearchOpen(true)}
                       >
                         <SearchIcon />
@@ -336,40 +349,44 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     </SidebarMenuItem>
                   </SidebarMenu>
                 )}
-                {navGroups.map((group) => (
-                  <div key={group.label} role="group" aria-label={group.label}>
-                    <p className="px-2 pb-1 text-xs font-medium text-sidebar-muted-foreground max-md:sr-only">
-                      {group.label}
-                    </p>
-                    <SidebarMenu>
-                      {group.items.map((item) => {
-                        const Icon = item.icon;
-                        const isGeneralDetailPage =
-                          item.to === "/settings/general" &&
-                          pathname === "/settings/open-source-licenses";
-                        const isActive =
-                          isGeneralDetailPage ||
-                          pathname === item.to ||
-                          pathname.startsWith(`${item.to}/`);
-                        return (
-                          <SidebarMenuItem key={item.to}>
-                            <SidebarMenuButton
-                              isActive={isActive}
-                              onClick={() => handleSectionClick(item.to)}
-                            >
-                              <Icon />
-                              <span
-                                className={cn("truncate", !compactSearchOpen && "max-md:sr-only")}
+                <div onKeyDown={handleSettingsSectionKeyDown} className="contents">
+                  {navGroups.map((group) => (
+                    <div key={group.label} role="group" aria-label={group.label}>
+                      <p className="px-2 pb-1 text-xs font-medium text-sidebar-muted-foreground max-md:sr-only">
+                        {group.label}
+                      </p>
+                      <SidebarMenu>
+                        {group.items.map((item) => {
+                          const Icon = item.icon;
+                          const isGeneralDetailPage =
+                            item.to === "/settings/general" &&
+                            pathname === "/settings/open-source-licenses";
+                          const isActive =
+                            isGeneralDetailPage ||
+                            pathname === item.to ||
+                            pathname.startsWith(`${item.to}/`);
+                          return (
+                            <SidebarMenuItem key={item.to}>
+                              <SidebarMenuButton
+                                data-settings-section={item.to}
+                                aria-current={isActive ? "page" : undefined}
+                                isActive={isActive}
+                                onClick={() => handleSectionClick(item.to)}
                               >
-                                {item.label}
-                              </span>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        );
-                      })}
-                    </SidebarMenu>
-                  </div>
-                ))}
+                                <Icon />
+                                <span
+                                  className={cn("truncate", !compactSearchOpen && "max-md:sr-only")}
+                                >
+                                  {item.label}
+                                </span>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

@@ -11,6 +11,7 @@ import { resolveAntigravityInstanceDirectories } from "../provider/antigravityAu
 import { makeAntigravityConnectProxy } from "../provider/AntigravityConnectProxy.ts";
 import { runAntigravityDiagnostics } from "../provider/AntigravityDiagnostics.ts";
 import { makeAntigravityInstallation } from "../provider/AntigravityInstallation.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 const diagnoseCommand = Command.make("diagnose", {
@@ -31,7 +32,16 @@ const diagnoseCommand = Command.make("diagnose", {
     Effect.gen(function* () {
       const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel);
       const environment = yield* HostProcess.Environment;
-      const installation = yield* makeAntigravityInstallation({ baseDir: config.baseDir });
+      const bundled = Effect.succeed(ModelManifest.BUNDLED_MODEL_MANIFEST);
+      const installation = yield* makeAntigravityInstallation({ baseDir: config.baseDir }).pipe(
+        Effect.provideService(ModelManifest.ModelManifest, {
+          current: bundled,
+          refresh: bundled,
+          forceRefresh: bundled,
+          refreshOnDemand: bundled,
+          refreshInBackground: Effect.void,
+        }),
+      );
       const executable = yield* installation
         .acquire(undefined, environment)
         .pipe(Effect.catch((cause) => Effect.succeed({ error: cause.detail })));

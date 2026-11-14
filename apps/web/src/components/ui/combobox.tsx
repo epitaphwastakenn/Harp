@@ -127,7 +127,7 @@ function ComboboxSearchInput({
         />
         <ComboboxInput
           {...props}
-          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+          className="flex w-full [&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
           showTrigger={false}
           size="sm"
           unstyled
@@ -152,6 +152,7 @@ function ComboboxPopup({
   sideOffset = 4,
   alignOffset,
   align = "start",
+  collisionAvoidance,
   anchor: anchorProp,
   ...props
 }: ComboboxPrimitive.Popup.Props & {
@@ -160,6 +161,7 @@ function ComboboxPopup({
   alignOffset?: ComboboxPrimitive.Positioner.Props["alignOffset"];
   side?: ComboboxPrimitive.Positioner.Props["side"];
   anchor?: ComboboxPrimitive.Positioner.Props["anchor"];
+  collisionAvoidance?: ComboboxPrimitive.Positioner.Props["collisionAvoidance"];
 }) {
   const { chipsRef, multiple } = React.use(ComboboxContext);
   const anchor = anchorProp ?? (multiple ? chipsRef : undefined);
@@ -170,6 +172,7 @@ function ComboboxPopup({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
+        collisionAvoidance={collisionAvoidance}
         className="z-[130] select-none"
         data-slot="combobox-positioner"
         side={side}
@@ -183,7 +186,8 @@ function ComboboxPopup({
           data-slot="combobox-surface"
         >
           <ComboboxPrimitive.Popup
-            className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground"
+            // Electron drag hit-testing ignores z-index; items over a drag region would swallow clicks.
+            className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground [-webkit-app-region:no-drag]"
             data-slot="combobox-popup"
             {...props}
           >

@@ -2,8 +2,20 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). It provides the Node version
-pinned in `package.json` (Node 26), so no separate Node install is needed. From the repository root:
+Harp uses [Vite+](https://viteplus.dev/guide/). Install its global `vp` command:
+
+```sh
+curl -fsSL https://vite.plus | bash
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://vite.plus/ps1 | iex
+```
+
+`vp` provides the Node version pinned in `package.json` (Node 26), so no separate Node install is
+needed. From the repository root:
 
 ```sh
 vp i
@@ -22,6 +34,11 @@ Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron cl
 
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
 Add `--browser` to open a browser automatically.
+
+To stop a worktree's dev stack when its thread settles, import the **Dev** action from
+`t3.json` in Settings > Projects > Actions and start it through the action menu or its
+keybinding. Its `stopOnSettle` option lets Harp stop the terminal and its child processes.
+Running `vp run dev` through an agent's own shell tool does not attach it to this lifecycle.
 
 ### State and ports
 
@@ -46,7 +63,7 @@ Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies the backend through 
 origin so the same build works over localhost and remote connections.
 
 Shared runs enable bundled dev to avoid a network round trip for each import level.
-`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. Two reload traps matter
+`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. These traps matter
 when changing this setup:
 
 - The web entry must dynamically import the app so React refresh initializes before application
@@ -56,6 +73,9 @@ when changing this setup:
 - The app and its routes are lazy chunks, built on first request. A plugin pre-bundles the
   startup chain when the server starts. Renaming or moving a startup route or the app entry
   silently drops it from that list.
+- Bundled dev and `--built` hand Rolldown its own watcher, which skips Vite's default
+  `node_modules` ignore. Those files are pnpm-store hardlinks, so another worktree's install or
+  removal rebuilds every long-running server and leaks memory. Keep `node_modules` excluded.
 
 The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts),
 [Tailwind plugin](../../apps/web/vite/tailwind.ts), and
@@ -135,9 +155,11 @@ In `apps/web`, a test that renders React or touches the DOM is named `*.browser.
 and runs in headless Chromium with the React Compiler on, like the app. There is no jsdom; other
 `*.test.ts` files run in Node.
 
-TypeScript workspaces typecheck with `tsc`. The `typescript` catalog entry is
-`@tsc-rs/typescript`, the tsc-rs drop-in, with Effect diagnostics, quick fixes, and
-refactors built in. VS Code uses it through `js/ts.tsdk.path` in `.vscode/settings.json`.
+TypeScript workspaces typecheck with `effect-tsgo tsrs --noEmit` from `@effect/tsgo`: the
+[tsrs](https://github.com/oxc-project/tsrs) checker with Effect diagnostics, quick fixes, and
+refactors built in. VS Code's TypeScript 7 extension starts the same checker through
+`.vscode/tsdk/tsgo` (`js/ts.tsdk.path`), a POSIX
+script, so on Windows open the workspace through WSL.
 
 CI owns the full suite; see [ci.yml](../../.github/workflows/ci.yml) for its current jobs.
 The [manual Windows lane](../../.github/workflows/windows-tests.yml) is available for focused
@@ -145,7 +167,7 @@ Windows investigation while that suite is not a required gate.
 
 ### Unused code
 
-`vp run knip:check` checks unused files and dependencies across the repo, then
+`vp run knip:check` checks unused files and dependencies across the repo and, at the same time,
 unused runtime exports in `apps/server`, `apps/desktop`, `apps/web`, and every internal package under
 `packages/`. CI enforces both checks.
 Exported types and Effect schemas are allowed without consumers. The schema preprocessor

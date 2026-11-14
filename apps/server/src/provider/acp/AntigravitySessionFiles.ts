@@ -79,6 +79,15 @@ export function replaceAntigravityStepStatus(
   return undefined;
 }
 
+class AntigravitySessionFileError extends Schema.TaggedError<AntigravitySessionFileError>()(
+  "AntigravitySessionFileError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not settle Antigravity session commands.";
+  }
+}
+
 function settleOrphanedCommandSteps(filename: string) {
   const database = new NodeSqlite.DatabaseSync(filename);
   try {
@@ -134,7 +143,10 @@ export const settleOrphanedAntigravityCommands = Effect.fn("settleOrphanedAntigr
       `${input.sessionId}.db`,
     );
     if (!(yield* fs.exists(filename))) return;
-    const settled = yield* Effect.try(() => settleOrphanedCommandSteps(filename));
+    const settled = yield* Effect.try({
+      try: () => settleOrphanedCommandSteps(filename),
+      catch: (cause) => new AntigravitySessionFileError({ cause }),
+    });
     if (settled > 0) {
       yield* Effect.logInfo("Settled Antigravity commands that died with their runtime.", {
         sessionId: input.sessionId,

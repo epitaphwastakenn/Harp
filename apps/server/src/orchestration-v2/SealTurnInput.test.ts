@@ -258,7 +258,7 @@ describe("SealTurnInput", () => {
             }),
             Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
               // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
-              getInstance: () => Effect.succeed(undefined),
+              getInstance: () => Effect.undefined,
             }),
             Layer.mock(TextGeneration.TextGeneration)({}),
             Layer.succeed(RobloxStudioConfig, {
@@ -303,7 +303,7 @@ describe("SealTurnInput", () => {
             }),
             Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
               // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
-              getInstance: () => Effect.succeed(undefined),
+              getInstance: () => Effect.undefined,
             }),
             Layer.mock(TextGeneration.TextGeneration)({}),
             Layer.succeed(RobloxStudioConfig, {
@@ -346,7 +346,7 @@ describe("SealTurnInput", () => {
             }),
             Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
               // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
-              getInstance: () => Effect.succeed(undefined),
+              getInstance: () => Effect.undefined,
             }),
             Layer.mock(TextGeneration.TextGeneration)({}),
             Layer.succeed(RobloxStudioConfig, {

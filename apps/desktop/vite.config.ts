@@ -1,16 +1,33 @@
 import "vite-plus/test/config";
-import { defineConfig } from "vite-plus";
+import * as NodeOS from "node:os";
+
+import { defaultInclude, defineConfig } from "vite-plus";
 
 import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
+
+const domTests = ["src/preview/PickPreload.test.ts"];
 
 // Install only bundle externals; the server bundle already carries its dependency tree.
 const isMainProcessExternal = (id: string) =>
   id === "electron" || id.startsWith("electron/") || isDesktopRuntimeExternalDependency(id);
 const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
+// tsdown runs onSuccess through a shell. dash forks instead of exec'ing the last command, which
+// would leave an `sh` between `vp pack` and the supervisor and hide `vp pack` dying from it.
+const devElectronCommand =
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Build config has no Effect runtime.
+  NodeOS.platform() === "win32"
+    ? "node scripts/dev-electron.mjs"
+    : "exec node scripts/dev-electron.mjs";
+
 export default defineConfig({
   run: {
     tasks: {
       build: {
+        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        dependsOn: ["t3#build"],
+        cache: false,
+      },
+      "build:bundle": {
         command: "node scripts/build-preview-annotation-css.mjs && vp pack",
         dependsOn: ["t3#build"],
         cache: false,
@@ -30,9 +47,9 @@ export default defineConfig({
         dependsOn: ["t3#build"],
         cache: false,
       },
-      // tsc (tsc-rs) rewrites the tsbuildinfo it reads, which keeps a task out of the cache.
+      // A local tsbuildinfo is leftover build state, not a typecheck input.
       typecheck: {
-        command: "tsc --noEmit",
+        command: "effect-tsgo tsrs --noEmit",
         cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
       },
     },
@@ -52,7 +69,7 @@ export default defineConfig({
         neverBundle: isMainProcessExternal,
         onlyBundle: false,
       },
-      ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
+      ...(shouldLaunchElectronAfterPack ? { onSuccess: devElectronCommand } : {}),
     },
     {
       format: "cjs",
@@ -102,7 +119,10 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preview-pick-preload.ts"],
       deps: {
-        alwaysBundle: (id) => id === "react-grab" || id.startsWith("react-grab/"),
+        alwaysBundle: (id) =>
+          id === "react-grab" ||
+          id.startsWith("react-grab/") ||
+          id === "@t3tools/shared/keybindingMatching",
       },
     },
     {
@@ -127,9 +147,29 @@ export default defineConfig({
     // The Windows lane runs workspace suites concurrently; filesystem-heavy
     // desktop integration tests can exceed Vitest's 5 second default there.
     testTimeout: 15_000,
-    setupFiles: [
-      "../../packages/shared/src/testing/longTempDir.ts",
-      "../../packages/shared/src/testing/providerEnv.ts",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: defaultInclude,
+          exclude: ["**/node_modules/**", ...domTests],
+          setupFiles: [
+            "../../packages/shared/src/testing/longTempDir.ts",
+            "../../packages/shared/src/testing/providerEnv.ts",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          include: domTests,
+          // Guest preloads run in the page; these tests drive them against a DOM.
+          environment: "jsdom",
+          setupFiles: ["../../packages/shared/src/testing/providerEnv.ts"],
+        },
+      },
     ],
   },
 });

@@ -1,4 +1,4 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { RuntimeMode } from "@t3tools/contracts";
 import { memo } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -17,18 +17,16 @@ import { useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
-  interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<{
     readonly mode: RuntimeMode;
     readonly label: string;
+    readonly disabledReason?: string;
   }>;
-  showInteractionModeToggle: boolean;
   agentControls?: AgentControlsBinding | undefined;
   size?: "sm" | "xs";
   /** Close the portaled popup when its trigger hides. */
   hidden?: boolean;
-  onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -50,22 +48,6 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
-        {props.showInteractionModeToggle ? (
-          <>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-            <MenuRadioGroup
-              value={props.interactionMode}
-              onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
-              }}
-            >
-              <MenuRadioItem value="default">Build</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-            </MenuRadioGroup>
-            <MenuDivider />
-          </>
-        ) : null}
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Permissions</div>
         <MenuRadioGroup
           value={props.runtimeMode}
@@ -75,7 +57,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           }}
         >
           {props.runtimeModeOptions.map((option) => (
-            <MenuRadioItem key={option.mode} value={option.mode} data-runtime-mode={option.mode}>
+            <MenuRadioItem
+              key={option.mode}
+              value={option.mode}
+              disabled={option.disabledReason !== undefined}
+              data-runtime-mode={option.mode}
+            >
               {option.label}
             </MenuRadioItem>
           ))}

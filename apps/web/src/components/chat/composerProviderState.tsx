@@ -12,6 +12,7 @@ import {
   getProviderOptionDescriptors,
   migrateLegacyUltracodeOptions,
   normalizeModelSlug,
+  withImplicitFastModeDefault,
 } from "@t3tools/shared/model";
 
 import { getProviderModelCapabilities } from "../../providerModels";
@@ -22,7 +23,7 @@ export type ComposerProviderStateInput = {
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
-  planModeEnabled: boolean;
+  includePlanAgent?: boolean | undefined;
 };
 
 const COMPOSER_MAX_EFFORT_FRAME = {
@@ -39,38 +40,17 @@ export type ComposerProviderState = {
   modelPickerIconClassName?: string;
 };
 
-/**
- * Cursor ACP can report `fastMode: true` as the provider default. T3 only
- * treats Fast as selected when the user chose it (draft/sticky/settings).
- */
-export function withImplicitFastModeDefault(
-  caps: ModelCapabilities,
-  modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-): ReadonlyArray<ProviderOptionSelection> | undefined {
-  const hasExplicitFastMode = modelOptions?.some((selection) => selection.id === "fastMode");
-  if (hasExplicitFastMode) {
-    return modelOptions ?? undefined;
-  }
-  const hasFastModeDescriptor = caps.optionDescriptors?.some(
-    (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
-  );
-  if (!hasFastModeDescriptor) {
-    return modelOptions ?? undefined;
-  }
-  return [...(modelOptions ?? []), { id: "fastMode", value: false }];
-}
-
 function resolveComposerOptionSelections(
   models: ReadonlyArray<ServerProviderModel>,
   model: string,
   provider: ProviderDriverKind,
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-  planModeEnabled: boolean,
+  includePlanAgent: boolean | undefined,
 ): {
   caps: ModelCapabilities;
   selections: ReadonlyArray<ProviderOptionSelection> | undefined;
 } {
-  const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
+  const caps = getProviderModelCapabilities(models, model, provider, includePlanAgent);
   return {
     caps,
     selections: withImplicitFastModeDefault(caps, migrateLegacyUltracodeOptions(modelOptions)),
@@ -78,13 +58,13 @@ function resolveComposerOptionSelections(
 }
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
-  const { provider, model, models, modelOptions, planModeEnabled } = input;
-  if (provider === "opencode") {
+  const { provider, model, models, modelOptions, includePlanAgent } = input;
+  if (provider === "opencode" || provider === "cursor") {
     const normalizedModel = normalizeModelSlug(model, provider);
     const modelIsInCatalog = models.some((candidate) => candidate.slug === normalizedModel);
     if (!modelIsInCatalog) {
       const preservedOptions = modelOptions?.filter(
-        (option) => planModeEnabled || option.id !== "agent" || option.value !== "plan",
+        (option) => includePlanAgent || option.id !== "agent" || option.value !== "plan",
       );
       return {
         provider,
@@ -99,7 +79,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
     model,
     provider,
     modelOptions,
-    planModeEnabled,
+    includePlanAgent,
   );
   const descriptors = getProviderOptionDescriptors({ caps, selections });
   const primarySelectDescriptor = descriptors.find(
@@ -132,7 +112,7 @@ export function getComposerReasoningStep(input: {
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
-  planModeEnabled: boolean;
+  includePlanAgent?: boolean | undefined;
   direction: 1 | -1;
 }): { modelOptions: ReadonlyArray<ProviderOptionSelection> } | null {
   const { selections } = resolveComposerOptionSelections(
@@ -140,7 +120,7 @@ export function getComposerReasoningStep(input: {
     input.model,
     input.provider,
     input.modelOptions,
-    input.planModeEnabled,
+    input.includePlanAgent,
   );
   return getReasoningTraitStep({
     provider: input.provider,
@@ -149,7 +129,7 @@ export function getComposerReasoningStep(input: {
     models: input.models,
     modelOptions: selections,
     reportedModelSelection: input.reportedModelSelection,
-    planModeEnabled: input.planModeEnabled,
+    includePlanAgent: input.includePlanAgent,
     direction: input.direction,
   });
 }

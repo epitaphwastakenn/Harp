@@ -9,7 +9,7 @@ import type {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -259,7 +259,7 @@ export const RobloxStudioConfig = Context.Reference<RobloxStudioConfigShape>(
       appliesTo: () => Effect.succeed(false),
       hiddenServerIds: () => Effect.succeed(new Set<string>()),
       // @effect-diagnostics-next-line effectSucceedWithVoid:off - No instructions is a value, not a void step.
-      instructions: () => Effect.succeed(undefined),
+      instructions: () => Effect.undefined,
     }),
   },
 );
@@ -362,7 +362,7 @@ const make = Effect.gen(function* () {
     ? blenderMcpCandidate
     : undefined;
 
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const configuredPort = Number(env.SEALCODE_STUDIO_BRIDGE_PORT?.trim() ?? "");
   const studioBridge: StudioBridgeEndpoint = {
     port:

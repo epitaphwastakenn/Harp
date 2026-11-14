@@ -95,8 +95,7 @@ export default function OfficeViewer(props: {
       </FileSurfaceUnavailable>
     );
   if (!prepared) return <FileSurfaceLoading />;
-  const Viewer =
-    props.kind === "docx" ? WordDocument : props.kind === "xlsx" ? Spreadsheet : Presentation;
+  const Viewer = props.kind === "docx" ? WordDocument : Presentation;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {details ? (
@@ -113,7 +112,16 @@ export default function OfficeViewer(props: {
         </FileSurfaceNotice>
       ) : null}
       <Suspense fallback={<FileSurfaceLoading />}>
-        <Viewer bytes={prepared.bytes} onDetails={setDetails} onError={fail} />
+        {prepared.view ? (
+          <Spreadsheet
+            bytes={prepared.bytes}
+            view={prepared.view}
+            onDetails={setDetails}
+            onError={fail}
+          />
+        ) : (
+          <Viewer bytes={prepared.bytes} onDetails={setDetails} onError={fail} />
+        )}
       </Suspense>
     </div>
   );

@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -183,8 +183,8 @@ export const makeAntigravityAuth = Effect.fn("makeAntigravityAuth")(function* <
   Runtime extends AntigravityAuthRuntime,
 >(
   options: AntigravityAuthOptions<Runtime>,
-): Effect.fn.Return<AntigravityAuth, never, Crypto.Crypto | Scope.Scope> {
-  const crypto = yield* Crypto.Crypto;
+): Effect.fn.Return<AntigravityAuth, never, SecureRandom.SecureRandom | Scope.Scope> {
+  const random = yield* SecureRandom.SecureRandom;
   const instanceScope = yield* Scope.Scope;
   const usesBrowser = options.usesBrowser ?? true;
   const lock = yield* Semaphore.make(1);
@@ -256,7 +256,7 @@ export const makeAntigravityAuth = Effect.fn("makeAntigravityAuth")(function* <
         );
         // Propagate interruption after the exit wait so concurrent stop waiters stay attached.
         return yield* restore(Fiber.await(fiber)).pipe(
-          Effect.flatMap((result) => result),
+          Effect.flatten,
           Effect.ensuring(Fiber.interrupt(fiber)),
           Effect.ensuring(
             Effect.sync(() => {
@@ -479,8 +479,8 @@ export const makeAntigravityAuth = Effect.fn("makeAntigravityAuth")(function* <
             if (operation !== "idle") {
               return yield* setupError("start", "Antigravity setup is already in progress.");
             }
-            const flowId = yield* crypto
-              .randomUUIDv4()
+            const flowId = yield* random
+              .uuidV4()
               .pipe(
                 Effect.mapError(() =>
                   setupError("start", "Could not start Google sign-in. Try again."),
@@ -643,7 +643,7 @@ export const makeAntigravityAuth = Effect.fn("makeAntigravityAuth")(function* <
         }),
       );
       const worker = yield* task.pipe(Effect.forkIn(instanceScope));
-      return yield* Fiber.await(worker).pipe(Effect.flatMap((result) => result));
+      return yield* Fiber.await(worker).pipe(Effect.flatten);
     }),
     subscribe: (ownerSessionId) =>
       SubscriptionRef.changes(snapshot).pipe(

@@ -5,6 +5,9 @@ import * as NodePath from "node:path";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export interface FakeCommandCodeRun {
   /** Written to stdout, one JSON line each. */
@@ -66,7 +69,7 @@ export const makeFakeCommandCode = Effect.fn("makeFakeCommandCode")(function* (
   const probeLogPath = NodePath.join(directory, "probes.log");
   NodeFS.writeFileSync(
     configPath,
-    JSON.stringify({
+    encodeJson({
       runs: options.runs ?? [{}],
       version: options.version ?? "1.17.0",
       versionExitCode: options.versionExitCode ?? 0,

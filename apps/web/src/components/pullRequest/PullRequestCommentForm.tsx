@@ -7,9 +7,12 @@ import { useState, type RefObject } from "react";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { PullRequestGlyph } from "./pullRequestIcons";
+import {
+  PullRequestMarkdownTextarea,
+  pullRequestCompletionScope,
+} from "./PullRequestMarkdownTextarea";
 import { pullRequestReviewKey } from "./pullRequestReviewStore";
 import { useInlineActionConfirm } from "./useInlineActionConfirm";
 
@@ -37,6 +40,7 @@ export function PullRequestCommentForm({
 }) {
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState<"comment" | "close" | "reopen" | null>(null);
+  const locked = submitting !== null || actionPending;
   const postComment = useAtomCommand(pullRequestEnvironment.comment, {
     reportFailure: false,
   });
@@ -52,8 +56,8 @@ export function PullRequestCommentForm({
         ? ("reopen" as const)
         : null;
 
-  const submit = async (action: "comment" | "close" | "reopen") => {
-    const trimmed = body.trim();
+  const submit = async (action: "comment" | "close" | "reopen", text: string) => {
+    const trimmed = text.trim();
     if (trimmed.length === 0 || submitting !== null || actionPending) return;
     setSubmitting(action);
     if (action !== "comment") {
@@ -82,18 +86,22 @@ export function PullRequestCommentForm({
     onClose();
     onCommented();
   };
+  const submitAfterDictation = (action: "comment" | "close" | "reopen") =>
+    void submit(action, body);
+  const submitDisabled = body.trim().length === 0 || locked;
 
   return (
     <div className="space-y-2">
-      <Textarea
+      <PullRequestMarkdownTextarea
         ref={textareaRef}
+        completionScope={pullRequestCompletionScope(detail, environmentId, reference)}
         // Lock while posting because success clears the draft.
-        disabled={submitting !== null || actionPending}
+        disabled={locked}
         value={body}
         rows={3}
         placeholder="Leave a comment"
         aria-label={`Comment on this ${sourceControlClients.get(detail.provider).changeRequest.singular}`}
-        onChange={(event) => setBody(event.target.value)}
+        onValueChange={setBody}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (
@@ -104,19 +112,19 @@ export function PullRequestCommentForm({
           ) {
             event.preventDefault();
             event.stopPropagation();
-            if (!event.repeat) void submit("comment");
+            if (!event.repeat) submitAfterDictation("comment");
           }
         }}
       />
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {followUpAction === null ? null : (
           <Button
             size="xs"
             variant={followUpAction === "close" ? "destructive-outline" : "outline"}
-            disabled={body.trim().length === 0 || submitting !== null || actionPending}
+            disabled={submitDisabled}
             {...(followUpAction === "close"
-              ? inlineConfirm.props("close", () => void submit("close"))
-              : { onClick: () => void submit("reopen") })}
+              ? inlineConfirm.props("close", () => submitAfterDictation("close"))
+              : { onClick: () => submitAfterDictation("reopen") })}
           >
             {followUpAction === "close" ? (
               <PullRequestGlyph.closed className="size-3.5" />
@@ -147,8 +155,8 @@ export function PullRequestCommentForm({
         <Button
           size="xs"
           variant="outline"
-          disabled={body.trim().length === 0 || submitting !== null || actionPending}
-          onClick={() => void submit("comment")}
+          disabled={submitDisabled}
+          onClick={() => submitAfterDictation("comment")}
         >
           <SendIcon className="size-3.5" />
           {submitting === "comment" ? "Posting..." : "Comment"}

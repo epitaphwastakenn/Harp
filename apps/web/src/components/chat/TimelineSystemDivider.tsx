@@ -21,16 +21,29 @@ export function TimelineSystemDivider(props: {
 }) {
   const Icon = props.icon;
   const content = (
-    <span className="flex min-w-0 items-center justify-center gap-1.5">
-      {Icon ? <Icon aria-hidden="true" className="size-3 shrink-0" /> : null}
-      <span className="font-medium">{props.label}</span>
+    <span
+      className={cn(
+        "min-w-0",
+        props.wrapDetail ? "text-center" : "flex items-center justify-center gap-1.5",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex items-baseline gap-1.5 align-baseline font-medium",
+          props.wrapDetail && "shrink-0 whitespace-nowrap",
+        )}
+      >
+        {Icon ? <Icon aria-hidden="true" className="size-3 shrink-0 self-center" /> : null}
+        {props.label}
+      </span>
       {props.detail ? (
         <span
           className={cn(
-            "inline-flex min-w-0 items-center",
+            "min-w-0",
+            props.wrapDetail ? "ml-1.5 wrap-anywhere" : "inline-flex items-center",
             props.tone !== "danger" && "text-muted-foreground",
             typeof props.detail === "string" &&
-              (props.wrapDetail ? "max-w-80 whitespace-pre-wrap" : "max-w-80 truncate"),
+              (props.wrapDetail ? "whitespace-pre-wrap" : "max-w-80 truncate"),
           )}
         >
           {props.showDetailSeparator === false ? null : "· "}

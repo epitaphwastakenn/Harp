@@ -1,3 +1,5 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { NodeId, ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
@@ -85,7 +87,7 @@ describe("ToolOutputImageStore", () => {
       // A tool item is updated many times; each image is still one file.
       yield* store.externalize(item);
       assert.lengthOf(yield* fileSystem.readDirectory(directory), 2);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it.effect("leaves items without inline images untouched", () =>
@@ -95,7 +97,7 @@ describe("ToolOutputImageStore", () => {
       const store = yield* make(attachmentsDir);
       const item = toolItem({ content: [{ type: "text", text: "done" }] });
       assert.strictEqual(yield* store.externalize(item), item);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it("only trusts file names the store writes", () => {

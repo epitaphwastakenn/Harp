@@ -6,7 +6,7 @@ import {
   type ClientSettings,
   type DesktopSnapShotEvent,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -443,11 +443,8 @@ const layerTest = (
         FileSystem.layerNoop(fileSystemOverrides),
         Path.layer,
         Layer.succeed(
-          Crypto.Crypto,
-          Crypto.make({
-            randomBytes: (size) => new Uint8Array(size),
-            digest: (_algorithm, data) => Effect.succeed(data),
-          }),
+          SecureRandom.SecureRandom,
+          SecureRandom.make((size) => new Uint8Array(size)),
         ),
       ),
     ),
@@ -573,11 +570,8 @@ function concurrentCaptureFixture(platform: NodeJS.Platform, animations: boolean
       readFileString: (path) => Effect.sync(() => metadata.get(path)!),
     }),
     Layer.succeed(
-      Crypto.Crypto,
-      Crypto.make({
-        randomBytes: (size) => new Uint8Array(size).fill(++randomByte),
-        digest: (_algorithm, data) => Effect.succeed(data),
-      }),
+      SecureRandom.SecureRandom,
+      SecureRandom.make((size) => new Uint8Array(size).fill(++randomByte)),
     ),
     Layer.succeed(
       DesktopWindow.DesktopWindow,
@@ -871,7 +865,7 @@ it.effect.each(["succeeds", "fails"] as const)(
   },
 );
 
-it.effect("matches Windows accessibility windows on a scaled display", () => {
+it.effect("captures and reads Windows windows in physical pixels on a scaled display", () => {
   const png = Buffer.from([1, 2, 3]);
   const active = {
     platform: "windows",
@@ -880,26 +874,26 @@ it.effect("matches Windows accessibility windows on a scaled display", () => {
     owner: { name: "Editor", processId: 123 },
     bounds: { x: 10, y: 20, width: 800, height: 600 },
   } as const;
-  const dipBounds = { x: 5, y: 10, width: 400, height: 300 };
+  const window = (name: string, value: string) => ({
+    role: "window",
+    name,
+    bounds: active.bounds,
+    children: async () => [
+      {
+        role: "button",
+        name: "Save",
+        bounds: { x: 210, y: 220, width: 200, height: 100 },
+        children: async () => [],
+      },
+    ],
+    tree: async () => ({ name, value, children: [] }),
+  });
   activeWindowMock.mockReset().mockResolvedValue(active);
-  screenToDipRectMock.mockImplementation(() => dipBounds);
+  screenToDipRectMock.mockImplementation(() => ({ x: 5, y: 10, width: 400, height: 300 }));
   regionCaptureMock.mockReset().mockResolvedValue({ width: 800, height: 600, png });
   accessibilityForegroundMock.mockReset().mockResolvedValue({
     pid: 123,
-    asElement: () => ({
-      role: "window",
-      name: "Editor",
-      bounds: dipBounds,
-      children: async () => [
-        {
-          role: "button",
-          name: "Save",
-          bounds: { x: 105, y: 110, width: 100, height: 50 },
-          children: async () => [],
-        },
-      ],
-      tree: async () => ({ name: "Editor", value: "Scaled text", children: [] }),
-    }),
+    children: async () => [window("Settings", "Wrong window"), window("Editor", "Scaled text")],
   });
   let metadata = "";
   return Effect.scoped(
@@ -908,6 +902,7 @@ it.effect("matches Windows accessibility windows on a scaled display", () => {
       yield* service.configure(enabledSettings());
       yield* service.capture;
       const saved = yield* decodePendingMetadata(metadata);
+      assert.deepEqual(regionCaptureMock.mock.calls[0]?.[0], active.bounds);
       assert.include(saved.source.accessibleText, "Scaled text");
       assert.deepEqual(
         saved.source.accessibility?.format === "element-tree"
@@ -1139,7 +1134,7 @@ it.each(["darwin", "win32"] as const)(
     accessibilityByPidMock.mockReset().mockResolvedValue({ children: async () => [window] });
     accessibilityForegroundMock
       .mockReset()
-      .mockResolvedValue({ pid: 123, asElement: () => window });
+      .mockResolvedValue({ pid: 123, children: async () => [window] });
 
     const result = await readAccessibleWindowContext(
       { title: "Editor", bounds, owner: { processId: 123 } },

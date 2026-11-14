@@ -1,6 +1,6 @@
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -402,7 +402,7 @@ export class StudioBridge extends Context.Service<
 >()("t3/studioBridge/StudioBridge") {}
 
 const make = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const sessions = new Map<string, Session>();
   const byToken = new Map<string, Session>();
   const pending = new Map<string, Pending>();
@@ -421,7 +421,7 @@ const make = Effect.gen(function* () {
   const errorWindows = new Map<string, { at: number; folded: number }>();
   const changesHub = yield* PubSub.sliding<void>(16);
 
-  const randomId = crypto.randomUUIDv4().pipe(Effect.orDie);
+  const randomId = crypto.uuidV4().pipe(Effect.orDie);
   const randomToken = crypto.randomBytes(24).pipe(
     Effect.orDie,
     Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),

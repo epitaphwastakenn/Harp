@@ -5,7 +5,8 @@ import {
   toolOutputImageBlocks,
 } from "@t3tools/shared/toolOutput";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
@@ -66,7 +67,8 @@ export const ToolOutputImageStore = Context.Reference<ToolOutputImageStoreShape>
 export const make = Effect.fn("ToolOutputImageStore.make")(function* (attachmentsDir: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
   const directory = path.join(attachmentsDir, TOOL_OUTPUT_IMAGES_DIRECTORY);
 
   // Content-addressed, so the repeated updates of one item write each image once.
@@ -74,12 +76,12 @@ export const make = Effect.fn("ToolOutputImageStore.make")(function* (attachment
     const extension = EXTENSION_BY_MIME[mimeType];
     if (extension === undefined) return undefined;
     const bytes = Buffer.from(data, "base64");
-    const name = `${Hex.encode(yield* crypto.digest("SHA-256", bytes))}.${extension}`;
+    const name = `${Hex.encode(yield* digest.digest(Digest.sha256, bytes))}.${extension}`;
     const filePath = path.join(directory, name);
     if (!(yield* fileSystem.exists(filePath))) {
       yield* fileSystem.makeDirectory(directory, { recursive: true });
       // A crash mid-write must not leave a truncated file under the final name.
-      const partial = `${filePath}.${(yield* crypto.randomUUIDv4()).slice(0, 8)}.partial`;
+      const partial = `${filePath}.${(yield* crypto.uuidV4()).slice(0, 8)}.partial`;
       yield* fileSystem.writeFile(partial, bytes);
       yield* fileSystem.rename(partial, filePath);
     }

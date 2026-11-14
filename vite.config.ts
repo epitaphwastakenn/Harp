@@ -23,6 +23,12 @@ const isRepoRootTestRun = process.cwd() === import.meta.dirname;
 
 const RESTRICTED_IMPORT_PATHS = [
   {
+    name: "react-native",
+    importNames: ["FlatList"],
+    message:
+      "Use LegendList from @legendapp/list/react-native, with renderScrollComponent={NativeScrollView} in a screen. Pass whatever renderItem reads through extraData: rows only re-render when their item or extraData changes.",
+  },
+  {
     name: "@t3tools/client-runtime",
     message:
       "Import from an explicit @t3tools/client-runtime/* subpath. The package has no root export.",
@@ -37,6 +43,12 @@ const RESTRICTED_IMPORT_PATHS = [
     importNames: ["ScrollViewMarker"],
     message:
       "Use NativeScrollViewMarker or NativeScrollView (src/native/NativeScrollViewMarker.tsx): they carry the header's scroll-edge blur under the Duo's vertical bar.",
+  },
+  {
+    name: "react-native",
+    importNames: ["RefreshControl"],
+    message:
+      "Use RefreshControl from src/components/ui/RefreshControl: Android bottom sheets own the pull at the top, so it steps aside there.",
   },
 ];
 
@@ -81,7 +93,16 @@ const taskCacheConfig = {
 export default defineConfig({
   run: {
     cache: taskCacheConfig,
-    tasks: cachedTestTasks(process.env.T3_CACHED_TESTS),
+    tasks: {
+      ...cachedTestTasks(process.env.T3_CACHED_TESTS),
+      // The two knip passes read the same files and write nothing, so they run side by side.
+      // The `knip:check` script runs this task, so `vp run knip:check` and `pnpm run knip:check` both use it.
+      "knip:check:all": {
+        command: 'node -e ""',
+        dependsOn: ["knip:check:files", "knip:check:exports"],
+        cache: false,
+      },
+    },
   },
   resolve: {
     alias: {
@@ -284,6 +305,12 @@ export default defineConfig({
         rules: { "t3code/prefer-effect-fn": "off" },
       },
       {
+        files: ["apps/web/src/**", "apps/mobile/src/**", "apps/desktop/src/**"],
+        // Users still pick their own project icon from the full Lucide set.
+        excludeFiles: ["apps/web/src/projectIconOptions.ts"],
+        rules: { "t3code/no-sparkles-icon": "error" },
+      },
+      {
         files: ["apps/web/**/*.test.{ts,tsx}"],
         rules: { "t3code/require-disposable-render": "error" },
       },
@@ -436,6 +463,10 @@ export default defineConfig({
       {
         files: ["apps/web/src/**"],
         rules: { "t3code/no-outset-state-indicators": "error" },
+      },
+      {
+        files: ["apps/web/src/**"],
+        rules: { "t3code/max-settings-description-length": "error" },
       },
       {
         files: ["apps/*/src/**", "packages/*/src/**"],

@@ -68,7 +68,16 @@ const TYPE_INTERVAL_MS = 12;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-class ComputerUseRefusal extends Error {}
+class ComputerUseRefusal extends Schema.TaggedError<ComputerUseRefusal>()("ComputerUseRefusal", {
+  reason: Schema.String,
+}) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+const refusal = (reason: string) => new ComputerUseRefusal({ reason });
+const isComputerUseRefusal = Schema.is(ComputerUseRefusal);
 
 export class ComputerUseHost extends Context.Service<
   ComputerUseHost,
@@ -170,7 +179,7 @@ export const make = Effect.gen(function* () {
   /** The first action that touches the screen starts driving mode. */
   const ensureDriving = async (threadId: string, agentName: string) => {
     if (session !== undefined && session.threadId !== threadId) {
-      throw new ComputerUseRefusal(
+      throw refusal(
         "Another Harp thread is using the computer right now. Try again when it finishes.",
       );
     }
@@ -199,8 +208,7 @@ export const make = Effect.gen(function* () {
       thumbnailSize: { width: geometry.imageWidth, height: geometry.imageHeight },
     });
     const source = sources.find((entry) => entry.display_id === String(display.id)) ?? sources[0];
-    if (source === undefined)
-      throw new ComputerUseRefusal("Windows did not offer a screen to capture.");
+    if (source === undefined) throw refusal("Windows did not offer a screen to capture.");
     let image = source.thumbnail;
     const size = image.getSize();
     if (size.width !== geometry.imageWidth || size.height !== geometry.imageHeight) {
@@ -231,16 +239,16 @@ export const make = Effect.gen(function* () {
     target: AppWindow | undefined,
   ) => {
     if (isOwnWindow(target)) {
-      throw new ComputerUseRefusal("That point is Harp's own window, which the agent cannot use.");
+      throw refusal("That point is Harp's own window, which the agent cannot use.");
     }
     const verdict = authorizeComputerUseAction({ action, target, grants: grantsFor(threadId) });
-    if (!verdict.ok) throw new ComputerUseRefusal(verdict.message);
+    if (!verdict.ok) throw refusal(verdict.message);
   };
 
   const physicalPoint = (current: DrivingSession, x: number, y: number) => {
     const geometry = current.geometry ?? currentGeometry();
     if (!isInsideImage(geometry, x, y)) {
-      throw new ComputerUseRefusal(
+      throw refusal(
         `(${x}, ${y}) is outside the ${geometry.imageWidth}x${geometry.imageHeight} screenshot.`,
       );
     }
@@ -289,9 +297,7 @@ export const make = Effect.gen(function* () {
         reason: action.reason,
       });
       if (!allowed) {
-        throw new ComputerUseRefusal(
-          `The user denied access to ${wanted.map((grant) => grant.app).join(", ")}.`,
-        );
+        throw refusal(`The user denied access to ${wanted.map((grant) => grant.app).join(", ")}.`);
       }
       grantsByThread.set(threadId, [...existing, ...wanted]);
     }
@@ -306,7 +312,7 @@ export const make = Effect.gen(function* () {
       grantsFor(threadId).find((entry) => entry.app.toLowerCase() === name.toLowerCase()) ??
       grantsFor(threadId).find((entry) => computerUseGrantMatches(entry.app, { exeName: name }));
     if (grant === undefined) {
-      throw new ComputerUseRefusal(`"${name}" has not been granted. Call request_access first.`);
+      throw refusal(`"${name}" has not been granted. Call request_access first.`);
     }
     let window = await findAppWindow(grant.app);
     let launchedAs: string | undefined;
@@ -341,7 +347,7 @@ export const make = Effect.gen(function* () {
     action: ComputerUseAction,
   ): Promise<ComputerUseActionResult> => {
     if (platform !== "win32") {
-      throw new ComputerUseRefusal("Computer use is only available on Windows for now.");
+      throw refusal("Computer use is only available on Windows for now.");
     }
     switch (action.kind) {
       case "request_access":
@@ -360,7 +366,7 @@ export const make = Effect.gen(function* () {
       case "click": {
         const current = await ensureDriving(threadId, agentName);
         const modifiers = parseModifiers(action.modifiers);
-        if (typeof modifiers === "string") throw new ComputerUseRefusal(modifiers);
+        if (typeof modifiers === "string") throw refusal(modifiers);
         const point = physicalPoint(current, action.x, action.y);
         const input = await loadWindowsInputApi();
         const target = await atPoint(threadId, action, point, async (hit) => {
@@ -437,7 +443,7 @@ export const make = Effect.gen(function* () {
       case "key": {
         await ensureDriving(threadId, agentName);
         const chord = parseChord(action.text);
-        if (typeof chord === "string") throw new ComputerUseRefusal(chord);
+        if (typeof chord === "string") throw refusal(chord);
         const target = await foregroundAppWindow();
         authorize(threadId, action, target);
         const input = await loadWindowsInputApi();
@@ -461,12 +467,11 @@ export const make = Effect.gen(function* () {
           type: "result",
           requestId: command.requestId,
           ok: false,
-          message:
-            error instanceof ComputerUseRefusal
-              ? error.message
-              : `The desktop app could not complete ${command.action.kind}: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
+          message: isComputerUseRefusal(error)
+            ? error.message
+            : `The desktop app could not complete ${command.action.kind}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
         }),
     );
   };

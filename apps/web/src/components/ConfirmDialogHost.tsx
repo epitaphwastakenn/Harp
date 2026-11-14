@@ -9,6 +9,7 @@ import {
 import {
   AlertDialog,
   AlertDialogClose,
+  AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -68,6 +69,7 @@ export function ConfirmDialogHost() {
       : confirmVariant === "destructive"
         ? "Delete"
         : "Continue";
+  const focusConfirm = state.status !== "idle" && state.initialFocus === "confirm";
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -92,9 +94,13 @@ export function ConfirmDialogHost() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
-            {confirmLabel}
-          </Button>
+          {focusConfirm && confirmVariant === "default" ? (
+            <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+          ) : (
+            <Button variant={confirmVariant} onClick={onConfirm}>
+              {confirmLabel}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>

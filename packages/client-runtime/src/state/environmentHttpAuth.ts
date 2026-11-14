@@ -3,11 +3,15 @@ import {
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
 } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { FetchHttpClient, type HttpMethod } from "effect/http";
 
 import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import {
   executeEnvironmentHttpRequest,
+  RemoteEnvironmentAuthFetchError,
   makeEnvironmentHttpApiGroupClient,
   makeEnvironmentHttpApiUrlBuilder,
   type RemoteEnvironmentRequestError,
@@ -32,13 +36,19 @@ export function withOrchestrationProtocolHeader(
  * Cookie-authenticated environments need credentialed mode for cross-origin fetches; bearer uses headers.
  * `FetchHttpClient` reads `RequestInit` from the fiber context per request.
  */
-const withEnvironmentCredentials = <A, E, R>(
+const withEnvironmentRequestInit = <A, E, R>(
   authorization: PreparedHttpAuthorization | null,
+  requestInit: RequestInit | undefined,
   request: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  authorization === null
-    ? request.pipe(Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include" }))
-    : request;
+): Effect.Effect<A, E, R> => {
+  if (authorization !== null && requestInit === undefined) return request;
+  return request.pipe(
+    Effect.provideService(FetchHttpClient.RequestInit, {
+      ...requestInit,
+      ...(authorization === null ? { credentials: "include" as const } : {}),
+    }),
+  );
+};
 
 const buildEnvironmentAuthHeaders = (
   authorization: PreparedHttpAuthorization | null,
@@ -54,6 +64,23 @@ export const executeAuthenticatedEnvironmentHttpRequest = <
   input: Parameters<typeof executeEnvironmentRequest<Group, A, E, R>>[0],
 ) => executeEnvironmentRequest(input).pipe(Effect.withSpan(ENVIRONMENT_REQUEST_SPAN));
 
+/** Sends the request with this client's own credentials on the supervised environment. */
+export const executeConnectedEnvironmentHttpRequest = Effect.fn(
+  "clientRuntime.state.executeConnectedEnvironmentHttpRequest",
+)(function* <Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1], A, E, R>(
+  input: Omit<Parameters<typeof executeEnvironmentRequest<Group, A, E, R>>[0], "prepared">,
+) {
+  const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+  if (Option.isNone(prepared)) {
+    return yield* new RemoteEnvironmentAuthFetchError({
+      message: "The environment is not connected.",
+      cause: supervisor.target._tag,
+    });
+  }
+  return yield* executeAuthenticatedEnvironmentHttpRequest({ ...input, prepared: prepared.value });
+});
+
 const ENVIRONMENT_REQUEST_SPAN = "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest";
 
 const executeEnvironmentRequest = Effect.fnUntraced(function* <
@@ -62,11 +89,13 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
   E,
   R,
 >(input: {
-  readonly prepared: PreparedConnection;
+  readonly prepared: Pick<PreparedConnection, "httpBaseUrl" | "httpAuthorization">;
   readonly method: HttpMethod.HttpMethod;
   /** The URL for the request, from the group's contract URL builder. */
   readonly url: (urls: ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>[Group]) => string;
   readonly timeoutMs: number;
+  /** Extra fetch options, such as refusing redirects for credentialed audio uploads. */
+  readonly requestInit?: RequestInit;
   readonly group: Group;
   readonly request: (input: {
     readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
@@ -85,6 +114,10 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
   return yield* executeEnvironmentHttpRequest(
     requestUrl,
     input.timeoutMs,
-    withEnvironmentCredentials(authorization, input.request({ client, headers })),
+    withEnvironmentRequestInit(
+      authorization,
+      input.requestInit,
+      input.request({ client, headers }),
+    ),
   );
 });

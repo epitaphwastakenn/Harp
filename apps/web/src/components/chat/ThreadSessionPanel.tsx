@@ -11,7 +11,8 @@ import {
   SquareTerminalIcon,
 } from "lucide-react";
 
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import { formatContextWindowTokens } from "~/lib/contextWindow";
 import { cn } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";

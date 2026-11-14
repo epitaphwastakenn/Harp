@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -24,7 +25,7 @@ const layer = StudioTools.layer.pipe(
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
   Layer.provide(RojoWorkspaces.layerNone),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const fakePlace = (input: { readonly instanceId: string; readonly placeName: string }) =>

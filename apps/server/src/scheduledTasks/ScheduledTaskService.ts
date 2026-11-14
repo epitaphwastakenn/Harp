@@ -13,11 +13,13 @@ import {
   type ScheduledTaskRunNowInput,
   type ScheduledTaskRunNowResult,
   type ScheduledTaskSetEnabledInput,
+  type ScheduledTaskThreadMode,
   type ScheduledTaskUpsertInput,
+  scheduledTaskThreadMode,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -35,6 +37,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as DueHint from "../scheduling/DueHint.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import { latestRootProviderFailure } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isMissedFixedTimeRun, isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
 
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
@@ -50,6 +53,19 @@ const decodeModelSelectionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ScheduledTask.fields.modelSelection),
 );
 
+/**
+ * Clients that predate thread modes send none, and may send a thread loaded before the first run
+ * bound one. An edit keeps the stored mode; binding a thread to a new-thread task continues it.
+ */
+function resolveThreadMode(
+  input: Pick<ScheduledTaskUpsertInput, "threadId" | "threadMode">,
+  existing: Pick<ScheduledTask, "threadId" | "threadMode"> | null,
+): ScheduledTaskThreadMode {
+  if (input.threadMode !== undefined) return input.threadMode;
+  const stored = existing === null ? "new_thread" : scheduledTaskThreadMode(existing);
+  return stored === "new_thread" && input.threadId != null ? "continue" : stored;
+}
+
 interface ScheduledTaskRow {
   readonly task_id: string;
   readonly title: string;
@@ -58,6 +74,7 @@ interface ScheduledTaskRow {
   readonly schedule_json: string;
   readonly project_id: string;
   readonly thread_id: string | null;
+  readonly thread_mode: string;
   readonly workspace_strategy_json: string;
   readonly model_selection_json: string;
   readonly runtime_mode: string;
@@ -116,6 +133,13 @@ function iso(value: DateTime.DateTime): string {
   return DateTime.formatIso(DateTime.toUtc(value));
 }
 
+const RUN_OUTCOME_WAIT_MS = 24 * 60 * 60 * 1_000;
+const UNSUCCESSFUL_RUN_ERRORS = {
+  failed: "The run failed.",
+  interrupted: "The run was stopped.",
+  cancelled: "The run was cancelled.",
+  rolled_back: "The run was rolled back.",
+} as const;
 const localNow = DateTime.withCurrentZoneLocal(DateTime.nowInCurrentZone);
 
 function nextRunAt(
@@ -165,9 +189,8 @@ const WEBHOOK_UNSUPPORTED =
   "Webhook triggers are no longer supported. Change this task to a repeating schedule, or delete it.";
 
 function errorMessage(error: unknown): string {
-  if (Cause.isCause(error)) return Cause.pretty(error);
-  if (error instanceof Error) return error.message;
-  return String(error);
+  const failure = Cause.isCause(error) ? Cause.squash(error) : error;
+  return failure instanceof Error ? failure.message : String(failure);
 }
 
 // Runs per task row; list and lookup operations already own the span.
@@ -186,6 +209,7 @@ const decodeRow = Effect.fnUntraced(
       schedule,
       projectId: row.project_id,
       threadId: row.thread_id,
+      threadMode: row.thread_mode,
       workspaceStrategy,
       modelSelection,
       runtimeMode: row.runtime_mode,
@@ -250,9 +274,10 @@ export const layer = Layer.effect(
   ScheduledTaskService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const crypto = yield* Crypto.Crypto;
+    const random = yield* SecureRandom.SecureRandom;
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const serviceScope = yield* Effect.scope;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const scheduler = yield* Scheduler.Scheduler;
     const activeRuns = yield* Ref.make<ReadonlySet<ScheduledTaskId>>(new Set());
@@ -275,6 +300,7 @@ export const layer = Layer.effect(
         schedule_json,
         project_id,
         thread_id,
+        thread_mode,
         workspace_strategy_json,
         model_selection_json,
         runtime_mode,
@@ -309,6 +335,7 @@ export const layer = Layer.effect(
         schedule_json,
         project_id,
         thread_id,
+        thread_mode,
         workspace_strategy_json,
         model_selection_json,
         runtime_mode,
@@ -362,6 +389,7 @@ export const layer = Layer.effect(
           schedule_json,
           project_id,
           thread_id,
+          thread_mode,
           workspace_strategy_json,
           model_selection_json,
           runtime_mode,
@@ -384,6 +412,7 @@ export const layer = Layer.effect(
           ${JSON.stringify(task.schedule)},
           ${task.projectId},
           ${task.threadId},
+          ${scheduledTaskThreadMode(task)},
           ${JSON.stringify(task.workspaceStrategy)},
           ${JSON.stringify(task.modelSelection)},
           ${task.runtimeMode},
@@ -406,7 +435,14 @@ export const layer = Layer.effect(
           enabled = excluded.enabled,
           schedule_json = excluded.schedule_json,
           project_id = excluded.project_id,
-          thread_id = excluded.thread_id,
+          -- A first run may bind the thread while this save is in flight; only a
+          -- switch to new threads unbinds.
+          thread_id = CASE
+            WHEN excluded.thread_mode = 'new_thread' THEN NULL
+            WHEN excluded.project_id != scheduled_tasks.project_id THEN excluded.thread_id
+            ELSE COALESCE(excluded.thread_id, scheduled_tasks.thread_id)
+          END,
+          thread_mode = excluded.thread_mode,
           workspace_strategy_json = excluded.workspace_strategy_json,
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
@@ -521,6 +557,89 @@ export const layer = Layer.effect(
         ),
     );
 
+    // Reads every run row but only the queued runs' messages, so the cost per
+    // due interval tracks the thread's run count, not its transcript.
+    const hasQueuedOccurrence = Effect.fn("ScheduledTaskService.hasQueuedOccurrence")(function* (
+      taskId: ScheduledTaskId,
+      threadId: ThreadId,
+    ) {
+      const { runs } = yield* threadManagement.getThreadRecords(threadId, ["runs"]);
+      const queued = runs.filter((run) => run.status === "queued");
+      if (queued.length === 0) return false;
+      const queuedMessageIds = new Set(queued.map((run) => run.userMessageId));
+      const { messages } = yield* threadManagement.getThreadRecords(threadId, ["messages"], {
+        messageIds: [...queuedMessageIds],
+      });
+      return messages.some(
+        (message) => queuedMessageIds.has(message.id) && message.scheduledTaskId === taskId,
+      );
+    });
+
+    // The run already started the thread, so a failed write only costs the binding.
+    // A thread deleted before the binding landed already ran its task cleanup, so apply that
+    // cleanup here; a later deletion finds the binding. An unconfirmed lookup keeps the binding.
+    const bindThread = Effect.fn("ScheduledTaskService.bindThread")(
+      function* (task: ScheduledTask, threadId: ThreadId) {
+        yield* sql`
+          UPDATE scheduled_tasks SET thread_id = ${threadId}
+          WHERE task_id = ${task.id} AND created_at = ${task.createdAt}
+            AND project_id = ${task.projectId}
+            AND thread_id IS NULL AND thread_mode != 'new_thread'
+        `;
+        const shell = yield* threadManagement.getThreadShell(threadId);
+        if (shell === null || shell.deletedAt != null) yield* deleteForThread(threadId);
+      },
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not bind a scheduled task to its first thread.", cause),
+      ),
+    );
+
+    // A dispatch is recorded once the message is accepted; the provider can still
+    // reject the turn after that, so follow the run and record its failure.
+    const recordRunFailure = Effect.fn("ScheduledTaskService.recordRunFailure")(function* (
+      taskId: ScheduledTaskId,
+      startedAtIso: string,
+      threadId: ThreadId,
+      messageId: MessageId,
+    ) {
+      const shell = yield* threadManagement.getThreadShell(threadId);
+      if (shell === null) return;
+      const thread = { projectId: shell.projectId, threadId };
+      const { runs } = yield* threadManagement.getProjectThreadRecords(thread, ["runs"]);
+      const dispatched = runs.find((run) => run.userMessageId === messageId);
+      if (dispatched === undefined) return;
+      const { run } = yield* threadManagement.waitForThread({
+        ...thread,
+        runId: dispatched.id,
+        timeoutMs: RUN_OUTCOME_WAIT_MS,
+      });
+      if (
+        run === null ||
+        run.status === "completed" ||
+        !ThreadManagementService.isTerminalRunStatus(run.status)
+      )
+        return;
+      const { turnItems, messages } = yield* threadManagement.getProjectThreadRecords(thread, [
+        "turnItems",
+        "messages",
+      ]);
+      // A queued message promoted to a steer cancels its run and joins the active one.
+      if (
+        run.status === "cancelled" &&
+        messages.find((message) => message.id === messageId)?.runId !== run.id
+      )
+        return;
+      const error =
+        latestRootProviderFailure(run, turnItems)?.message ?? UNSUCCESSFUL_RUN_ERRORS[run.status];
+      const updated = yield* sql`
+        UPDATE scheduled_tasks
+        SET last_run_status = 'failed', last_run_error = ${error}
+        WHERE task_id = ${taskId} AND last_run_at = ${startedAtIso} AND last_run_status = 'succeeded'
+        RETURNING task_id
+      `;
+      if (updated.length > 0) yield* notifyChanged;
+    });
+
     const runTask = Effect.fn("ScheduledTaskService.runTask")(function* (
       task: ScheduledTask,
       trigger: "scheduled" | "manual",
@@ -547,6 +666,19 @@ export const layer = Layer.effect(
         ) {
           return { task: active, threadId: null, dispatchFailed: false };
         }
+        // A thread that stays busy would otherwise collect one copy of the
+        // prompt per interval. A failed read falls through to the normal send.
+        if (
+          trigger === "scheduled" &&
+          active.schedule.type !== "once" &&
+          active.threadId !== null &&
+          (yield* hasQueuedOccurrence(active.id, ThreadId.make(active.threadId)).pipe(
+            Effect.orElseSucceed(() => false),
+          ))
+        ) {
+          yield* rescheduleMissedRun(active, startedAt, "previous occurrence still queued");
+          return { task: active, threadId: null, dispatchFailed: false };
+        }
         yield* markRunning(active.id, startedAtIso);
         yield* notifyChanged;
 
@@ -554,6 +686,7 @@ export const layer = Layer.effect(
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
         const prompt = active.prompt;
+        const threadMode = scheduledTaskThreadMode(active);
 
         // A bound thread can move to another project (No project to a project) while
         // this fires. Follow it; one move needs at most two retries. Same ids replay safely.
@@ -572,6 +705,7 @@ export const layer = Layer.effect(
               text: prompt,
               attachments: [],
               mode: "queue",
+              ...(threadMode === "fresh_session" ? { freshContext: true } : {}),
               createdBy: active.createdBy,
               creationSource: active.creationSource,
             })
@@ -613,7 +747,12 @@ export const layer = Layer.effect(
                     createdBy: active.createdBy,
                     creationSource: active.creationSource,
                   })
-                  .pipe(Effect.map((launched) => launched.threadId)),
+                  .pipe(
+                    Effect.map((launched) => launched.threadId),
+                    Effect.tap((threadId) =>
+                      threadMode === "new_thread" ? Effect.void : bindThread(active, threadId),
+                    ),
+                  ),
               )
             : yield* Effect.exit(
                 // The stored selection only seeds fresh threads. A bound run
@@ -672,6 +811,18 @@ export const layer = Layer.effect(
             ),
           );
         if (written) yield* notifyChanged;
+        if (written && threadId !== null) {
+          yield* recordRunFailure(active.id, startedAtIso, threadId, messageId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not record scheduled run outcome", {
+                taskId: active.id,
+                cause,
+              }),
+            ),
+            Effect.forkIn(serviceScope),
+          );
+        }
+        // The stored row can belong to a replacement, so report this dispatch separately.
         return { task: recorded, threadId, dispatchFailed: !runSucceeded };
       }).pipe(Effect.onError((cause) => releaseStuckRun(task, startedAtIso, errorMessage(cause))));
 
@@ -703,24 +854,32 @@ export const layer = Layer.effect(
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
+      reason = "missed",
+      runError?: string,
     ) {
       const next = nextRunAt(task, now);
-      yield* Effect.logInfo("Skipping missed schedule task run", {
+      yield* Effect.logInfo("Skipping schedule task run", {
         taskId: task.id,
+        reason,
         missedRunAt: task.nextRunAt,
         rescheduledTo: next,
       });
-      yield* sql`
+      // `task` can be a stale batch snapshot; a run or edit since then already moved the row on.
+      const updated = yield* sql`
         UPDATE scheduled_tasks
         SET next_run_at = ${next},
             updated_at = ${iso(now)}
+            ${runError === undefined ? sql`` : sql`, last_run_status = 'failed', last_run_error = ${runError}`}
         WHERE task_id = ${task.id}
+          AND next_run_at IS ${task.nextRunAt}
+          AND last_run_at IS ${task.lastRunAt}
+        RETURNING task_id
       `.pipe(
         Effect.mapError((cause) =>
           taskError("Could not reschedule missed schedule task run.", { taskId: task.id, cause }),
         ),
       );
-      yield* notifyChanged;
+      if (updated.length > 0) yield* notifyChanged;
     });
 
     const runDueTasks = Effect.fn("ScheduledTaskService.runDueTasks")(function* () {
@@ -758,7 +917,12 @@ export const layer = Layer.effect(
         ({ task, dueAt }) =>
           Effect.suspend(() =>
             isMissedFixedTimeRun(task.schedule, dueAt, now)
-              ? rescheduleMissedRun(task, now)
+              ? rescheduleMissedRun(
+                  task,
+                  now,
+                  "missed",
+                  "Missed a scheduled run because the server was not running at that time.",
+                )
               : runTask(task, "scheduled"),
           ).pipe(
             Effect.catch((cause) =>
@@ -830,7 +994,10 @@ export const layer = Layer.effect(
 
     const list: ScheduledTaskService["Service"]["list"] = () =>
       listRows().pipe(
-        Effect.map((tasks) => ({ tasks })),
+        Effect.map((tasks) => ({
+          tasks,
+          timeZone: DateTime.zoneToString(DateTime.zoneMakeLocal()),
+        })),
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
       );
 
@@ -846,14 +1013,38 @@ export const layer = Layer.effect(
         }),
       );
 
+    const requireDestinationThread = Effect.fn("ScheduledTaskService.requireDestinationThread")(
+      function* (threadId: ThreadId, projectId: ProjectId, taskId: ScheduledTaskId) {
+        const thread = yield* threadManagement
+          .getThreadShell(threadId)
+          .pipe(
+            Effect.mapError((cause) =>
+              taskError("Could not read the destination thread.", { taskId, cause }),
+            ),
+          );
+        if (thread === null || thread.deletedAt !== null) {
+          return yield* taskError("That thread no longer exists.", { taskId });
+        }
+        if (thread.archivedAt !== null) {
+          return yield* taskError(
+            "That thread is archived. Unarchive it or pick another destination.",
+            { taskId },
+          );
+        }
+        if (thread.projectId !== projectId) {
+          return yield* taskError("That thread belongs to a different project.", { taskId });
+        }
+      },
+    );
+
     const upsert: ScheduledTaskService["Service"]["upsert"] = Effect.fn(
       "ScheduledTaskService.upsert",
     )(function* (input) {
       const now = yield* localNow;
       const uuid =
         input.commandId === undefined
-          ? yield* crypto
-              .randomUUIDv4()
+          ? yield* random
+              .uuidV4()
               .pipe(
                 Effect.mapError((cause) =>
                   taskError("Could not generate schedule task id.", { cause }),
@@ -869,6 +1060,18 @@ export const layer = Layer.effect(
       // keep their run history, and so real load failures propagate instead
       // of silently resetting an existing row.
       const existingTask = yield* findTask(id);
+      const threadMode = resolveThreadMode(input, existingTask);
+      const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
+      // A bound thread belongs to its project, so moving the task leaves it for a new one.
+      const movedOffThread =
+        existingTask !== null &&
+        existingTask.projectId !== input.projectId &&
+        keptThreadId === existingTask.threadId;
+      const threadId = threadMode === "new_thread" || movedOffThread ? null : keptThreadId;
+      // An unchanged destination is not rechecked, so a task on an archived thread stays editable.
+      if (threadId !== null && threadId !== existingTask?.threadId) {
+        yield* requireDestinationThread(threadId, input.projectId, id);
+      }
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.
@@ -894,7 +1097,8 @@ export const layer = Layer.effect(
         enabled: input.enabled,
         schedule,
         projectId: input.projectId,
-        threadId: input.threadId ?? null,
+        threadId,
+        threadMode,
         workspaceStrategy,
         modelSelection: input.modelSelection,
         runtimeMode: input.runtimeMode,
@@ -1001,7 +1205,9 @@ export const layer = Layer.effect(
       }
       return yield* runTask(task, "manual").pipe(
         Effect.mapError((cause) =>
-          taskError("Could not run schedule task.", { taskId: input.id, cause }),
+          isScheduledTaskError(cause)
+            ? cause
+            : taskError("Could not run schedule task.", { taskId: input.id, cause }),
         ),
       );
     });

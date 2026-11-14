@@ -6,7 +6,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as NetService from "@t3tools/shared/Net";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -15,10 +15,14 @@ import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import { activeCompileCacheDirectory, cleanStaleCompileCaches } from "./DesktopCompileCache.ts";
 import * as DesktopAppLinks from "./DesktopAppLinks.ts";
+import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopHomeOwner from "../backend/DesktopHomeOwner.ts";
+import * as DesktopLocalEnvironmentAuth from "../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -27,6 +31,7 @@ import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
+import * as DesktopStartupRecovery from "./DesktopStartupRecovery.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
@@ -39,8 +44,8 @@ const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
 
-const makeDesktopRunId = Crypto.Crypto.pipe(
-  Effect.flatMap((crypto) => crypto.randomUUIDv4()),
+const makeDesktopRunId = SecureRandom.SecureRandom.pipe(
+  Effect.flatMap((random) => random.uuidV4()),
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
 );
 
@@ -151,19 +156,18 @@ const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances")(
     const instances = yield* pool.list;
     yield* Effect.forEach(
       instances,
-      (instance) => instance.stop({ timeout: Duration.seconds(5) }),
+      (instance) => instance.stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT }),
       { concurrency: "unbounded" },
     );
   },
 );
 
-const bootstrap = Effect.gen(function* () {
+// Spawns the local backend as soon as the protocol, IPC, and legacy storage that every window needs exist.
+const startLocalBackend = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
-  const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
-  const appActivation = yield* DesktopAppActivation.DesktopAppActivation;
   yield* logBootstrapInfo("bootstrap start");
 
   const settings = yield* desktopSettings.get;
@@ -181,23 +185,33 @@ const bootstrap = Effect.gen(function* () {
     yield* (yield* DesktopAppIdentity.DesktopAppIdentity).resolveUserDataPath,
   );
 
-  yield* snapShot.initialize;
-
   if (!settings.localEnvironmentEnabled) {
     yield* logBootstrapInfo("bootstrap skipping local environment (disabled in settings)");
-    if (!(yield* Ref.get(state.quitting))) {
-      yield* desktopWindow.createMainIfBackendReady;
-    }
-    return;
+    return false;
   }
 
-  const pool = yield* DesktopBackendPool.DesktopBackendPool;
-  const primaryBackend = yield* pool.primary;
+  const primaryBackend = yield* (yield* DesktopBackendPool.DesktopBackendPool).primary;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-  const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
+  }
+
+  // A backend started while another server holds this home's lock can only exit with code 78.
+  if (
+    !(settings.wslOnly && settings.wslBackendEnabled) &&
+    !(yield* DesktopHomeOwner.awaitHomeOwnershipRelease())
+  ) {
+    const owner = yield* DesktopHomeOwner.readLiveHomeOwner();
+    yield* logBootstrapWarning("bootstrap found another server owning the Harp home", {
+      owner: Option.getOrNull(owner),
+    });
+    yield* (yield* ElectronDialog.ElectronDialog).showErrorBox(
+      "This Harp home is unavailable",
+      DesktopHomeOwner.homeOwnedMessage(owner),
+    );
+    yield* (yield* ElectronApp.ElectronApp).quit;
+    return false;
   }
 
   const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
@@ -235,25 +249,68 @@ const bootstrap = Effect.gen(function* () {
     );
   }
 
-  if (!(yield* Ref.get(state.quitting))) {
-    if (settings.wslOnly === true && settings.wslBackendEnabled === true) {
-      yield* desktopWindow.showConnectingSplash;
-    }
-    yield* primaryBackend.start;
-    yield* logBootstrapInfo("bootstrap backend start requested");
-    yield* appActivation.start.pipe(
-      Effect.tap(() => logBootstrapInfo("desktop app control socket ready")),
-      Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
-    );
-    yield* Effect.forkScoped(wslBackend.reconcile);
-    // After the backend process is requested: window creation blocks the main thread for a few hundred ms.
-    yield* desktopWindow.prepareMain.pipe(
-      Effect.catch((error) =>
-        logBootstrapWarning("could not prepare the main window early", { error: error.message }),
-      ),
-    );
+  if (yield* Ref.get(state.quitting)) {
+    return false;
   }
-}).pipe(Effect.withSpan("desktop.bootstrap"));
+  if (settings.wslOnly === true && settings.wslBackendEnabled === true) {
+    yield* desktopWindow.showConnectingSplash;
+  }
+  yield* primaryBackend.start;
+  yield* logBootstrapInfo("bootstrap backend start requested");
+  // The renderer asks for this token first; minting it at readiness saves a round trip.
+  yield* Effect.forkScoped(
+    (yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth).getBearerToken.pipe(
+      Effect.ignore,
+    ),
+  );
+  return true;
+}).pipe(Effect.withSpan("desktop.startLocalBackend"));
+
+const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: boolean) {
+  const state = yield* DesktopState.DesktopState;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
+  const appActivation = yield* DesktopAppActivation.DesktopAppActivation;
+  const settings = yield* desktopSettings.get;
+  if (settings.localEnvironmentEnabled && (!backendStarted || (yield* Ref.get(state.quitting)))) {
+    return;
+  }
+
+  yield* snapShot.initialize;
+  // Only the user's own login shell PATH shows every t3 a new terminal runs; a fresh install has
+  // no cached one. Without it, the command is left to Settings.
+  const installCli = (yield* DesktopCliCommand.DesktopCliCommand).installOnFirstLaunch;
+  yield* Effect.forkScoped(
+    (yield* DesktopShellEnvironment.DesktopShellEnvironment).awaitUserShellDiscovery.pipe(
+      Effect.flatMap((found) =>
+        found || environment.platform === "win32"
+          ? installCli
+          : logBootstrapInfo("skipped installing the t3 command without the shell PATH"),
+      ),
+    ),
+  );
+
+  if (!settings.localEnvironmentEnabled) {
+    if (!(yield* Ref.get(state.quitting))) {
+      yield* desktopWindow.createMainIfBackendReady;
+    }
+    return;
+  }
+
+  yield* appActivation.start.pipe(
+    Effect.tap(() => logBootstrapInfo("desktop app control socket ready")),
+    Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
+  );
+  yield* Effect.forkScoped((yield* DesktopWslBackend.DesktopWslBackend).reconcile);
+  // After the backend process is requested: window creation blocks the main thread for a few hundred ms.
+  yield* desktopWindow.prepareMain.pipe(
+    Effect.catch((error) =>
+      logBootstrapWarning("could not prepare the main window early", { error: error.message }),
+    ),
+  );
+});
 
 const startup = Effect.gen(function* () {
   const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
@@ -283,11 +340,18 @@ const startup = Effect.gen(function* () {
   );
   yield* logStartupInfo("app ready");
   yield* appIdentity.configure;
-  yield* previewPasskeys.configure;
-  yield* applicationMenu.configure;
+  // Sets canInstallUpdates, which the backend bootstrap payload reads.
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
-  yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
+  yield* DesktopStartupRecovery.listen;
+  const backendStarted = yield* startLocalBackend.pipe(
+    Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)),
+  );
+  yield* previewPasskeys.configure;
+  yield* applicationMenu.configure;
+  yield* bootstrap(backendStarted).pipe(
+    Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)),
+  );
   // Disk housekeeping with nothing waiting on it: wait until startup has settled.
   yield* cleanStaleCompileCaches(activeCompileCacheDirectory()).pipe(
     Effect.delay(COMPILE_CACHE_CLEANUP_DELAY),
@@ -309,6 +373,7 @@ const scopedProgram = Effect.scoped(
       stopAllPoolInstances().pipe(
         Effect.ensuring(rendererHistory.shutdown),
         Effect.ensuring(shutdown.markComplete),
+        Effect.withSpan("desktop.app.shutdown"),
       ),
     );
 

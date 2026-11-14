@@ -17,6 +17,7 @@ export function FoldedSettingsSection({
   control,
   headerPlacement = "inside",
   variant = "grouped",
+  collapsedContent,
   children,
 }: {
   readonly id: string;
@@ -26,6 +27,8 @@ export function FoldedSettingsSection({
   readonly control?: ReactNode;
   readonly headerPlacement?: "inside" | "outside";
   readonly variant?: "grouped" | "flat";
+  /** Shown under the header only while folded. */
+  readonly collapsedContent?: ReactNode;
   readonly children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -72,8 +75,9 @@ export function FoldedSettingsSection({
   return (
     <section id={id} ref={targetRef} tabIndex={-1} className="outline-none">
       <Collapsible open={open} onOpenChange={setOpen} render={<SettingsGroup divided={false} />}>
-        <div className="flex items-center gap-4 px-3 sm:px-4">
-          <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring rounded-md">
+        {/* On a narrow screen the controls drop below the title instead of covering it. */}
+        <div className="flex flex-wrap items-center gap-x-4 px-3 sm:px-4">
+          <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 basis-40 items-center gap-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring rounded-md">
             <DisclosureChevron open={open} />
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="flex min-w-0 items-center gap-2">
@@ -87,8 +91,13 @@ export function FoldedSettingsSection({
               ) : null}
             </span>
           </CollapsibleTrigger>
-          {control ? <div className="flex shrink-0 items-center">{control}</div> : null}
+          {control ? (
+            <div className="ms-auto flex max-w-full items-center py-1.5">{control}</div>
+          ) : null}
         </div>
+        {!open && collapsedContent ? (
+          <div className="border-t border-border/50 empty:hidden">{collapsedContent}</div>
+        ) : null}
         <CollapsiblePanel>
           <div className="border-t border-border/50 [&>*+*]:border-t [&>*+*]:border-border/50">
             {children}

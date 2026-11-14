@@ -2,6 +2,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
@@ -9,7 +10,7 @@ import { FetchHttpClient } from "effect/http";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../service/bootService.ts";
 import { compareExactServiceVersions } from "../service/serviceProtocol.ts";
-import type * as ServerConfig from "../config.ts";
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { resolveEntryPath } from "./invocation.ts";
@@ -36,8 +37,16 @@ const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?:
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
 }) {
+  const { baseDir } = yield* ServerConfig.ServerConfig;
   const service = yield* BootService.BootService;
   const status = yield* service.status;
+  // Before the downgrade check, which reads this home's state, not the service's.
+  if (status.otherBaseDir !== undefined) {
+    return yield* new BootService.BootServiceOtherBaseDirError({
+      installedBaseDir: status.otherBaseDir,
+      baseDir,
+    });
+  }
   if (status.installed && status.current) {
     return { changed: false, status } satisfies ServiceReconcileResult;
   }
@@ -70,10 +79,18 @@ function formatServiceChange(
 
 function formatServiceStatus(status: BootService.BootServiceStatus, cliVersion: string): string {
   if (!status.supported) {
-    return "Harp service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
+    return "Harp service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler";
   }
   if (!status.installed) {
     return "Harp service\n  Status: not installed\n  Next: Run `t3 service install`.";
+  }
+  if (status.otherBaseDir !== undefined) {
+    return [
+      "Harp service",
+      "  Status: installed for another T3 home",
+      `  Base dir: ${status.otherBaseDir}`,
+      `  Next: Pass \`${BootService.formatBootServiceBaseDirOption(status.otherBaseDir)}\` to manage it.`,
+    ].join("\n");
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -109,7 +126,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E, R>(
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
-  return yield* run.pipe(Effect.provide(layer(config)));
+  return yield* run.pipe(Effect.provide(Layer.merge(layer(config), ServerConfig.layer(config))));
 });
 
 const serviceReconcileFlags = {
@@ -180,7 +197,9 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
             ? `Restarted the Harp service${onVersion}.`
             : outcome === "queued"
               ? `Queued a restart of the Harp service${onVersion}. This session runs inside the service and disconnects when it goes down.\nLogs: ${status.logPath}`
-              : "Harp service is not installed.",
+              : status.otherBaseDir !== undefined
+                ? `The Harp service serves ${status.otherBaseDir}, so it was not restarted. Pass \`${BootService.formatBootServiceBaseDirOption(status.otherBaseDir)}\` to restart it.`
+                : "Harp service is not installed.",
         );
       }),
     ),
@@ -194,6 +213,22 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
       flags,
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
+        const path = yield* Path.Path;
+        const { baseDir } = yield* ServerConfig.ServerConfig;
+        // An unreadable unit stays removable; only a unit known to serve another home is kept.
+        const installedBaseDir = yield* service.status.pipe(
+          Effect.map((status) => status.installedBaseDir),
+          Effect.orElseSucceed(() => undefined),
+        );
+        if (
+          installedBaseDir !== undefined &&
+          path.resolve(installedBaseDir) !== path.resolve(baseDir)
+        ) {
+          yield* Console.log(
+            `The Harp service serves ${installedBaseDir}, so it was not removed. Pass \`${BootService.formatBootServiceBaseDirOption(installedBaseDir)}\` to remove it.`,
+          );
+          return;
+        }
         const removed = yield* service.uninstall;
         yield* Console.log(
           removed ? "Removed the Harp service." : "Harp service is not installed.",

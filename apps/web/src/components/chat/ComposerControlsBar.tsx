@@ -6,12 +6,7 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerAgentControlsMenu, type AgentControlsBinding } from "./ComposerAgentControlsMenu";
 import { ComposerControl, ComposerControlSeparator } from "./ComposerControl";
 import { ComposerFooterModeControls, type RuntimeModeOption } from "./ComposerFooterControls";
-import type {
-  AgentPreset,
-  ProviderInstanceId,
-  ProviderInteractionMode,
-  RuntimeMode,
-} from "@t3tools/contracts";
+import type { AgentPreset, ProviderInstanceId, RuntimeMode } from "@t3tools/contracts";
 import { cn } from "~/lib/utils";
 
 /**
@@ -21,11 +16,8 @@ import { cn } from "~/lib/utils";
  * expanded footer, so they render here only while the composer rests.
  */
 export function ComposerControlsBar(props: {
-  planModeUiEnabled: boolean;
-  interactionMode: ProviderInteractionMode;
   compatibleRuntimeMode: RuntimeMode;
   compatibleRuntimeModeOptions: ReadonlyArray<RuntimeModeOption>;
-  toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   composerControlsCollapsed: boolean;
   composerControlsHidden: boolean;
@@ -43,11 +35,8 @@ export function ComposerControlsBar(props: {
   attachButton: ReactNode;
 }) {
   const {
-    planModeUiEnabled,
-    interactionMode,
     compatibleRuntimeMode,
     compatibleRuntimeModeOptions,
-    toggleInteractionMode,
     handleRuntimeModeChange,
     composerControlsCollapsed,
     composerControlsHidden,
@@ -69,13 +58,10 @@ export function ComposerControlsBar(props: {
       id: "mode",
       content: (
         <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
-          interactionMode={interactionMode}
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
           size={composerControlsCollapsed ? "xs" : "sm"}
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-          onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
       ),
@@ -173,14 +159,11 @@ export function ComposerControlsBar(props: {
           )}
         >
           <CompactComposerControlsMenu
-            interactionMode={interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={composerControlsCollapsed ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             agentControls={hiddenRestingBlockIds.includes("agent") ? agentControls : undefined}
-            showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
-            onToggleInteractionMode={toggleInteractionMode}
             onRuntimeModeChange={handleRuntimeModeChange}
           />
         </div>

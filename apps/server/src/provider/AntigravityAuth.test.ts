@@ -1,4 +1,6 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
 import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId, ProviderSetupError, type ProviderAuthState } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -88,18 +90,22 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
             yield* Deferred.succeed(closed, undefined);
           }),
         );
+        // Like AcpSessionRuntime, `start` reuses one memoized initialize handshake.
+        const initialize = yield* Effect.cached(
+          Effect.gen(function* () {
+            events.push("initialize");
+            yield* options.beforeInitialize ?? Effect.void;
+            return options.supportsLogout === false
+              ? { ...initialized, agentCapabilities: {} }
+              : initialized;
+          }),
+        );
         return {
-          initialize: () =>
-            Effect.gen(function* () {
-              events.push("initialize");
-              yield* options.beforeInitialize ?? Effect.void;
-              return options.supportsLogout === false
-                ? { ...initialized, agentCapabilities: {} }
-                : initialized;
-            }),
+          initialize: () => initialize,
           start: () =>
             Effect.gen(function* () {
               yield* options.launch ?? Effect.void;
+              yield* initialize;
               yield* input.onInitialized ?? Effect.void;
               events.push("authenticate");
               yield* Deferred.succeed(authenticateCalled, undefined);
@@ -156,7 +162,7 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
   };
 });
 
-it.layer(NodeServices.layer)("AntigravityAuth", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AntigravityAuth", (it) => {
   it.effect("accepts a delayed duplicate after callback completion starts", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -486,7 +492,7 @@ it.layer(NodeServices.layer)("AntigravityAuth", (it) => {
       assert.isTrue(Exit.isFailure(competing));
       const resumed = yield* phase(harness.auth, "waiting");
       assert.equal(resumed.flowId, first.flowId);
-      assert.deepEqual(harness.events, ["process-open", "authenticate"]);
+      assert.deepEqual(harness.events, ["process-open", "initialize", "authenticate"]);
       yield* harness.auth.controller.cancel(owner, first.flowId!);
     }),
   );

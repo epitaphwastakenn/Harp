@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -18,7 +19,7 @@ const layer = StudioTools.layer.pipe(
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
   Layer.provide(RojoWorkspaces.layerNone),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 /** A stand-in plugin: answers each endpoint through `answer` until interrupted. */
@@ -310,7 +311,10 @@ describe("StudioTools", () => {
         expect(textOf(xml)).toContain("invalid_arguments");
         expect(plugin.calls).toHaveLength(1);
         yield* Fiber.interrupt(plugin.fiber);
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(layer, NodeServices.layer))),
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.mergeAll(layer, NodeServices.layer, NodeCrypto.layer)),
+      ),
   );
 
   it.effect("sends a file's bytes and parent to the plugin when importing", () =>
@@ -334,7 +338,10 @@ describe("StudioTools", () => {
       const missing = yield* tools.call("import_rbxm", { filePath: `${dir}/none.rbxm` }, {});
       expect(textOf(missing)).toContain("not_found");
       yield* Fiber.interrupt(plugin.fiber);
-    }).pipe(Effect.scoped, Effect.provide(Layer.merge(layer, NodeServices.layer))),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(layer, NodeServices.layer, NodeCrypto.layer)),
+    ),
   );
 
   it.effect("checks network profile values before touching any peer", () =>
@@ -450,7 +457,7 @@ describe("script tools in a Rojo workspace", () => {
     Layer.provide(ServerSettingsService.layerTest()),
     Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
     Layer.provide(RojoWorkspaces.layer),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
   const makeWorkspace = Effect.fn("makeWorkspace")(function* (source: string) {

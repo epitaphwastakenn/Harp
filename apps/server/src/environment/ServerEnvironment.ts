@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -83,7 +83,7 @@ function platformArch(
 const makeIdentity = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const serverConfig = yield* ServerConfig.ServerConfig;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem.exists(serverConfig.environmentIdPath).pipe(
@@ -157,7 +157,7 @@ const makeIdentity = Effect.gen(function* () {
       return persisted;
     }
 
-    const generated = yield* crypto.randomUUIDv4();
+    const generated = yield* random.uuidV4();
     yield* persistEnvironmentId(generated, "create");
     let winner = yield* readPersistedEnvironmentId;
     if (winner === null) {
@@ -196,10 +196,11 @@ export const make = Effect.gen(function* () {
     launcherManaged: launcher.managed,
   });
   const serverInstallation = serverSelfUpdate === null ? yield* resolveServerInstallation : null;
-  // Desktop and server ship together; a control fd guarantees requestDesktopUpdate support.
-
+  // The desktop reports whether it can install updates; requests travel over its control fd.
   const desktopAppUpdate =
-    serverSelfUpdate === "desktop-managed" && serverConfig.desktopTelemetryControlFd !== undefined;
+    serverSelfUpdate === "desktop-managed" &&
+    serverConfig.desktopAppUpdate === true &&
+    serverConfig.desktopTelemetryControlFd !== undefined;
 
   const databaseMigration = databaseMigrationHead(serverConfig.dbPath);
   const descriptor: ExecutionEnvironmentDescriptor = {
@@ -221,7 +222,9 @@ export const make = Effect.gen(function* () {
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       pullRequests: true,
       pullRequestChecks: true,
+      linkedThreadRefreshes: true,
       sideChats: true,
+      vcsBranchStatus: true,
       inlineMessageContext: true,
       requiredWorktreeBootstrap: true,
       threadSettlement: true,
@@ -230,9 +233,11 @@ export const make = Effect.gen(function* () {
       storageCleanupRun: true,
       databaseStorage: true,
       otlpEndpointCheck: true,
+      secretSourceCheck: true,
       projectWorktreeCleanup: true,
       settledWorktreeCleanup: true,
       worktreesDirectory: true,
+      ...(hostPlatform === "darwin" ? { fastWorktreeCheckout: true } : {}),
       threadAutoSettlementScope: true,
       threadRestartContinuation: true,
       projectSettingsOverrides: true,
@@ -242,6 +247,7 @@ export const make = Effect.gen(function* () {
       environmentThemes: true,
       usageLimitSources: true,
       providerWorkspaceSnapshotsOnDemand: true,
+      modelCatalogRefresh: true,
       usagePriceOverrides: true,
       usageModelAliases: true,
       threadPinning: true,
@@ -265,7 +271,10 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       projectOrganization: true,
       ignoredFileListing: true,
+      ignoredFileSearch: true,
       oneTimeSchedules: true,
+      freshContext: true,
+      scheduledTaskThreadModes: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverInstallation === null ? {} : { serverInstallation }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
@@ -276,6 +285,9 @@ export const make = Effect.gen(function* () {
       peerLinks: true,
       mcpModeLimitHeader: true,
       linkFence: true,
+      mcpApprovalCodes: true,
+      shellThreadFamilies: true,
+      shellOlderSettled: true,
     },
   };
 

@@ -3,7 +3,6 @@ import {
   decodeComposerContextFragment,
   encodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
-import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import { resolveThreadReferenceCopyTarget } from "./threadReference.ts";
@@ -98,13 +97,15 @@ describe("resolveThreadReferenceCopyTarget", () => {
         }),
       ],
     });
-    // A paste keeps only the records its plain text references.
-    expect(collectComposerContextReferences(target!.value)).toEqual([
-      expect.objectContaining({
-        kind: "thread",
-        contextId: pasted!.records[0]!.contextId,
-        label: "Fix the login flow",
-      }),
-    ]);
+    expect(target!.value).toBe(
+      `[Fix the login flow](t3-context://v1/thread/${pasted!.records[0]!.contextId})`,
+    );
+  });
+
+  it("links through the build's hosted app", () => {
+    expect(
+      resolveThreadReferenceCopyTarget({ ...thread, hostedAppUrl: "https://preview.t3.codes" })
+        ?.value,
+    ).toBe("https://preview.t3.codes/threads/env-1/thread-1");
   });
 });

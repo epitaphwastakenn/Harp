@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -9,7 +10,9 @@ import * as TestClock from "effect/testing/TestClock";
 import { STUDIO_PROTOCOL_VERSION } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 
-const layer = StudioBridge.layer.pipe(Layer.provide(NodeServices.layer));
+const layer = StudioBridge.layer.pipe(
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+);
 
 const hello = (
   overrides: Partial<StudioBridge.StudioHelloInput> = {},

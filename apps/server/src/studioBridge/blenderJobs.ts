@@ -4,6 +4,9 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+
+const decodeJsonUnknown = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 /**
  * Headless Blender jobs. The agent's Python runs inside a prelude that gives it the job folder
@@ -278,9 +281,9 @@ export const runBlenderJob = (input: {
       });
       let status: Record<string, unknown> = {};
       try {
-        status = JSON.parse(
+        status = decodeJsonUnknown(
           NodeFS.readFileSync(NodePath.join(jobDir, "sealcode-status.json"), "utf8"),
-        );
+        ) as Record<string, unknown>;
       } catch {
         status = { statusMissing: true };
       }

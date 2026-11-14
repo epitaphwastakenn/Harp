@@ -1,8 +1,12 @@
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { MessageCircle, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
-import { Textarea } from "~/components/ui/textarea";
+import {
+  PullRequestMarkdownTextarea,
+  type PullRequestCompletionScope,
+} from "~/components/pullRequest/PullRequestMarkdownTextarea";
 import { textDirection } from "~/textDirection";
 
 import { isCommentSubmitShortcut } from "./commentSubmitShortcut";
@@ -15,6 +19,9 @@ interface DiffCommentSecondaryAction {
 }
 
 interface DiffCommentAnnotationProps {
+  environmentId?: EnvironmentId | undefined;
+  projectId?: ProjectId | null | undefined;
+  ownerKey?: string;
   kind: "draft" | "comment";
   rangeLabel: string;
   text: string;
@@ -27,6 +34,8 @@ interface DiffCommentAnnotationProps {
   pending?: boolean;
   secondaryAction?: DiffCommentSecondaryAction;
   focusOnMount?: boolean;
+  /** Set only for pull request comments, where `@` completes the repository's users. */
+  completionScope?: PullRequestCompletionScope | null;
 }
 
 export function DiffCommentAnnotation({
@@ -42,6 +51,7 @@ export function DiffCommentAnnotation({
   pending = false,
   secondaryAction,
   focusOnMount = true,
+  completionScope = null,
 }: DiffCommentAnnotationProps) {
   const [localDraftText, setLocalDraftText] = useState("");
   const displayedText = kind === "draft" && !onTextChange ? localDraftText : text;
@@ -88,6 +98,10 @@ export function DiffCommentAnnotation({
     );
   }
 
+  const submit = (action: (text: string) => void, allowEmpty = false) => {
+    if (!pending && (allowEmpty || trimmedText)) action(trimmedText);
+  };
+
   // Pierre hides native carets and selection; textarea comments need their own visible feedback.
   return (
     <div
@@ -96,15 +110,16 @@ export function DiffCommentAnnotation({
       contentEditable={false}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <Textarea
+      <PullRequestMarkdownTextarea
         ref={textareaRef}
+        completionScope={completionScope}
         autoFocus={focusOnMount}
         size="sm"
         value={displayedText}
         dir={textDirection(displayedText)}
         placeholder={placeholder}
         aria-label={`Comment on lines ${rangeLabel}`}
-        onChange={(event) => (onTextChange ?? setLocalDraftText)(event.target.value)}
+        onValueChange={onTextChange ?? setLocalDraftText}
         onFocus={(event) => {
           const end = event.currentTarget.value.length;
           event.currentTarget.setSelectionRange(end, end);
@@ -116,11 +131,11 @@ export function DiffCommentAnnotation({
           }
           if (isCommentSubmitShortcut(event, trimmedText, pending)) {
             event.preventDefault();
-            onComment(trimmedText);
+            submit(onComment);
           }
         }}
       />
-      <div className="mt-1.5 flex items-center gap-1">
+      <div className="mt-1.5 flex flex-wrap items-center gap-1">
         <span className="mr-auto text-xs text-muted-foreground">⌘/Ctrl Enter to send</span>
         <Button variant="ghost-muted" size="xs" onClick={onCancel}>
           Cancel
@@ -129,14 +144,14 @@ export function DiffCommentAnnotation({
           <Button
             size="xs"
             variant="outline"
-            disabled={!secondaryAction.allowEmpty && !trimmedText}
-            onClick={() => secondaryAction.onAction(trimmedText)}
+            disabled={pending || (!secondaryAction.allowEmpty && !trimmedText)}
+            onClick={() => submit(secondaryAction.onAction, secondaryAction.allowEmpty)}
           >
             {secondaryAction.icon}
             {secondaryAction.label}
           </Button>
         ) : null}
-        <Button size="xs" disabled={pending || !trimmedText} onClick={() => onComment(trimmedText)}>
+        <Button size="xs" disabled={pending || !trimmedText} onClick={() => submit(onComment)}>
           {submitLabel}
         </Button>
       </div>

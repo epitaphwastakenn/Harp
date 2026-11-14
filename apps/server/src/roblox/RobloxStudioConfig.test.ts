@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { DEFAULT_SERVER_SETTINGS, ProjectId, type RobloxStudioSettings } from "@t3tools/contracts";
@@ -139,7 +140,7 @@ describe("blenderExecutableFor", () => {
 describe("a project's Roblox tools and instructions", () => {
   const configLayer = robloxStudioConfigLayer.pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-roblox-config-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const projectId = ProjectId.make("project-1");
   const settings = (robloxProject?: "auto" | "roblox" | "other") => ({

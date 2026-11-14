@@ -4,6 +4,8 @@ import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodeTls from "node:tls";
 
+import * as Schema from "effect/Schema";
+
 import { trustedCaCertificates } from "./antigravityTrust.ts";
 
 /** Hosts the agent and Harp reach for Antigravity, seen through a logging proxy. */
@@ -136,7 +138,14 @@ const connectSocket = (address: string, port: number, family: 4 | 6) =>
     socket.once("error", reject);
   });
 
-class ProxyUnreachableError extends Error {}
+class ProxyUnreachableError extends Schema.TaggedError<ProxyUnreachableError>()(
+  "ProxyUnreachableError",
+  { detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
 
 const connectThroughProxy = (proxyUrl: string, host: string, port: number) =>
   new Promise<NodeNet.Socket>((resolve, reject) => {
@@ -157,7 +166,9 @@ const connectThroughProxy = (proxyUrl: string, host: string, port: number) =>
     });
     request.once("timeout", () => request.destroy(new Error("the proxy did not answer")));
     request.once("error", (error) =>
-      reject(new ProxyUnreachableError(`proxy ${proxyUrl} unreachable: ${errorText(error)}`)),
+      reject(
+        new ProxyUnreachableError({ detail: `proxy ${proxyUrl} unreachable: ${errorText(error)}` }),
+      ),
     );
     request.end();
   });
@@ -246,7 +257,7 @@ export const probeTls = async (
     socket?.destroy();
     return {
       ...result,
-      failedAt: error instanceof ProxyUnreachableError ? "proxy" : failedAt,
+      failedAt: Schema.is(ProxyUnreachableError)(error) ? "proxy" : failedAt,
       error: errorText(error),
     };
   }

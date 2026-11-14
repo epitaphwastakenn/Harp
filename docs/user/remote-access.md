@@ -192,8 +192,10 @@ The server shows the exact line for how you started it, such as
 for your user. Where `t3` is not on your `PATH`, such as with only the
 desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries and system fonts with apt; pages that load without text
-can mean the host has no fonts. It is safe to run again. Without `sudo`, it only
-reports what it would change.
+can mean the host has no fonts. It is safe to run again, and each run reloads
+the AppArmor profile: run it again if the browser reports a blocked sandbox on a
+host restored from an image or snapshot, where the profile can be on disk
+without being loaded. Without `sudo`, it only reports what it would change.
 
 The browser always runs in Chrome's sandbox. Where you cannot change the host,
 set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
@@ -210,6 +212,10 @@ On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
 management is available through `t3 auth --help`.
+
+When the app connects to more than one environment, choose one at the top of the
+page. A desktop app with **Local environment** off can manage a background
+service on the same machine this way.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -267,6 +273,9 @@ desktop app, open **Settings → Connections** and switch off **Local
 environment**. Harp restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
 history, and saved connections are kept, and you keep working through pairing or SSH.
+If a [background service](./background-service.md) on this computer uses the same T3 home, the
+app still treats it as this computer: **Open in** and file reveal for its projects run here,
+whichever connection you reach it through.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.

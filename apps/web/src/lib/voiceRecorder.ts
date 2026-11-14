@@ -1,4 +1,5 @@
 import { VOICE_RECORDING_TARGET_SAMPLE_RATE_HZ } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { encodeVoiceRecordingWav } from "./voiceRecorderEncoding";
@@ -30,12 +31,19 @@ interface RecorderRuntime {
   sampleRateHz: number;
 }
 
-class VoiceRecordingCancelledError extends Error {
-  override readonly name = "VoiceRecordingCancelledError";
+class VoiceRecordingCancelledError extends Schema.TaggedError<VoiceRecordingCancelledError>()(
+  "VoiceRecordingCancelledError",
+  {},
+) {
+  override get message(): string {
+    return "Voice recording was cancelled.";
+  }
 }
 
+const isVoiceRecordingCancelled = Schema.is(VoiceRecordingCancelledError);
+
 export function isVoiceRecordingCancelledError(error: unknown): boolean {
-  return error instanceof VoiceRecordingCancelledError;
+  return isVoiceRecordingCancelled(error);
 }
 
 export function formatVoiceRecordingDuration(durationMs: number): string {
@@ -130,7 +138,7 @@ export function useVoiceRecorder() {
     isStartingRef.current = true;
     const assertStartIsCurrent = () => {
       if (startGenerationRef.current !== startGeneration) {
-        throw new VoiceRecordingCancelledError("Voice recording was cancelled.");
+        throw new VoiceRecordingCancelledError();
       }
     };
 

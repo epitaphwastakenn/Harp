@@ -6,16 +6,15 @@ import "./index.css";
 
 import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
-import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { whenLocaleReady } from "./i18n/runtime";
+import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 import { scheduleIdle } from "./lib/scheduleIdle";
 
 const router = startAppServices();
 const settingsRouteIds = ["/_chat/settings", "/_chat/settings/general"] as const;
 
-let chunkLoadFailed = false;
 let reloadScheduled = false;
 window.addEventListener("vite:preloadError", (event) => {
-  chunkLoadFailed = true;
   if (reloadOnceForChunkLoadError()) {
     reloadScheduled = true;
     event.preventDefault();
@@ -32,10 +31,11 @@ for (const route of router.getMatchedRoutes(router.latestLocation.pathname).matc
 
 export const startup = router
   .load()
+  // Chained so settings have usually hydrated; English resolves without a chunk load.
+  .then(whenLocaleReady)
   .then(() => {
     // Route chunk failures resolve router.load() and surface later through the error boundary.
     if (reloadScheduled) return;
-    if (!chunkLoadFailed) clearChunkReloadGuard();
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>{app}</React.StrictMode>,
     );

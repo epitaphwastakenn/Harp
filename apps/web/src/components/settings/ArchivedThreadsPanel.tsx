@@ -1,6 +1,6 @@
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { Spinner } from "~/components/ui/spinner";
-import { ArchiveIcon, ArchiveX } from "lucide-react";
+import { ArchiveIcon, ArchiveX, Trash2Icon } from "lucide-react";
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -191,18 +191,20 @@ export function ArchivedThreadsPanel() {
       return;
     }
 
-    if (clicked === "delete") {
-      if (confirmThreadDelete) {
-        requestDeleteConfirmation({
-          title,
-          count: 1,
-          single: true,
-          onConfirm: () => deleteArchivedThread(threadRef),
-        });
-        return;
-      }
-      await deleteArchivedThread(threadRef);
+    if (clicked === "delete") await requestArchivedThreadDelete(threadRef, title);
+  };
+
+  const requestArchivedThreadDelete = async (threadRef: ScopedThreadRef, title: string) => {
+    if (confirmThreadDelete) {
+      requestDeleteConfirmation({
+        title,
+        count: 1,
+        single: true,
+        onConfirm: () => deleteArchivedThread(threadRef),
+      });
+      return;
     }
+    await deleteArchivedThread(threadRef);
   };
 
   return (
@@ -282,37 +284,54 @@ export function ArchivedThreadsPanel() {
                     </span>
                   }
                   control={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => {
-                        void (async () => {
-                          const result = await unarchiveThread(
-                            scopeThreadRef(thread.environmentId, thread.id),
-                          );
-                          if (result._tag === "Success") {
-                            refreshArchivedThreads();
-                            return;
-                          }
-                          if (!isAtomCommandInterrupted(result)) {
-                            const error = squashAtomCommandFailure(result);
-                            toastManager.add(
-                              stackedThreadToast({
-                                type: "error",
-                                title: "Failed to unarchive thread",
-                                description:
-                                  error instanceof Error ? error.message : "An error occurred.",
-                              }),
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => {
+                          void (async () => {
+                            const result = await unarchiveThread(
+                              scopeThreadRef(thread.environmentId, thread.id),
                             );
-                          }
-                        })();
-                      }}
-                    >
-                      <ArchiveX className="size-3.5" />
-                      <span>Unarchive</span>
-                    </Button>
+                            if (result._tag === "Success") {
+                              refreshArchivedThreads();
+                              return;
+                            }
+                            if (!isAtomCommandInterrupted(result)) {
+                              const error = squashAtomCommandFailure(result);
+                              toastManager.add(
+                                stackedThreadToast({
+                                  type: "error",
+                                  title: "Failed to unarchive thread",
+                                  description:
+                                    error instanceof Error ? error.message : "An error occurred.",
+                                }),
+                              );
+                            }
+                          })();
+                        }}
+                      >
+                        <ArchiveX className="size-3.5" />
+                        <span>Unarchive</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive-outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() =>
+                          void requestArchivedThreadDelete(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                            thread.title,
+                          )
+                        }
+                      >
+                        <Trash2Icon className="size-3.5" />
+                        <span>Delete</span>
+                      </Button>
+                    </div>
                   }
                 />
               ))}

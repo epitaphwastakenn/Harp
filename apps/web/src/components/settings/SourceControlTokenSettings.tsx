@@ -112,6 +112,7 @@ export function SourceControlTokenSettings({
             <SecretInput
               id={`${definition.kind}-token-${environmentId}`}
               size="sm"
+              aria-label={`${definition.label} token`}
               configured={isSaved}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}

@@ -57,6 +57,15 @@ describe("searchSettings", () => {
     expect(searchSettings("connections", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
+    const spanish = (message: string) => (message === "Word wrap" ? "Ajuste de línea" : message);
+    expect(searchSettings("ajuste", ITEMS, spanish).map((item) => item.id)).toEqual(["word-wrap"]);
+  });
+
+  it("finds the Scheduled tasks page", () => {
+    expect(searchSettings("scheduled tasks")[0]).toMatchObject({
+      id: "scheduled-tasks",
+      to: "/settings/scheduled-tasks",
+    });
   });
 
   it("matches normalized title substrings", () => {
@@ -102,7 +111,6 @@ describe("searchSettings", () => {
     const available = filterAvailableSettingsSearchItems({
       hasEnvironment: false,
       hasProviderSettingsEnvironment: false,
-      hasMacProviderSettingsEnvironment: false,
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: false,
@@ -113,7 +121,6 @@ describe("searchSettings", () => {
       "git-fetch-interval",
       "network-access",
       "provider-health-check-interval",
-      "cursor-keychain-usage",
       "source-control-writer-model",
       "review-guide-model",
       "review-guide-instructions",
@@ -125,6 +132,24 @@ describe("searchSettings", () => {
       "days-before-auto-settle",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
+  });
+
+  it("finds the Welcome page only where a primary computer can open it", () => {
+    const availability = {
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: true,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+    };
+    const ids = (hasPrimaryEnvironment: boolean) =>
+      searchSettings(
+        "welcome page",
+        filterAvailableSettingsSearchItems({ ...availability, hasPrimaryEnvironment }),
+      ).map((item) => item.id);
+    // Hosted web reaches remote computers but has no primary one to set up.
+    expect(ids(false)).not.toContain("welcome-page");
+    expect(ids(true)).toContain("welcome-page");
   });
 
   it("finds keybinding commands by label, command id, and default key", () => {
@@ -171,7 +196,7 @@ describe("settings search targets", () => {
     const streaming = getSettingsSearchTargetScope("response-streaming")!;
     expect(streaming.scope).toBe("project-defaults");
     expect(isSettingsSearchScopeAvailable(streaming.scope, "project")).toBe(true);
-    for (const id of ["legacy-plan-mode", "legacy-context-window-indicator"]) {
+    for (const id of ["tool-call-visibility"]) {
       expect(getSettingsSearchTargetScope(id)!.scope).toBeNull();
     }
   });
@@ -200,7 +225,6 @@ describe("auto-settlement search availability", () => {
     const items = filterAvailableSettingsSearchItems({
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: availability.eligibleEnvironmentIds.length > 0,

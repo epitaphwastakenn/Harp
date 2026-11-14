@@ -41,6 +41,7 @@ import { environmentCatalog } from "~/connection/catalog";
 import type { EnvironmentPresentation } from "~/state/environments";
 import { APP_VERSION } from "~/branding";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
 import { serverEnvironment } from "~/state/server";
 import {
   OutdatedServerUpdateAction,

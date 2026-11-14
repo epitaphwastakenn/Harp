@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -119,6 +119,7 @@ export interface AcpSessionRuntimeOptions {
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
+    readonly title?: string;
     readonly version: string;
   };
   readonly authMethodId?: string;
@@ -485,18 +486,18 @@ export function terminateLinuxCgroupLease(
     let lastRemovalFailure: { readonly cause: unknown } | null = null;
     for (let attempt = 0; attempt < 200; attempt += 1) {
       if (!lease.exists()) return;
-      const killed = yield* Effect.try(() => lease.kill()).pipe(Effect.result);
+      const killed = Result.try(() => lease.kill());
       if (Result.isFailure(killed)) {
-        const cause = killed.failure.cause;
+        const cause = killed.failure;
         const code = (cause as NodeJS.ErrnoException | undefined)?.code;
         if (code !== "ENOENT") return yield* failure("kill", cause);
         if (!lease.exists()) return;
         yield* Effect.sleep("10 millis");
         continue;
       }
-      const populated = yield* Effect.try(() => lease.populated()).pipe(Effect.result);
+      const populated = Result.try(() => lease.populated());
       if (Result.isFailure(populated)) {
-        const cause = populated.failure.cause;
+        const cause = populated.failure;
         const code = (cause as NodeJS.ErrnoException | undefined)?.code;
         if (code === "ENOENT" && !lease.exists()) return;
         if (code === "ENOENT") {
@@ -510,9 +511,9 @@ export function terminateLinuxCgroupLease(
         yield* Effect.sleep("10 millis");
         continue;
       }
-      const removed = yield* Effect.try(() => lease.remove()).pipe(Effect.result);
+      const removed = Result.try(() => lease.remove());
       if (Result.isFailure(removed)) {
-        const cause = removed.failure.cause;
+        const cause = removed.failure;
         const code = (cause as NodeJS.ErrnoException | undefined)?.code;
         if (code === "ENOENT" && !lease.exists()) return;
         if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "ENOENT") {
@@ -1163,10 +1164,16 @@ export class AcpSessionRuntime extends Context.Service<
       providerId: string,
     ) => Effect.Effect<EffectAcpSchema.DisableProviderResponse, EffectAcpErrors.AcpError>;
     readonly logout: Effect.Effect<EffectAcpSchema.LogoutResponse, EffectAcpErrors.AcpError>;
-    /** options.dispatched settles when cancel can target this prompt. */
+    /**
+     * options.dispatched settles when cancel can target this prompt. options.released lets the
+     * next prompt go out while this one's response is still held; it still resolves this call.
+     */
     readonly prompt: (
       payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
-      options?: { readonly dispatched?: Deferred.Deferred<void> },
+      options?: {
+        readonly dispatched?: Deferred.Deferred<void>;
+        readonly released?: Deferred.Deferred<void>;
+      },
     ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
     readonly cancel: Effect.Effect<void, EffectAcpErrors.AcpError>;
     readonly terminateProcessGroup?: Effect.Effect<void, AcpProcessGroupTerminationError>;
@@ -1186,7 +1193,11 @@ export class AcpSessionRuntime extends Context.Service<
     readonly setConfigOption: (
       configId: string,
       value: string | boolean,
-      options?: { readonly allowUnlistedValue?: boolean },
+      options?: {
+        readonly allowUnlistedValue?: boolean;
+        /** Sends the write even when the cached value already matches it. */
+        readonly resendCurrentValue?: boolean;
+      },
     ) => Effect.Effect<EffectAcpSchema.SetSessionConfigOptionResponse, EffectAcpErrors.AcpError>;
     readonly setModel: (model: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
     readonly request: (
@@ -1241,16 +1252,17 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
 ): Effect.fn.Return<
   AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom | Scope.Scope
 > {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcess.Platform;
   const runtimeScope = yield* Scope.fork(yield* Scope.Scope);
   const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
   const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
   const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallTrackedState>());
   const shownToolCallIds = new Set<string>();
-  const assistantItemRuntimeId = yield* crypto.randomUUIDv4().pipe(
+  const assistantItemRuntimeId = yield* random.uuidV4().pipe(
     Effect.mapError(
       (cause) =>
         new EffectAcpErrors.AcpTransportError({
@@ -1454,7 +1466,10 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
         ...(spawnEnvironment ? { env: spawnEnvironment } : {}),
         extendEnv: options.spawn.extendEnv ?? true,
-        ...ownedProcessSpawnOptions(options.ownDetachedProcessGroup, options.processGroupPlatform),
+        ...ownedProcessSpawnOptions(
+          options.ownDetachedProcessGroup,
+          options.processGroupPlatform ?? hostPlatform,
+        ),
         shell: containedSpawnCommand.shell,
       }),
     )
@@ -1616,7 +1631,6 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     Effect.uninterruptible(terminateOwnedProcessGroupImpl),
   );
   if (options.ownDetachedProcessGroup === true) {
-    const hostPlatform = yield* HostProcess.Platform;
     const forceTerminateOwnedProcessGroup =
       hostPlatform === "win32"
         ? terminateWindowsProcessTreeWithTaskkill(Number(child.pid)).pipe(
@@ -1792,8 +1806,9 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       ...options.clientCapabilities?.fs,
     },
     terminal: options.clientCapabilities?.terminal ?? false,
-    // ACP v1 agents send session notices only to clients that advertise them; v2 needs no capability.
-    session: { ...options.clientCapabilities?.session, notices: {} },
+    // ACP v1 agents send session notices and compaction updates only to clients that advertise
+    // them; v2 needs no capability.
+    session: { ...options.clientCapabilities?.session, notices: {}, compaction: {} },
     ...(options.clientCapabilities?.auth ? { auth: options.clientCapabilities.auth } : {}),
     ...(options.clientCapabilities?.elicitation
       ? { elicitation: options.clientCapabilities.elicitation }
@@ -2029,7 +2044,10 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   const setConfigOption = (
     configId: string,
     value: string | boolean,
-    options?: { readonly allowUnlistedValue?: boolean },
+    options?: {
+      readonly allowUnlistedValue?: boolean;
+      readonly resendCurrentValue?: boolean;
+    },
   ): Effect.Effect<EffectAcpSchema.SetSessionConfigOptionResponse, EffectAcpErrors.AcpError> =>
     validateConfigOptionValue(configId, value, options?.allowUnlistedValue === true).pipe(
       Effect.andThen(getStartedState),
@@ -2037,7 +2055,11 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         SubscriptionRef.get(configOptionsRef).pipe(
           Effect.flatMap((configOptions) => {
             const existing = findSessionConfigOption(configOptions, configId);
-            if (existing && configOptionCurrentValueMatches(existing, value)) {
+            if (
+              existing &&
+              options?.resendCurrentValue !== true &&
+              configOptionCurrentValueMatches(existing, value)
+            ) {
               return Effect.succeed({
                 configOptions,
               } satisfies EffectAcpSchema.SetSessionConfigOptionResponse);
@@ -2362,6 +2384,17 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
   });
 
+  const joinPrompt = (
+    fiber: Fiber.Fiber<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>,
+  ) =>
+    Fiber.join(fiber).pipe(
+      Effect.catchCauseIf(
+        (cause) => options.cancelBehavior !== "wait-for-prompt" && Cause.hasInterruptsOnly(cause),
+        (_cause) =>
+          Effect.succeed({ stopReason: "cancelled" } satisfies EffectAcpSchema.PromptResponse),
+      ),
+    );
+
   const cancel = Effect.gen(function* () {
     const started = yield* getStartedState;
     const activePrompt = yield* Ref.get(activePromptRef);
@@ -2602,66 +2635,81 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       Effect.andThen(runLoggedRequest("logout", {}, acp.agent.logout({}))),
     ),
     prompt: (payload, promptOptions?) =>
-      promptSerializationSemaphore.withPermit(
-        Effect.acquireUseRelease(
-          promptDispatchSemaphore.withPermit(
-            Effect.gen(function* () {
-              const started = yield* getStartedState;
-              yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
-              yield* Ref.set(assistantUpdatesOpenRef, true);
-              const requestPayload = {
-                sessionId: started.sessionId,
-                ...payload,
-              } satisfies EffectAcpSchema.PromptRequest;
-              const completed = yield* Deferred.make<void>();
-              const fiber = yield* runLoggedRequest(
-                "session/prompt",
-                requestPayload,
-                acp.agent.prompt(requestPayload),
-              ).pipe(Effect.forkIn(runtimeScope));
-              const active = { fiber, completed } satisfies AcpActivePrompt;
-              yield* Ref.set(activePromptRef, Option.some(active));
-              if (promptOptions?.dispatched) {
-                yield* Deferred.succeed(promptOptions.dispatched, undefined);
-              }
-              return active;
-            }).pipe(notificationSemaphore.withPermit),
-          ),
-          (activePrompt) =>
-            Fiber.join(activePrompt.fiber).pipe(
-              Effect.catchCauseIf(
-                (cause) =>
-                  options.cancelBehavior !== "wait-for-prompt" && Cause.hasInterruptsOnly(cause),
-                (_cause) =>
-                  Effect.succeed({
-                    stopReason: "cancelled",
-                  } satisfies EffectAcpSchema.PromptResponse),
-              ),
-              Effect.tap(() =>
-                closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef }),
-              ),
+      promptSerializationSemaphore
+        .withPermit(
+          Effect.acquireUseRelease(
+            promptDispatchSemaphore.withPermit(
+              Effect.gen(function* () {
+                const started = yield* getStartedState;
+                yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
+                yield* Ref.set(assistantUpdatesOpenRef, true);
+                const requestPayload = {
+                  sessionId: started.sessionId,
+                  ...payload,
+                } satisfies EffectAcpSchema.PromptRequest;
+                const completed = yield* Deferred.make<void>();
+                const fiber = yield* runLoggedRequest(
+                  "session/prompt",
+                  requestPayload,
+                  acp.agent.prompt(requestPayload),
+                ).pipe(Effect.forkIn(runtimeScope));
+                const active = { fiber, completed } satisfies AcpActivePrompt;
+                yield* Ref.set(activePromptRef, Option.some(active));
+                if (promptOptions?.dispatched) {
+                  yield* Deferred.succeed(promptOptions.dispatched, undefined);
+                }
+                return active;
+              }).pipe(notificationSemaphore.withPermit),
             ),
-          (activePrompt, result) =>
-            Effect.gen(function* () {
-              if (
-                options.cancelBehavior === "wait-for-prompt" &&
-                Exit.isFailure(result) &&
-                Cause.hasInterrupts(result.cause)
-              ) {
-                yield* retireRuntime(
-                  new EffectAcpErrors.AcpTransportError({
-                    method: "session/prompt",
-                    detail: "The ACP prompt stopped before the agent confirmed completion.",
-                    cause: undefined,
-                  }),
-                );
-              }
-              yield* Fiber.interrupt(activePrompt.fiber).pipe(Effect.ignore);
-              yield* Ref.set(activePromptRef, Option.none());
-              yield* Deferred.succeed(activePrompt.completed, undefined);
-            }),
+            (activePrompt) => {
+              const settled = joinPrompt(activePrompt.fiber).pipe(
+                Effect.tap(() =>
+                  closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef }),
+                ),
+                Effect.map((response) => ({ _tag: "Settled" as const, response })),
+              );
+              return promptOptions?.released === undefined
+                ? settled
+                : Effect.raceFirst(
+                    settled,
+                    Deferred.await(promptOptions.released).pipe(
+                      Effect.as({ _tag: "Released" as const, fiber: activePrompt.fiber }),
+                    ),
+                  );
+            },
+            (activePrompt, result) =>
+              Effect.gen(function* () {
+                if (Exit.isSuccess(result) && result.value._tag === "Released") {
+                  yield* Ref.set(activePromptRef, Option.none());
+                  yield* Deferred.succeed(activePrompt.completed, undefined);
+                  return;
+                }
+                if (
+                  options.cancelBehavior === "wait-for-prompt" &&
+                  Exit.isFailure(result) &&
+                  Cause.hasInterrupts(result.cause)
+                ) {
+                  yield* retireRuntime(
+                    new EffectAcpErrors.AcpTransportError({
+                      method: "session/prompt",
+                      detail: "The ACP prompt stopped before the agent confirmed completion.",
+                      cause: undefined,
+                    }),
+                  );
+                }
+                yield* Fiber.interrupt(activePrompt.fiber).pipe(Effect.ignore);
+                yield* Ref.set(activePromptRef, Option.none());
+                yield* Deferred.succeed(activePrompt.completed, undefined);
+              }),
+          ),
+        )
+        .pipe(
+          Effect.flatMap((outcome) =>
+            outcome._tag === "Settled"
+              ? Effect.succeed(outcome.response)
+              : joinPrompt(outcome.fiber),
+          ),
         ),
-      ),
     cancel:
       options.cancelBehavior === "wait-for-prompt"
         ? promptDispatchSemaphore.withPermit(cancel)
@@ -2726,7 +2774,7 @@ export const layer = (
 ): Layer.Layer<
   AcpSessionRuntime,
   EffectAcpErrors.AcpError,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom
 > => Layer.effect(AcpSessionRuntime, make(options));
 
 function sessionConfigOptionsFromSetup(

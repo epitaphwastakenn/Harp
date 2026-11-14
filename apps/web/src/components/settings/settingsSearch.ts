@@ -10,6 +10,7 @@ import {
 } from "@t3tools/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-react";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { writeLocalStorageValue } from "../../hooks/useLocalStorage";
 import { commandLabel } from "./KeybindingsSettings.logic";
@@ -55,10 +56,12 @@ export interface SettingsSearchItem {
   readonly releaseChannelOnly?: boolean;
   readonly environmentOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
-  readonly macProviderSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;
+  readonly primaryEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
+  readonly fastWorktreeCheckoutOnly?: boolean;
+  readonly textGeneratorsOnly?: boolean;
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
 }
@@ -67,26 +70,29 @@ export interface SettingsSearchAvailability {
   readonly localEnvironmentDisabled?: boolean;
   readonly hasEnvironment: boolean;
   readonly hasProviderSettingsEnvironment: boolean;
-  readonly hasMacProviderSettingsEnvironment: boolean;
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
+  readonly hasFastWorktreeCheckoutEnvironment?: boolean;
+  /** An environment without a provider allow-list, which hides text generators. */
+  readonly hasTextGeneratorsEnvironment?: boolean;
+  readonly hasPrimaryEnvironment?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/diagnostics": "Diagnostics",
-  "/settings/projects": "Project",
-  "/settings/general": "General",
-  "/settings/appearance": "Appearance",
-  "/settings/keybindings": "Keybindings",
-  "/settings/roblox-studio": "Roblox Studio",
-  "/settings/providers": "Providers",
-  "/settings/integrations": "Integrations",
-  "/settings/scheduled-tasks": "Scheduled tasks",
-  "/settings/source-control": "Source control",
-  "/settings/storage": "Storage",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
+  "/settings/diagnostics": msg("Diagnostics"),
+  "/settings/projects": msg("Project"),
+  "/settings/general": msg("General"),
+  "/settings/appearance": msg("Appearance"),
+  "/settings/keybindings": msg("Keybindings"),
+  "/settings/roblox-studio": msg("Roblox Studio"),
+  "/settings/providers": msg("Providers"),
+  "/settings/integrations": msg("Integrations"),
+  "/settings/scheduled-tasks": msg("Scheduled tasks"),
+  "/settings/source-control": msg("Source control"),
+  "/settings/storage": msg("Storage"),
+  "/settings/connections": msg("Connections"),
+  "/settings/archived": msg("Archive"),
 };
 
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
@@ -441,13 +447,13 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    title: msg("Project grouping"),
     to: "/settings/general",
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
     id: "project-order",
-    title: "Project order",
+    title: msg("Project order"),
     to: "/settings/general",
     searchTerms: ["sort projects sidebar manual created recent"],
   },
@@ -464,6 +470,39 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Snooze until limits reset",
     to: "/settings/general",
     searchTerms: ["usage quota rate limit reset wake recover continue"],
+  },
+  {
+    id: "tool-call-visibility",
+    title: "Tool calls in chat",
+    to: "/settings/general",
+    searchTerms: [
+      "hide tool calls commands edits searches work log activity quiet chat zen final answers only",
+    ],
+  },
+  {
+    id: "screen-reader-announcements",
+    title: "Screen reader announcements",
+    to: "/settings/general",
+    searchTerms: [
+      "accessibility a11y screen reader nvda jaws voiceover orca narrator speech announce read aloud messages activity steps",
+    ],
+  },
+  {
+    id: "screen-reader-window-title",
+    title: "Screen reader window title",
+    to: "/settings/general",
+    searchTerms: [
+      "accessibility a11y screen reader nvda jaws voiceover orca narrator window title tab title alt tab taskbar thread status order working approval",
+    ],
+  },
+  {
+    id: "welcome-page",
+    title: "Welcome page",
+    to: "/settings/general",
+    primaryEnvironmentOnly: true,
+    searchTerms: [
+      "onboarding setup first run getting started agents import projects roblox studio",
+    ],
   },
   {
     id: "auto-resume-limited-threads",
@@ -520,13 +559,21 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "in-app-notifications",
-    title: "In-app notifications",
+    title: msg("In-app notifications"),
     to: "/settings/general",
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "language",
+    title: msg("Language"),
+    to: "/settings/general",
+    searchTerms: [
+      "locale translation english deutsch german español spanish français french português portuguese brasil brazilian chinese 中文 japanese 日本語 korean 한국어 russian русский sprache idioma langue 语言 言語 언어 язык",
+    ],
+  },
+  {
     id: "time-format",
-    title: "Time format",
+    title: msg("Time format"),
     to: "/settings/general",
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
@@ -637,6 +684,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "keep-awake-while-agents-work",
+    title: "Keep awake while agents work",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["caffeinate sleep prevent stay awake power laptop lid inhibit"],
+  },
+  {
     id: "background-activity",
     title: "Background activity",
     to: "/settings/general",
@@ -674,26 +728,33 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["base directory folder browser path home"],
   },
   {
+    id: "ghq-clone-layout",
+    title: "Clone into host folders",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["ghq clone destination host owner repository root layout"],
+  },
+  {
     id: "unpin-confirmation",
-    title: "Unpin confirmation",
+    title: msg("Unpin confirmation"),
     to: "/settings/general",
     searchTerms: ["ask before thread pinned section"],
   },
   {
     id: "archive-confirmation",
-    title: "Archive confirmation",
+    title: msg("Archive confirmation"),
     to: "/settings/general",
     searchTerms: ["ask before thread second click inline action"],
   },
   {
     id: "delete-confirmation",
-    title: "Delete confirmation",
+    title: msg("Delete confirmation"),
     to: "/settings/general",
     searchTerms: ["ask before thread chat history"],
   },
   {
     id: "quit-confirmation",
-    title: "Quit shortcut",
+    title: msg("Quit shortcut"),
     to: "/settings/general",
     searchTerms: ["confirmation desktop app exit direct hold double click press twice"],
     desktopOnly: true,
@@ -772,18 +833,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
-    id: "legacy-plan-mode",
-    title: "Plan mode",
-    to: "/settings/general",
-    searchTerms: ["build plan composer"],
-  },
-  {
-    id: "legacy-context-window-indicator",
-    title: "Context window indicator",
-    to: "/settings/general",
-    searchTerms: ["composer meter usage tokens circle"],
-  },
-  {
     id: "keybindings",
     title: "Keybindings",
     to: "/settings/keybindings",
@@ -847,12 +896,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
-    id: "cursor-keychain-usage",
-    title: "Cursor account usage",
+    id: "text-generators",
+    title: "Text generators",
     to: "/settings/providers",
-    searchTerms: ["cursor macOS keychain usage tokens cost limits permission"],
+    searchTerms: [
+      "model api api key openai openrouter anthropic ollama lm studio custom endpoint base url thread titles commit messages",
+    ],
     providerSettingsOnly: true,
-    macProviderSettingsOnly: true,
+    textGeneratorsOnly: true,
   },
   {
     id: "provider-health-check-interval",
@@ -860,6 +911,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/providers",
     searchTerms: ["refresh availability versions auth state models background probes seconds off"],
     providerSettingsOnly: true,
+  },
+  {
+    id: "scheduled-tasks",
+    title: "Scheduled tasks",
+    to: "/settings/scheduled-tasks",
   },
   {
     id: "agent-browser-access",
@@ -994,18 +1050,18 @@ export const SETTINGS_SEARCH_ITEMS = [
   ...sourceControlHostSearchItems(sourceControlClients.definitions),
   {
     id: "source-control-writing-style",
-    title: "Source control writing style",
+    title: "Commit and pull request writing",
     to: "/settings/source-control",
     searchTerms: [
-      "repository conventions conventional commits custom instructions change descriptions request titles",
+      "repository conventions conventional commits custom instructions commit messages change pr pull request merge request titles descriptions body style prompt write my own",
     ],
     environmentOnly: true,
   },
   {
     id: "follow-change-request-templates",
-    title: "Follow change request templates",
+    title: "Follow pull request templates",
     to: "/settings/source-control",
-    searchTerms: ["repository pr pull request description structure"],
+    searchTerms: ["repository pr pull request merge request change request description structure"],
     environmentOnly: true,
   },
   {
@@ -1283,11 +1339,14 @@ export function filterAvailableSettingsSearchItems(
     (item) =>
       (!item.environmentOnly || availability.hasEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
-      (!item.macProviderSettingsOnly || availability.hasMacProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.localEnvironmentOnly || !availability.localEnvironmentDisabled) &&
+      (!item.primaryEnvironmentOnly || availability.hasPrimaryEnvironment === true) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
-      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement),
+      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
+      (!item.fastWorktreeCheckoutOnly ||
+        availability.hasFastWorktreeCheckoutEnvironment === true) &&
+      (!item.textGeneratorsOnly || availability.hasTextGeneratorsEnvironment === true),
   );
 }
 
@@ -1308,6 +1367,7 @@ export function settingsForThisPlatform(
 export function searchSettings(
   query: string,
   items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS,
+  translate: (message: string) => string = (message) => message,
 ): ReadonlyArray<SettingsSearchItem> {
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
@@ -1319,6 +1379,9 @@ export function searchSettings(
       const fields = [
         title,
         normalizeSearchText(SETTINGS_SECTION_LABELS[item.to]),
+        // The labels as displayed, so search also works in the active language.
+        normalizeSearchText(translate(item.title)),
+        normalizeSearchText(translate(SETTINGS_SECTION_LABELS[item.to])),
         ...(item.searchTerms ?? []).map(normalizeSearchText),
       ];
       if (!queryTokens.every((token) => fields.some((field) => field.includes(token)))) return [];

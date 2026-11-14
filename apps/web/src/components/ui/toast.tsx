@@ -10,12 +10,18 @@ import {
   type ReactNode,
 } from "react";
 import { type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
-import { CircleAlertIcon, CircleCheckIcon, InfoIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { Check, Copy } from "lucide";
+import {
+  CheckIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CopyIcon,
+  InfoIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { Button, buttonVariants } from "~/components/ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { DisclosureChevron } from "~/components/ui/disclosure-chevron";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -160,10 +166,7 @@ function CopyErrorButton({ text }: { text: string }) {
           />
         }
       >
-        <MorphIcon
-          className={cn("size-3", isCopied && "text-success")}
-          icon={isCopied ? Check : Copy}
-        />
+        {isCopied ? <CheckIcon className="size-3 text-success" /> : <CopyIcon className="size-3" />}
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>

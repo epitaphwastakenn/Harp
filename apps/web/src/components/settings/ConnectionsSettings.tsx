@@ -65,13 +65,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
-import {
-  revokeOtherServerClientSessions,
-  revokeServerClientSession,
-  revokeServerPairingLink,
-  usePrimarySessionState,
-  type ServerClientSessionRecord,
-} from "~/environments/primary";
+import { type ServerClientSessionRecord } from "~/environments/primary";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { useUiStateStore } from "~/uiStateStore";
 import {
@@ -81,7 +75,11 @@ import {
 } from "~/versionSkew";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
-import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import {
+  readEnvironmentScope,
+  useEnvironmentScope,
+  useEnvironmentSessionState,
+} from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import {
   desktopNetworkAccessStateAtom,
@@ -111,6 +109,7 @@ import {
   toDesktopPairingLinkRecord,
   toDesktopClientSessionRecord,
   selectPairingEndpoint,
+  isServerNetworkAccessible,
   isTailscaleHttpsEndpoint,
   endpointDefaultPreferenceKey,
 } from "./ConnectionsSettings.logic";
@@ -150,7 +149,14 @@ export function ConnectionsSettings() {
     reportFailure: false,
   });
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
-  const primarySessionState = usePrimarySessionState();
+  const primarySessionState = useEnvironmentSessionState(primaryEnvironmentId);
+  const revokePairingLink = useAtomCommand(authEnvironment.revokePairingLink, {
+    reportFailure: false,
+  });
+  const revokeClient = useAtomCommand(authEnvironment.revokeClient, { reportFailure: false });
+  const revokeOtherClients = useAtomCommand(authEnvironment.revokeOtherClients, {
+    reportFailure: false,
+  });
   const currentSessionScopes = primarySessionState.data?.authenticated
     ? (primarySessionState.data.permissions ?? primarySessionState.data.scopes ?? null)
     : null;
@@ -211,8 +217,10 @@ export function ConnectionsSettings() {
   const [createdPairingCredentials, setCreatedPairingCredentials] = useState<
     ReadonlyMap<string, string>
   >(() => new Map());
+  const [newestPairingLinkId, setNewestPairingLinkId] = useState<string | null>(null);
   const handlePairingLinkCreated = (created: AuthPairingCredentialResult) => {
     setCreatedPairingCredentials((current) => new Map(current).set(created.id, created.credential));
+    setNewestPairingLinkId(created.id);
   };
   const [revokingDesktopPairingLinkId, setRevokingDesktopPairingLinkId] = useState<string | null>(
     null,
@@ -316,7 +324,10 @@ export function ConnectionsSettings() {
   })();
   const isLocalBackendNetworkAccessible = desktopBridge
     ? desktopServerExposureState?.mode === "network-accessible"
-    : currentAuthPolicy === "remote-reachable";
+    : isServerNetworkAccessible({
+        authPolicy: currentAuthPolicy,
+        directEndpoints: primaryEnvironment?.serverConfig?.directEndpoints,
+      });
   const trimmedTailscaleServePortInput = tailscaleServePortInput.trim();
   const parsedTailscaleServePort = Number(trimmedTailscaleServePortInput);
   const isTailscaleServePortValid =
@@ -460,11 +471,9 @@ export function ConnectionsSettings() {
       return;
     setRevokingDesktopPairingLinkId(id);
     setDesktopAccessManagementMutationError(null);
-    const settled = await settlePromise(async () => {
-      await revokeServerPairingLink(id);
-    });
-    if (settled._tag === "Failure") {
-      const error = Cause.squash(settled.cause);
+    const result = await revokePairingLink({ environmentId: primaryEnvironmentId, input: { id } });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
       const message = error instanceof Error ? error.message : "Failed to revoke pairing link.";
       setDesktopAccessManagementMutationError(message);
       toastManager.add(
@@ -488,11 +497,12 @@ export function ConnectionsSettings() {
       return;
     setRevokingDesktopClientSessionId(sessionId);
     setDesktopAccessManagementMutationError(null);
-    const settled = await settlePromise(async () => {
-      await revokeServerClientSession(sessionId);
+    const result = await revokeClient({
+      environmentId: primaryEnvironmentId,
+      input: { sessionId },
     });
-    if (settled._tag === "Failure") {
-      const error = Cause.squash(settled.cause);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
       const message = error instanceof Error ? error.message : "Failed to revoke client access.";
       setDesktopAccessManagementMutationError(message);
       toastManager.add(
@@ -514,16 +524,15 @@ export function ConnectionsSettings() {
       return;
     setIsRevokingOtherDesktopClients(true);
     setDesktopAccessManagementMutationError(null);
-    const settled = await settlePromise(async () => {
-      const revokedCount = await revokeOtherServerClientSessions();
+    const result = await revokeOtherClients({ environmentId: primaryEnvironmentId, input: null });
+    if (result._tag === "Success") {
       toastManager.add({
         type: "success",
-        title: revokedCount === 1 ? "Revoked 1 other client" : `Revoked ${revokedCount} clients`,
+        title: result.value === 1 ? "Revoked 1 other client" : `Revoked ${result.value} clients`,
         description: "Other paired clients will need a new pairing link before reconnecting.",
       });
-    });
-    if (settled._tag === "Failure") {
-      const error = Cause.squash(settled.cause);
+    } else if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
       const message = error instanceof Error ? error.message : "Failed to revoke other clients.";
       setDesktopAccessManagementMutationError(message);
       toastManager.add(
@@ -907,6 +916,30 @@ export function ConnectionsSettings() {
       }
     />
   );
+  const newestPairingLink = visibleDesktopPairingLinks.find(
+    (pairingLink) => pairingLink.id === newestPairingLinkId,
+  );
+  const renderPairingClientsList = (
+    pairingLinks: typeof visibleDesktopPairingLinks,
+    clientSessions: typeof desktopClientSessions,
+  ) => (
+    <PairingClientsList
+      servedByEnvironment
+      endpointUrl={desktopServerExposureState?.endpointUrl}
+      endpoints={visibleDesktopAdvertisedEndpoints}
+      defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
+      isLoading={isLoadingDesktopAccessManagement}
+      pairingLinks={pairingLinks}
+      createdPairingCredentials={createdPairingCredentials}
+      sharedPairingLinkId={newestPairingLinkId}
+      clientSessions={clientSessions}
+      revokingPairingLinkId={revokingDesktopPairingLinkId}
+      revokingClientSessionId={revokingDesktopClientSessionId}
+      onRevokePairingLink={handleRevokeDesktopPairingLink}
+      onRevokeClientSession={handleRevokeDesktopClientSession}
+      canRevoke={canWriteAccess}
+    />
+  );
   const renderAuthorizedClients = () => (
     <>
       {desktopAccessManagementError ? (
@@ -914,20 +947,7 @@ export function ConnectionsSettings() {
           <p className="text-xs text-destructive">{desktopAccessManagementError}</p>
         </div>
       ) : null}
-      <PairingClientsList
-        endpointUrl={desktopServerExposureState?.endpointUrl}
-        endpoints={visibleDesktopAdvertisedEndpoints}
-        defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
-        isLoading={isLoadingDesktopAccessManagement}
-        pairingLinks={visibleDesktopPairingLinks}
-        createdPairingCredentials={createdPairingCredentials}
-        clientSessions={desktopClientSessions}
-        revokingPairingLinkId={revokingDesktopPairingLinkId}
-        revokingClientSessionId={revokingDesktopClientSessionId}
-        onRevokePairingLink={handleRevokeDesktopPairingLink}
-        onRevokeClientSession={handleRevokeDesktopClientSession}
-        canRevoke={canWriteAccess}
-      />
+      {renderPairingClientsList(visibleDesktopPairingLinks, desktopClientSessions)}
     </>
   );
   const renderNetworkAccessRow = () => (
@@ -968,7 +988,7 @@ export function ConnectionsSettings() {
       description={
         desktopBridge
           ? "This connection cannot view or change network exposure."
-          : currentAuthPolicy === "remote-reachable"
+          : isLocalBackendNetworkAccessible
             ? "Remote access is already configured. Change network exposure where the server starts."
             : currentAuthPolicy === "loopback-browser"
               ? "Only this machine can connect. Restart with a non-loopback host for remote pairing."
@@ -1119,13 +1139,19 @@ export function ConnectionsSettings() {
             <FoldedSettingsSection
               id="authorized-clients"
               title="Authorized clients"
+              collapsedContent={
+                canReadAccess && newestPairingLink
+                  ? renderPairingClientsList([newestPairingLink], [])
+                  : undefined
+              }
               summary={summarizeAuthorizedClients(
                 desktopClientSessions,
                 visibleDesktopPairingLinks,
               )}
               control={
-                canWriteAccess ? (
+                canWriteAccess && primaryEnvironmentId !== null ? (
                   <AuthorizedClientsHeaderAction
+                    environmentId={primaryEnvironmentId}
                     delegatableScopes={currentSessionScopes ?? []}
                     onPairingLinkCreated={handlePairingLinkCreated}
                     clientSessions={

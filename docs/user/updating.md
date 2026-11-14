@@ -103,7 +103,7 @@ The offered action depends on how the server runs:
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Update server**          | Keep the client open while it installs and reconnects. Supported background services update remotely. For a desktop-hosted server, this also closes and relaunches the desktop app on the host. |
 | **Update the desktop app** | Update the desktop app on the machine running the server, then reopen it if needed.                                                                                                             |
-| **Copy update command**    | Run the command on the named host to update the detected global npm install, then restart the server with your usual options.                                                                   |
+| **Copy update command**    | Run the command on the named host to update the detected global npm install or installed `t3` command, then restart the server with your usual options.                                         |
 | **Copy relaunch command**  | Stop the command-line server on its host and relaunch with the copied command, keeping your usual subcommand and options. This does not update an installed `t3` command.                       |
 
 On the host, run:
@@ -120,6 +120,10 @@ or `--tailscale-serve`.
 
 If the host's `t3` is older than this client, update Harp on the host,
 then relaunch the server with the same subcommand and options.
+
+If you decline the restart for a background service installed by an older
+release, the service can stay down after a crash or reboot until you run
+`t3 service restart`.
 
 ## If an update fails
 
@@ -169,8 +173,11 @@ Machines without npm check the public npm registry directly.
 
 **Settings → Providers** shows provider updates for the selected environment.
 **Update all** updates every outdated provider on every connected environment
-at once. Hover it to see which providers it will update. Providers that only
-offer a manual update command are not included.
+at once. Hover it to see which providers it will update. A provider is left out
+when any of its enabled, outdated instances offers only a manual update command,
+or when its instances use different update commands, such as two instances that
+run different CLI installs. Update those by hand, or point every instance of the
+provider at the same CLI.
 
 After a successful provider CLI update, Harp refreshes model discovery for
 every enabled instance of that provider using its own configuration. Connected

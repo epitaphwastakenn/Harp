@@ -14,7 +14,7 @@ import {
   type StudioPromptTargets,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const intake = yield* Effect.context<
     | ThreadManagement.ThreadManagementService
     | ServerConfig.ServerConfig
@@ -309,9 +309,7 @@ const make = Effect.gen(function* () {
       projectId: shell.projectId,
       commandId: CommandId.make(`${commandBase}:send`),
       threadId: shell.id,
-      messageId: MessageId.make(
-        `${commandBase}:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
-      ),
+      messageId: MessageId.make(`${commandBase}:${yield* crypto.uuidV4().pipe(Effect.orDie)}`),
       text: request.text,
       attachments,
       mode: "auto",

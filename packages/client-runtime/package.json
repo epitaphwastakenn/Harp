@@ -23,6 +23,18 @@
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
     },
+    "./composer-model-mentions": {
+      "types": "./src/composerModelMentions.ts",
+      "default": "./src/composerModelMentions.ts"
+    },
+    "./locales": {
+      "types": "./src/locales.ts",
+      "default": "./src/locales.ts"
+    },
+    "./model-search": {
+      "types": "./src/modelSearch.ts",
+      "default": "./src/modelSearch.ts"
+    },
     "./image-attachment-size": {
       "types": "./src/imageAttachmentSize.ts",
       "default": "./src/imageAttachmentSize.ts"
@@ -58,6 +70,10 @@
     "./secret-request": {
       "types": "./src/secretRequest.ts",
       "default": "./src/secretRequest.ts"
+    },
+    "./scheduled-task-time-zone": {
+      "types": "./src/scheduledTaskTimeZone.ts",
+      "default": "./src/scheduledTaskTimeZone.ts"
     },
     "./connection": {
       "types": "./src/connection/index.ts",
@@ -191,6 +207,18 @@
       "types": "./src/state/presentation.ts",
       "default": "./src/state/presentation.ts"
     },
+    "./state/peerLinks": {
+      "types": "./src/state/peerLinks.ts",
+      "default": "./src/state/peerLinks.ts"
+    },
+    "./state/environmentHttpAuth": {
+      "types": "./src/state/environmentHttpAuth.ts",
+      "default": "./src/state/environmentHttpAuth.ts"
+    },
+    "./state/connectMcpApproval": {
+      "types": "./src/state/connectMcpApproval.ts",
+      "default": "./src/state/connectMcpApproval.ts"
+    },
     "./state/preview": {
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"
@@ -263,6 +291,10 @@
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"
     },
+    "./state/thread-activity-announcement": {
+      "types": "./src/state/threadActivityAnnouncement.ts",
+      "default": "./src/state/threadActivityAnnouncement.ts"
+    },
     "./state/subagent-display": {
       "types": "./src/state/subagentDisplay.ts",
       "default": "./src/state/subagentDisplay.ts"
@@ -311,6 +343,10 @@
       "types": "./src/state/composerDispatch.ts",
       "default": "./src/state/composerDispatch.ts"
     },
+    "./state/context-window": {
+      "types": "./src/state/contextWindow.ts",
+      "default": "./src/state/contextWindow.ts"
+    },
     "./state/thread-subagents": {
       "types": "./src/state/threadSubagents.ts",
       "default": "./src/state/threadSubagents.ts"
@@ -358,6 +394,10 @@
     "./work-log/command-label": {
       "types": "./src/work-log/commandLabel.ts",
       "default": "./src/work-log/commandLabel.ts"
+    },
+    "./work-log/embedded-scripts": {
+      "types": "./src/work-log/embeddedScripts.ts",
+      "default": "./src/work-log/embeddedScripts.ts"
     },
     "./work-log/scroll-anchor": {
       "types": "./src/work-log/scrollAnchor.ts",
@@ -431,6 +471,10 @@
       "types": "./src/pullRequestReactions.ts",
       "default": "./src/pullRequestReactions.ts"
     },
+    "./pull-request-reply": {
+      "types": "./src/pullRequestReply.ts",
+      "default": "./src/pullRequestReply.ts"
+    },
     "./pull-request-query": {
       "types": "./src/pullRequestQuery.ts",
       "default": "./src/pullRequestQuery.ts"
@@ -443,13 +487,21 @@
       "types": "./src/state/previewStreamAccess.ts",
       "default": "./src/state/previewStreamAccess.ts"
     },
+    "./pull-request-reviewers": {
+      "types": "./src/pullRequestReviewers.ts",
+      "default": "./src/pullRequestReviewers.ts"
+    },
     "./provider-clients": {
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
+    },
+    "./provider-instance-ids": {
+      "types": "./src/providerInstanceIds.ts",
+      "default": "./src/providerInstanceIds.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run"
   },
   "dependencies": {
@@ -463,11 +515,14 @@
     "@t3tools/provider-muse": "workspace:*",
     "@t3tools/provider-opencode": "workspace:*",
     "@t3tools/provider-pi": "workspace:*",
+    "@t3tools/secret-provider-definitions": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@t3tools/source-control-core": "workspace:*",
     "@t3tools/source-control-definitions": "workspace:*",
     "effect": "catalog:",
-    "jszip": "3.10.1"
+    "jszip": "3.10.1",
+    "three": "0.180.0",
+    "unbash": "^5.0.0"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

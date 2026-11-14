@@ -1,11 +1,14 @@
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { type EnvironmentId, type RunId } from "@t3tools/contracts";
+import { type EnvironmentId, type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
+import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { memo, use, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { ChatMarkdownAssetImage } from "./ChatMarkdownMedia";
-import { GitForkIcon, TriangleAlertIcon } from "lucide-react";
+import { GitForkIcon, ReplyIcon, TriangleAlertIcon } from "lucide-react";
+import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
+import { responseContextRecord } from "~/lib/composerContextRecords";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Spinner } from "../ui/spinner";
@@ -31,13 +34,19 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
+import {
+  readResponseSubagents,
+  useAssistantMessageText,
+  useProject,
+  useThreadShell,
+} from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
+import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import {
@@ -54,7 +63,8 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.projectedItem?.item.id,
   );
   const text = liveText ?? row.message.text;
-  const messageText = text || (row.message.streaming ? "" : "(empty response)");
+  const messageText =
+    text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
 
   return (
     <>
@@ -70,7 +80,13 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           >
             <ChatMarkdown
               text={messageText}
+              renderInsights
               cwd={ctx.markdownCwd}
+              agentDirectories={() =>
+                ctx.threadRef && row.projectedItem
+                  ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
+                  : []
+              }
               threadRef={ctx.threadRef ?? undefined}
               isStreaming={Boolean(row.message.streaming)}
               lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
@@ -90,6 +106,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             onOpenTurnDiff={ctx.onOpenTurnDiff}
           />
         ) : null}
+        {!row.showAssistantMeta && row.projectedItem?.item.status === "interrupted" ? (
+          <div className="mt-1.5 flex">
+            <AssistantStatusBadge status="interrupted" />
+          </div>
+        ) : null}
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
@@ -101,6 +122,32 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         ) : null}
       </div>
     </>
+  );
+}
+
+/** Text an agent sent with `send_to_user`, shown as its own words. */
+export function SentMessageTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "sent-message" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <MessageAuthorHeading>Harp</MessageAuthorHeading>
+      <ChatMarkdown
+        text={row.text}
+        cwd={ctx.markdownCwd}
+        threadRef={ctx.threadRef ?? undefined}
+        lineBreaks={shouldPreserveAssistantLineBreaks(row.text)}
+        skills={ctx.skills}
+        headingLevelOffset={MESSAGE_HEADING_LEVEL}
+        onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+        onRunShellCommand={ctx.onRunShellCommand}
+        onImageExpand={ctx.onImageExpand}
+      />
+    </div>
   );
 }
 
@@ -197,14 +244,8 @@ function AssistantMessageMeta({
         className,
       )}
     >
-      {projectedItem?.item.status === "failed" ? (
-        <Badge variant="error" size="sm">
-          Failed
-        </Badge>
-      ) : projectedItem?.item.status === "interrupted" ? (
-        <Badge variant="warning" size="sm">
-          Interrupted
-        </Badge>
+      {projectedItem?.item.status === "failed" || projectedItem?.item.status === "interrupted" ? (
+        <AssistantStatusBadge status={projectedItem.item.status} />
       ) : null}
       <AssistantCopyButton
         message={message}
@@ -214,6 +255,9 @@ function AssistantMessageMeta({
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
+      {!message.streaming && projectedItem ? (
+        <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
+      ) : null}
       {!message.streaming && (
         <TimelineRowTimestamp
           createdAt={message.updatedAt}
@@ -222,6 +266,68 @@ function AssistantMessageMeta({
         />
       )}
     </div>
+  );
+}
+
+function AssistantReplyButton({ message, itemId }: { message: ChatMessage; itemId: TurnItemId }) {
+  const ctx = use(TimelineRowCtx);
+  const { threadRef, onReplyToResponse } = ctx;
+  if (!threadRef || !onReplyToResponse || !message.text.trim()) return null;
+
+  const reply = () => {
+    // The meta row can sit below trailing tool rows, so the message may be virtualized away.
+    const source = [
+      ...document.querySelectorAll<HTMLElement>("[data-assistant-citation-source]"),
+    ].find(
+      (element) =>
+        element.dataset.assistantCitationSource === message.id &&
+        element.dataset.assistantCitationThread === threadRef.threadId &&
+        element.dataset.assistantCitationEnvironment === threadRef.environmentId,
+    );
+    const opening = captureAssistantMessageOpening(source ?? null, message.text);
+    if (!opening) return;
+    onReplyToResponse(
+      responseContextRecord({
+        citation: { version: 1, ...threadRef, messageId: message.id, ...opening },
+        itemId,
+        subagents: readResponseSubagents(threadRef, itemId),
+      }),
+    );
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-muted"
+            onClick={reply}
+            aria-label="Reply to this response"
+          />
+        }
+      >
+        <ReplyIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Reply to this response</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function AssistantStatusBadge({ status }: { status: string }) {
+  return status === "failed" ? (
+    <Badge variant="error" size="sm">
+      Failed
+    </Badge>
+  ) : status === "interrupted" ? (
+    <Badge variant="warning" size="sm">
+      Interrupted
+    </Badge>
+  ) : (
+    <Badge variant="outline" size="sm">
+      {status}
+    </Badge>
   );
 }
 

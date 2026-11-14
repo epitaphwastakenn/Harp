@@ -99,7 +99,11 @@ export function QueuedRunsControl({
   const queued = workflow?.queuedRuns ?? [];
   const activeRun = workflow?.activeRun ?? null;
   const canReorder = workflow?.canReorder === true;
-  const canSend = workflow?.canSendNow === true || workflow?.canPromoteToSteer === true;
+  // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
+  const canSendRun = (freshContext: boolean) =>
+    workflow?.canSendNow === true ||
+    (workflow?.canPromoteToSteer === true &&
+      (!freshContext || workflow.promoteSkipsCompaction === true));
   const queuedImageUrlById = new Map(
     queuedImageAttachmentUrls.flatMap((url, index) => {
       const resource = queuedImageAttachmentResources[index];
@@ -114,6 +118,7 @@ export function QueuedRunsControl({
       key: run.id,
       runId: run.id,
       messageId: run.userMessageId,
+      freshContext: run.freshContext === true,
       serverIndex,
       text,
       attachments,
@@ -130,6 +135,7 @@ export function QueuedRunsControl({
       key: message.id,
       runId: null,
       messageId: null,
+      freshContext: false,
       serverIndex: null,
       text: message.text,
       attachments: [] as ReadonlyArray<ContractChatAttachment>,
@@ -164,7 +170,10 @@ export function QueuedRunsControl({
   };
 
   const sendQueuedMessage = async (queuedRunId: RunId) => {
-    if (!canSend || steerInFlightRef.current) return;
+    const freshContext = queued.some(
+      ({ run }) => run.id === queuedRunId && run.freshContext === true,
+    );
+    if (!canSendRun(freshContext) || steerInFlightRef.current) return;
     steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     if (workflow?.canSendNow) {
@@ -185,7 +194,7 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
-      if (!next || !canSend) return false;
+      if (!next || !canSendRun(next.run.freshContext === true)) return false;
       if (!repeat && busyRunId === null) void sendQueuedMessage(next.run.id);
       return true;
     },
@@ -249,9 +258,7 @@ export function QueuedRunsControl({
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
               const previewText = assistantCitationsToPlainText(
-                replaceComposerContextReferences(item.text, (reference) =>
-                  reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
-                ),
+                replaceComposerContextReferences(item.text, (reference) => reference.label),
               ).trim();
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
@@ -424,7 +431,11 @@ export function QueuedRunsControl({
                               <Button
                                 size="xs"
                                 variant="ghost-muted"
-                                disabled={item.runId === null || busyRunId !== null || !canSend}
+                                disabled={
+                                  item.runId === null ||
+                                  busyRunId !== null ||
+                                  !canSendRun(item.freshContext)
+                                }
                                 onClick={() => {
                                   if (item.runId !== null) {
                                     void sendQueuedMessage(item.runId);

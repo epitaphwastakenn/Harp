@@ -1,6 +1,7 @@
 import {
   AuthAccessTokenType,
   AuthAccessWriteScope,
+  AuthMcpClientAccess,
   AuthOrchestrationOperateScope,
   AuthStandardClientScopes,
   type AuthAccessTokenResult,
@@ -9,7 +10,6 @@ import {
   type AuthClientSession,
   type AuthCreatePairingCredentialInput,
   type AuthEnvironmentScope,
-  type AuthMcpClientAccess,
   type AuthPairingLink,
   type AuthPairingCredentialResult,
   type AuthSessionId,
@@ -26,7 +26,7 @@ import {
 import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -48,6 +48,8 @@ import { DESKTOP_RENDERER_ORIGINS } from "../httpCors.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedLimits from "../policy/managedLimits.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import { MCP_APPROVAL_SUBJECT_PREFIX } from "../persistence/AuthPairingLinks.ts";
+import { requestUrl } from "../requestUrl.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
@@ -397,6 +399,7 @@ export class EnvironmentAuth extends Context.Service<
       readonly subject?: string;
       readonly proofKeyThumbprint?: string;
       readonly purpose?: "startup";
+      readonly mcpApproval?: AuthMcpClientAccess;
     }) => Effect.Effect<
       IssuedPairingLink,
       ServerAuthInternalError | ManagedLimits.ManagedPolicyRefusedError
@@ -468,11 +471,17 @@ export class EnvironmentAuth extends Context.Service<
       },
       ServerAuthInternalError
     >;
-    /** Spends a code covering all granted scopes. Rejects desktop grants and leaves refused proof-bound codes unspent. */
+    /**
+     * Spends a code covering all granted scopes and returns the level it approves. A level-bound
+     * code must name `access`. Rejects desktop grants and leaves refused codes unspent.
+     */
     readonly consumeMcpApprovalCode: (
       code: string,
       access: AuthMcpClientAccess,
-    ) => Effect.Effect<void, ServerAuthMcpApprovalCodeError | ServerAuthInternalError>;
+    ) => Effect.Effect<
+      AuthMcpClientAccess,
+      ServerAuthMcpApprovalCodeError | ServerAuthInternalError
+    >;
     readonly authenticateBrowserSession: (
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
@@ -549,7 +558,7 @@ export function parseBearerToken(request: HttpServerRequest.HttpServerRequest): 
 
 function parseDpopToken(request: HttpServerRequest.HttpServerRequest): string | null {
   const header = request.headers["authorization"];
-  if (typeof header !== "string" || !header.startsWith(DPOP_AUTHORIZATION_PREFIX)) {
+  if (typeof header !== "string" || !/^DPoP /i.test(header)) {
     return null;
   }
   const token = header.slice(DPOP_AUTHORIZATION_PREFIX.length).trim();
@@ -623,7 +632,7 @@ export const make = Effect.gen(function* () {
   const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
   const sessions = yield* SessionStore.SessionStore;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
-  const crypto = yield* Crypto.Crypto;
+  const digest = yield* Digest.Digest;
   const descriptor = yield* policy.getDescriptor();
   const config = yield* ServerConfig.ServerConfig;
   const managedPolicy = yield* ManagedPolicy.ManagedPolicy;
@@ -715,7 +724,7 @@ export const make = Effect.gen(function* () {
             expectedAccessToken: dpopToken,
           }).pipe(
             Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
-            Effect.provideService(Crypto.Crypto, crypto),
+            Effect.provideService(Digest.Digest, digest),
             Effect.as(session),
           );
         }
@@ -827,6 +836,8 @@ export const make = Effect.gen(function* () {
       readonly proofKeyThumbprint?: string;
       readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
       readonly requiredScopes?: ReadonlyArray<AuthEnvironmentScope>;
+      /** Only an agent sign-in opts in to spending a code issued for it. */
+      readonly mcpApproval?: AuthMcpClientAccess;
     },
   ): Effect.Effect<
     ResolvedBootstrapGrant,
@@ -941,6 +952,7 @@ export const make = Effect.gen(function* () {
         ...(input?.label ? { label: input.label } : {}),
         ...(input?.proofKeyThumbprint ? { proofKeyThumbprint: input.proofKeyThumbprint } : {}),
         ...(input?.purpose ? { purpose: input.purpose } : {}),
+        ...(input?.mcpApproval ? { mcpApproval: input.mcpApproval } : {}),
       });
       return {
         id: issued.id,
@@ -975,7 +987,11 @@ export const make = Effect.gen(function* () {
           INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT,
         ];
         return pairingLinks
-          .filter((pairingLink) => !excludedSubjects.includes(pairingLink.subject))
+          .filter(
+            (pairingLink) =>
+              !excludedSubjects.includes(pairingLink.subject) &&
+              !pairingLink.subject.startsWith(MCP_APPROVAL_SUBJECT_PREFIX),
+          )
           .map((link) => ({ ...link, ...authScopeResponse(link.scopes) }))
           .toSorted(
             (left, right) => right.createdAt.epochMilliseconds - left.createdAt.epochMilliseconds,
@@ -1041,11 +1057,17 @@ export const make = Effect.gen(function* () {
 
   const issuePairingCredential: EnvironmentAuth["Service"]["issuePairingCredential"] = (input) =>
     createPairingLink({
-      scopes: input?.scopes ?? AuthStandardClientScopes,
+      scopes: input?.access
+        ? mcpClientScopes(input.access)
+        : (input?.scopes ?? AuthStandardClientScopes),
       subject: "one-time-token",
       ...(input?.label ? { label: input.label } : {}),
+      ...(input?.access ? { mcpApproval: input.access } : {}),
     }).pipe(
-      Effect.map(toPairingCredential),
+      Effect.map((issued) => ({
+        ...toPairingCredential(issued),
+        ...(input?.access ? { access: input.access } : {}),
+      })),
       Effect.withSpan("EnvironmentAuth.issuePairingCredential"),
     );
 
@@ -1152,10 +1174,10 @@ export const make = Effect.gen(function* () {
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request, use) {
-      const requestUrl = HttpServerRequest.toURL(request);
-      if (Option.isSome(requestUrl)) {
+      const url = requestUrl(request);
+      if (Option.isSome(url)) {
         const query = yield* decodeWebSocketUpgradeQuery(
-          Object.fromEntries(requestUrl.value.searchParams),
+          Object.fromEntries(url.value.searchParams),
         ).pipe(Effect.orDie);
         const websocketTicket = query.wsTicket && Redacted.value(query.wsTicket);
         if (websocketTicket && websocketTicket.trim().length > 0) {
@@ -1185,7 +1207,7 @@ export const make = Effect.gen(function* () {
               expectedAccessToken: websocketTicket,
             }).pipe(
               Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
-              Effect.provideService(Crypto.Crypto, crypto),
+              Effect.provideService(Digest.Digest, digest),
             );
           }
           return {
@@ -1250,6 +1272,28 @@ export const make = Effect.gen(function* () {
         Effect.withSpan("EnvironmentAuth.issueMcpClientSession"),
       );
 
+  const consumeMcpApprovalCode: EnvironmentAuth["Service"]["consumeMcpApprovalCode"] = (
+    code,
+    access,
+  ) =>
+    resolveBootstrapGrant(code.trim(), {
+      requiredScopes: mcpClientScopes(access),
+      mcpApproval: access,
+    }).pipe(
+      Effect.catchTags({
+        ServerAuthInvalidCredentialError: () =>
+          Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "unknown_or_used" })),
+        ServerAuthScopeNotGrantedError: () =>
+          Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "insufficient_scope" })),
+      }),
+      Effect.flatMap((grant) =>
+        grant.method !== "one-time-token" && grant.method !== "reusable-dev-token"
+          ? Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "not_a_pairing_code" }))
+          : Effect.succeed(mcpApprovalLevel(grant.subject) ?? access),
+      ),
+      Effect.withSpan("EnvironmentAuth.consumeMcpApprovalCode"),
+    );
+
   const authenticateBrowserSession: EnvironmentAuth["Service"]["authenticateBrowserSession"] = (
     request,
   ) => {
@@ -1265,25 +1309,6 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.authenticateBrowserSession"),
     );
   };
-
-  const consumeMcpApprovalCode: EnvironmentAuth["Service"]["consumeMcpApprovalCode"] = (
-    code,
-    access,
-  ) =>
-    resolveBootstrapGrant(code.trim(), { requiredScopes: mcpClientScopes(access) }).pipe(
-      Effect.catchTags({
-        ServerAuthInvalidCredentialError: () =>
-          Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "unknown_or_used" })),
-        ServerAuthScopeNotGrantedError: () =>
-          Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "insufficient_scope" })),
-      }),
-      Effect.flatMap((grant) =>
-        grant.method !== "one-time-token" && grant.method !== "reusable-dev-token"
-          ? Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "not_a_pairing_code" }))
-          : Effect.void,
-      ),
-      Effect.withSpan("EnvironmentAuth.consumeMcpApprovalCode"),
-    );
 
   yield* revokePairedClientsThePolicyDisallows(managedPolicy, {
     sessions,
@@ -1319,6 +1344,16 @@ export const make = Effect.gen(function* () {
   });
 });
 
+const isMcpClientAccess = Schema.is(AuthMcpClientAccess);
+
+/** The level an approval code's subject names, or undefined for any other code. */
+const mcpApprovalLevel = (subject: string): AuthMcpClientAccess | undefined => {
+  const level = subject.startsWith(MCP_APPROVAL_SUBJECT_PREFIX)
+    ? subject.slice(MCP_APPROVAL_SUBJECT_PREFIX.length)
+    : undefined;
+  return isMcpClientAccess(level) ? level : undefined;
+};
+
 /** Subjects of sessions and links a pairing link created, keyed by how the client paired. */
 const LINK_PAIRED_SUBJECTS = { link: "one-time-token", connect: "cloud-connect" } as const;
 
@@ -1349,8 +1384,11 @@ const revokePairedClientsThePolicyDisallows = Effect.fn(
         session.client.ipAddress !== undefined &&
         !isLocalLoopbackHost(session.client.ipAddress)),
   );
-  const links = (yield* stores.pairingLinks.listActive()).filter((link) =>
-    disallowed.has(link.subject),
+  const links = (yield* stores.pairingLinks.listActive()).filter(
+    (link) =>
+      disallowed.has(link.subject) ||
+      // Approval codes let an agent elsewhere sign in, as plain codes do.
+      (!remoteAllowed && link.subject.startsWith(MCP_APPROVAL_SUBJECT_PREFIX)),
   );
   yield* Effect.forEach(sessions, (session) => stores.sessions.revoke(session.sessionId), {
     discard: true,
@@ -1370,7 +1408,7 @@ export const layer = Layer.effect(EnvironmentAuth, make).pipe(
   Layer.provideMerge(EnvironmentAuthPolicy.layer),
 );
 
-const layerStorage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerConfig);
+const layerStorage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerCliConfig);
 
 export const layerRuntime = layer.pipe(
   Layer.provideMerge(ManagedPolicy.layer),

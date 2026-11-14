@@ -1,20 +1,28 @@
+import { useAtomMount } from "@effect/atom-react";
+import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
+import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  resolveSettledThreadTimestamp,
+  resolveThreadActivityTimestamp,
+} from "@t3tools/client-runtime/state/thread-sort";
 import { type EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
 import {
   formatWorkingDurationLabel,
   resolveThreadProviderStack,
 } from "@t3tools/client-runtime/state/models";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { toServerClock } from "@t3tools/client-runtime/clock";
 import { presentThreadState } from "@t3tools/shared/statusPresentation";
 import {
   AuthOrchestrationOperateScope,
+  type EnvironmentId,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -58,7 +66,7 @@ import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import { useUiStateStore } from "../../uiStateStore";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { vcsEnvironment } from "../../state/vcs";
+import { vcsEnvironment, vcsBranchRevalidation } from "../../state/vcs";
 import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../../timestampFormat";
@@ -79,6 +87,7 @@ import {
   useRetainedValue,
   useSidebarRowSubscriptionLease,
   setFileDragActive,
+  withoutRemovedCheckout,
 } from "../Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
@@ -139,10 +148,6 @@ function RelativeTimeLabel(props: { timestamp: string | null }) {
       );
 }
 
-function threadTimeTimestamp(thread: SidebarThreadSummary): string {
-  return thread.latestUserMessageAt ?? thread.updatedAt;
-}
-
 function JumpHintBadge(props: { label: string }) {
   return (
     <Kbd aria-hidden className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2">
@@ -153,7 +158,8 @@ function JumpHintBadge(props: { label: string }) {
 
 // Self-ticking via a text-node write, so working rows never commit through
 // React once a second.
-function WorkingDuration(props: { startedAt: string | null }) {
+function WorkingDuration(props: { environmentId: EnvironmentId; startedAt: string | null }) {
+  const { environmentId } = props;
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
   // Mount time is close enough for the first frame; the interval keeps it current.
   const [mountedMs] = useState(() => Date.now());
@@ -162,17 +168,19 @@ function WorkingDuration(props: { startedAt: string | null }) {
     if (Number.isNaN(startedMs)) return;
     const update = () => {
       if (textRef.current) {
-        textRef.current.textContent = formatWorkingDurationLabel(Date.now() - startedMs);
+        textRef.current.textContent = formatWorkingDurationLabel(
+          toServerClock(environmentId, Date.now()) - startedMs,
+        );
       }
     };
     update();
     const id = window.setInterval(update, 1_000);
     return () => window.clearInterval(id);
-  }, [startedMs]);
+  }, [environmentId, startedMs]);
   if (Number.isNaN(startedMs)) return null;
   return (
     <span ref={textRef} className="tabular-nums">
-      {formatWorkingDurationLabel(mountedMs - startedMs)}
+      {formatWorkingDurationLabel(toServerClock(environmentId, mountedMs) - startedMs)}
     </span>
   );
 }
@@ -416,9 +424,16 @@ export function SortableThreadRow(
   };
   // The sidebar arranges rows from quiet shells, which hold still while a
   // thread streams; reading the live shell here re-renders only this row.
+  const liveThread = useThreadShell(
+    scopeThreadRef(rowProps.thread.environmentId, rowProps.thread.id),
+  );
+  // A runtime on the arranged copy but not the run-less live shell is the list's launch overlay.
   const thread =
-    useThreadShell(scopeThreadRef(rowProps.thread.environmentId, rowProps.thread.id)) ??
-    rowProps.thread;
+    liveThread === null
+      ? rowProps.thread
+      : rowProps.thread.runtime !== null
+        ? asLaunchingThread(liveThread)
+        : liveThread;
   // Keyed by variant so a card/slim switch remounts the row.
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
 }
@@ -497,7 +512,7 @@ type SidebarThreadRowProps = {
   wokeAt: string | null;
   isActive: boolean;
   // Set on the active row only; scrolls it into view when a reveal is owed.
-  revealRef?: ((row: HTMLElement, threadKey: string) => void) | undefined;
+  revealRef?: ((row: HTMLElement, threadKey: string) => (() => void) | undefined) | undefined;
   // Unlike isActive, never true for the ancestor standing in for an open
   // subagent: drafts and PR clicks care about which composer is on screen.
   isRouteThread: boolean;
@@ -515,7 +530,7 @@ type SidebarThreadRowProps = {
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
   onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
   onRenameTitleChange: (title: string) => void;
-  onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
+  onCommitRename: (threadRef: ScopedThreadRef, title: string) => void;
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
@@ -597,6 +612,8 @@ function resolveTopStatus(input: {
   isUnread: boolean;
 }): TopStatus | null {
   switch (input.status) {
+    case "preparing":
+      return { label: "Setting up", icon: "working", className: "text-info-foreground" };
     case "working":
       return {
         label:
@@ -667,8 +684,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const { revealRef } = props;
   const rowRef = (row: HTMLElement | null) => {
-    if (row !== null) revealRef?.(row, threadKey);
-    return leaseRowRef(row);
+    const stopReveal = row === null ? undefined : revealRef?.(row, threadKey);
+    const releaseLease = leaseRowRef(row);
+    if (!stopReveal) return releaseLease;
+    return () => {
+      stopReveal();
+      releaseLease?.();
+    };
   };
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
@@ -696,18 +718,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     thread.pullRequests,
     thread.branchPullRequest,
   );
-  const gitStatus = useEnvironmentQuery(
+  const branchTarget =
     leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: thread.environmentId,
-          input: { cwd: gitCwd, includeRemote: false },
-        })
-      : null,
+      ? { environmentId: thread.environmentId, cwd: gitCwd }
+      : null;
+  const gitStatus = useEnvironmentQuery(
+    branchTarget === null
+      ? null
+      : vcsEnvironment.branch({
+          environmentId: branchTarget.environmentId,
+          input: { cwd: branchTarget.cwd },
+        }),
   );
+  useAtomMount(vcsBranchRevalidation(branchTarget));
   const visibleGitStatus = useRetainedValue(
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
+  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus);
   const pr = linkedPullRequestStatus?.pr ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
   const currentLinkedPr = supportsMultiplePullRequests
@@ -757,11 +785,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     : thread.modelSelection.model;
 
   const isRemote = thread.environmentId !== props.currentEnvironmentId;
-  const showsScratchMachine = !thread.branch && props.scratchMachineLabel !== null;
+  const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
     <SidebarThreadTooltip
-      thread={thread}
+      thread={checkoutThread}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
       environmentLabel={props.environmentLabel}
@@ -920,7 +948,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <ThreadRenameInput
         title={renamingTitle}
         onTitleChange={onRenameTitleChange}
-        onCommit={() => onCommitRename(threadRef, renamingTitle, thread.title)}
+        onCommit={() => onCommitRename(threadRef, renamingTitle)}
         onCancel={onCancelRename}
       />
     ) : (
@@ -1043,13 +1071,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         >
           <StatusGlyph aria-hidden className="size-3.5 shrink-0" />
           <span className="truncate">{topStatus.label}</span>
-          {status === "working" ? (
+          {status === "preparing" || status === "working" ? (
             <span aria-hidden className="shrink-0">
-              <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+              <WorkingDuration
+                environmentId={thread.environmentId}
+                startedAt={resolveWorkingStartedAt(thread)}
+              />
             </span>
           ) : status === "waiting" ? (
             <span aria-hidden className="shrink-0">
-              <WorkingDuration startedAt={thread.latestRun?.completedAt ?? null} />
+              <WorkingDuration
+                environmentId={thread.environmentId}
+                startedAt={thread.latestRun?.completedAt ?? null}
+              />
             </span>
           ) : null}
         </span>
@@ -1061,7 +1095,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         timestamp={
           variantAction === "unsettle"
             ? resolveSettledThreadTimestamp(thread)
-            : threadTimeTimestamp(thread)
+            : resolveThreadActivityTimestamp(thread)
         }
       />
     </span>
@@ -1113,8 +1147,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             render={
               <div
                 ref={rowRef}
-                role="treeitem"
-                tabIndex={-1}
+                role="button"
+                tabIndex={0}
                 data-sidebar-row={threadKey}
                 data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
@@ -1209,7 +1243,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   }
 
   const metaLineEmpty =
-    !thread.branch &&
+    !checkoutThread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
     !isRemote &&
@@ -1238,8 +1272,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           render={
             <div
               ref={rowRef}
-              role="treeitem"
-              tabIndex={-1}
+              role="button"
+              tabIndex={0}
               data-sidebar-row={threadKey}
               data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
@@ -1288,7 +1322,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
                     )}
                   >
-                    {statusLabel ?? <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />}
+                    {statusLabel ?? (
+                      <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
+                    )}
                   </span>
                   {props.settlementSupported || hasUnsentDraft ? (
                     <SidebarRowActionSlot className="absolute inset-y-0 right-0 flex items-center gap-0.5 has-[:focus-visible]:static group-any-hover/sidebar-row:static">
@@ -1327,11 +1363,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </div>
             {metaLineEmpty ? null : (
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-secondary-label">
-                {thread.branch ? (
+                {checkoutThread.branch ? (
                   <>
-                    <ThreadWorktreeIndicator thread={thread} />
+                    <ThreadWorktreeIndicator thread={checkoutThread} />
                     <span className="flex min-w-0 flex-1">
-                      <MiddleTruncate value={thread.branch} showTitle={false} />
+                      <MiddleTruncate value={checkoutThread.branch} showTitle={false} />
                     </span>
                   </>
                 ) : showsScratchMachine ? (
@@ -1409,22 +1445,36 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
     isActive: props.isRouteActive,
   });
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-  const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(
+  // Results only drag out as chat context; the row keeps its own listbox attributes.
+  const { listeners: dragListeners, setNodeRef: setDragNodeRef } = useDraggable({
+    id: scopedThreadKey(threadRef),
+  });
+  const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(
     props.isHighlighted || props.isRouteActive,
   );
+  const rowRef = (row: HTMLElement | null) => {
+    setDragNodeRef(row);
+    return leaseRowRef(row);
+  };
   const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
-  const gitStatus = useEnvironmentQuery(
+  const branchTarget =
     leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: thread.environmentId,
-          input: { cwd: gitCwd, includeRemote: false },
-        })
-      : null,
+      ? { environmentId: thread.environmentId, cwd: gitCwd }
+      : null;
+  const gitStatus = useEnvironmentQuery(
+    branchTarget === null
+      ? null
+      : vcsEnvironment.branch({
+          environmentId: branchTarget.environmentId,
+          input: { cwd: branchTarget.cwd },
+        }),
   );
+  useAtomMount(vcsBranchRevalidation(branchTarget));
   const visibleGitStatus = useRetainedValue(
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
+  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus);
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
     activeWorktreePath: thread.worktreePath,
@@ -1476,6 +1526,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-current={accessibility.current}
               aria-describedby={`${props.resultId}-pr`}
               aria-label={accessibility.label}
+              {...dragListeners}
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(
@@ -1527,7 +1578,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                 />
               </span>
               <span className="w-8 shrink-0 text-right text-xs text-secondary-label tabular-nums">
-                <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
+                <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
               </span>
             </span>
             {props.searchMatch ? (
@@ -1542,7 +1593,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
           </span>
         </TooltipTrigger>
         <SidebarThreadTooltip
-          thread={thread}
+          thread={checkoutThread}
           project={props.project}
           projectDisplayName={props.projectDisplayName}
           environmentLabel={props.environmentLabel}

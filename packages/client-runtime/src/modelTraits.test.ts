@@ -1,7 +1,7 @@
-import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
+import type { ProviderOptionDescriptor } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildTraitsTriggerDisplay } from "./modelTraits.ts";
+import { buildTraitsTriggerDisplay, getDescriptorStringValue } from "./modelTraits.ts";
 
 const effort: ProviderOptionDescriptor = {
   id: "effort",
@@ -28,7 +28,6 @@ const ultracode = (currentValue: boolean | undefined): ProviderOptionDescriptor 
 
 const triggerLabel = (descriptors: ReadonlyArray<ProviderOptionDescriptor>) =>
   buildTraitsTriggerDisplay({
-    provider: ProviderDriverKind.make("claudeAgent"),
     descriptors,
     primarySelectDescriptorId: "effort",
     ultrathinkPromptControlled: false,
@@ -45,5 +44,34 @@ describe("buildTraitsTriggerDisplay", () => {
     expect(triggerLabel([effort, fastMode(true), ultracode(true)])).toBe(
       "Extra High Fast · Ultracode",
     );
+  });
+
+  it.each([
+    { currentValue: undefined, defaultValue: undefined, value: null, label: "Thinking" },
+    { currentValue: undefined, defaultValue: "high", value: "high", label: "High" },
+    { currentValue: "low", defaultValue: undefined, value: "low", label: "Low" },
+    { currentValue: "max", defaultValue: "high", value: "max", label: "Max" },
+    { id: "effort", currentValue: undefined, defaultValue: undefined, value: null, label: "" },
+  ])("labels Pi thinking without inventing a selection: $label ($value)", (input) => {
+    const descriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = {
+      id: input.id ?? "thinking",
+      label: "Thinking",
+      type: "select",
+      options: ["low", "high", "max"].map((id) => ({
+        id,
+        label: id[0]!.toUpperCase() + id.slice(1),
+        ...(id === input.defaultValue ? { isDefault: true } : {}),
+      })),
+      ...(input.currentValue ? { currentValue: input.currentValue } : {}),
+    };
+
+    expect(
+      buildTraitsTriggerDisplay({
+        descriptors: [descriptor],
+        primarySelectDescriptorId: descriptor.id,
+        ultrathinkPromptControlled: false,
+      }).label,
+    ).toBe(input.label);
+    expect(getDescriptorStringValue(descriptor)).toBe(input.value);
   });
 });

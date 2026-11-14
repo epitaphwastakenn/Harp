@@ -5,7 +5,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
+import { vi } from "vite-plus/test";
+
+vi.mock("electron", () => ({
+  webContents: { getAllWebContents: vi.fn(() => []) },
+}));
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -33,6 +38,7 @@ const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
   name: Effect.succeed("Harp"),
   systemLocale: Effect.succeed("en-US"),
+  preferredSystemLanguages: Effect.succeed(["en-US"]),
   whenReady: Effect.void,
   requestSingleInstanceLock: Effect.succeed(true),
   quit: Effect.void,
@@ -246,10 +252,32 @@ describe("DesktopApplicationMenu", () => {
           items.find((item) => item.role === "windowMenu" && item.submenu === undefined),
           platform,
         );
-        assert.isUndefined(
-          items.find((item) => item.accelerator?.toLowerCase().endsWith("+w")),
-          platform,
-        );
+        const closeTools = items.find((item) => item.accelerator === "CmdOrCtrl+W");
+        assert.equal(closeTools?.label, "Close Developer Tools", platform);
+        assert.isFunction(closeTools?.click);
+        const appContents = {
+          isDestroyed: () => false,
+          isDevToolsFocused: () => false,
+          closeDevTools: vi.fn(),
+        };
+        const inspectedContents = {
+          ...appContents,
+          isDevToolsFocused: () => true,
+          closeDevTools: vi.fn(),
+        };
+        using allContents = vi
+          .spyOn(Electron.webContents, "getAllWebContents")
+          .mockReturnValue([
+            appContents as unknown as Electron.WebContents,
+            inspectedContents as unknown as Electron.WebContents,
+          ]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(inspectedContents.closeDevTools.mock.calls.length, 1);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
+
+        allContents.mockReturnValue([appContents as unknown as Electron.WebContents]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
       }
     }),
   );
@@ -275,115 +303,6 @@ describe("DesktopApplicationMenu", () => {
 
       reload.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "main-reload");
-    }),
-  );
-  const fakeWindow = () => {
-    const window = { closed: 0, isDestroyed: () => false, close: () => (window.closed += 1) };
-    return window;
-  };
-
-  const closeWindowItem = (template: readonly Electron.MenuItemConstructorOptions[]) => {
-    const windowMenu = template.find((item) => item.label === "Window");
-    if (!Array.isArray(windowMenu?.submenu)) {
-      throw new Error("Expected Window menu submenu to be an array.");
-    }
-    const close = windowMenu.submenu.find((item) => item.accelerator === "CmdOrCtrl+W");
-    if (typeof close?.click !== "function") {
-      throw new Error("Expected a Close Window item that owns CmdOrCtrl+W.");
-    }
-    return close.click;
-  };
-
-  it.effect("asks before Ctrl+W closes the last window on Windows", () =>
-    Effect.gen(function* () {
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-      const main = fakeWindow();
-      let asked = 0;
-
-      yield* configureMenu(
-        yield* Deferred.make<string>(),
-        applicationMenuTemplate,
-        { platform: "win32" },
-        {
-          mainWindow: main as unknown as Electron.BrowserWindow,
-          showMessageBox: (options) => {
-            asked += 1;
-            // Cancel is the default, so an accidental Enter keeps the app open.
-            assert.equal(options.defaultId, options.cancelId);
-            return Effect.succeed({ response: options.cancelId ?? 1, checkboxChecked: false });
-          },
-        },
-      );
-
-      const close = closeWindowItem(yield* Deferred.await(applicationMenuTemplate));
-      close(
-        {} as Electron.MenuItem,
-        main as unknown as Electron.BrowserWindow,
-        { triggeredByAccelerator: true } as unknown as KeyboardEvent,
-      );
-
-      assert.equal(asked, 1);
-      assert.equal(main.closed, 0);
-    }),
-  );
-
-  it.effect("closes the last window once the user confirms", () =>
-    Effect.gen(function* () {
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-      const main = fakeWindow();
-
-      yield* configureMenu(
-        yield* Deferred.make<string>(),
-        applicationMenuTemplate,
-        { platform: "linux" },
-        {
-          mainWindow: main as unknown as Electron.BrowserWindow,
-          showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
-        },
-      );
-
-      const close = closeWindowItem(yield* Deferred.await(applicationMenuTemplate));
-      close(
-        {} as Electron.MenuItem,
-        main as unknown as Electron.BrowserWindow,
-        { triggeredByAccelerator: true } as unknown as KeyboardEvent,
-      );
-
-      assert.equal(main.closed, 1);
-    }),
-  );
-
-  it.effect("closes other windows without asking", () =>
-    Effect.gen(function* () {
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-      const popout = fakeWindow();
-      let asked = 0;
-
-      yield* configureMenu(
-        yield* Deferred.make<string>(),
-        applicationMenuTemplate,
-        { platform: "win32" },
-        {
-          mainWindow: fakeWindow() as unknown as Electron.BrowserWindow,
-          showMessageBox: () => {
-            asked += 1;
-            return Effect.succeed({ response: 0, checkboxChecked: false });
-          },
-        },
-      );
-
-      const close = closeWindowItem(yield* Deferred.await(applicationMenuTemplate));
-      close(
-        {} as Electron.MenuItem,
-        popout as unknown as Electron.BrowserWindow,
-        { triggeredByAccelerator: true } as unknown as KeyboardEvent,
-      );
-
-      assert.equal(asked, 0);
-      assert.equal(popout.closed, 1);
     }),
   );
 });

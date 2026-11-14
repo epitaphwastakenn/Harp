@@ -29,21 +29,24 @@ interface RecordedRequest {
   readonly body: unknown;
 }
 
+const applyProviderEnv = (env: Record<string, string>) => {
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  return previous;
+};
+
+const restoreProviderEnv = (previous: Record<string, string | undefined>) => {
+  for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
+
 const withProviderEnv = <A, E, R>(env: Record<string, string>, effect: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
-    Effect.sync(() => {
-      const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
-      Object.assign(process.env, env);
-      return previous;
-    }),
+    Effect.sync(() => applyProviderEnv(env)),
     () => effect,
-    (previous) =>
-      Effect.sync(() => {
-        for (const [key, value] of Object.entries(previous)) {
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
-      }),
+    (previous) => Effect.sync(() => restoreProviderEnv(previous)),
   );
 
 const layerProvider = (

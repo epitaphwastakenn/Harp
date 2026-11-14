@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
@@ -129,6 +129,17 @@ export class DesktopSnapShotError extends Schema.TaggedError<DesktopSnapShotErro
 }
 
 const isDesktopSnapShotError = Schema.is(DesktopSnapShotError);
+
+class SnapShotShortcutError extends Schema.TaggedError<SnapShotShortcutError>()(
+  "SnapShotShortcutError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not register the SnapShot shortcut.";
+  }
+}
+
+const shortcutFailure = (cause: unknown) => new SnapShotShortcutError({ cause });
 
 function captureFailure(cause: unknown, captureId?: string): DesktopSnapShotError {
   return isDesktopSnapShotError(cause)
@@ -399,13 +410,12 @@ async function captureSource({
     ({ source, png } = await captureRegionWindowSnapshot(
       regionSnapShotPool,
       active,
-      snapShotFlashBounds(active, platform),
       snapShotThumbnailSize(active),
     ));
   }
   const accessibilityRead = settings.snapShotIncludeAccessibility
     ? accessibilityProcessPool.read({
-        active: { ...active, bounds: snapShotFlashBounds(active, platform) },
+        active,
         platform,
         sourceTitle: source.name,
         imageSize: snapShotImageSize(png, active.bounds),
@@ -581,7 +591,7 @@ export const make = Effect.gen(function* () {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const settingsRef = yield* Ref.make(DEFAULT_CLIENT_SETTINGS);
   const stateRef = yield* Ref.make<DesktopSnapShotState>({
     mode: captureMode(environment.platform),
@@ -680,7 +690,7 @@ export const make = Effect.gen(function* () {
   const prepareCapture = Effect.fn("desktop.snapShot.prepareCapture")(function* (
     settings: ClientSettings,
   ) {
-    const id = yield* crypto.randomUUIDv4().pipe(Effect.mapError((cause) => captureFailure(cause)));
+    const id = yield* random.uuidV4().pipe(Effect.mapError((cause) => captureFailure(cause)));
     const mode = captureMode(environment.platform);
     if (mode === "unavailable") {
       return yield* new DesktopSnapShotError({ operation: "unsupported", captureId: id });
@@ -814,13 +824,15 @@ export const make = Effect.gen(function* () {
       return { available: false, message: "SnapShots are not supported on this platform." };
     }
     if (isModifierPairShortcut(shortcut)) {
-      const available = yield* Effect.tryPromise(() =>
-        startPairShortcutProcess(
-          snapShotShortcutModifierPair(shortcut),
-          () => undefined,
-          () => undefined,
-        ),
-      ).pipe(
+      const available = yield* Effect.tryPromise({
+        try: () =>
+          startPairShortcutProcess(
+            snapShotShortcutModifierPair(shortcut),
+            () => undefined,
+            () => undefined,
+          ),
+        catch: shortcutFailure,
+      }).pipe(
         Effect.tap((stop) => Effect.sync(stop)),
         Effect.as(true),
         Effect.orElseSucceed(() => false),
@@ -918,15 +930,21 @@ export const make = Effect.gen(function* () {
 
     let registered = false;
     if (isModifierPairShortcut(shortcut)) {
-      registered = yield* Effect.tryPromise(() =>
-        startPairShortcutProcess(snapShotShortcutModifierPair(shortcut), onCurrentShortcut, () => {
-          void runPromise(
-            setShortcutFailure(
-              snapShotShortcutRegistrationFailureMessage(shortcut, environment.platform),
-            ),
-          ).catch(() => undefined);
-        }),
-      ).pipe(
+      registered = yield* Effect.tryPromise({
+        try: () =>
+          startPairShortcutProcess(
+            snapShotShortcutModifierPair(shortcut),
+            onCurrentShortcut,
+            () => {
+              void runPromise(
+                setShortcutFailure(
+                  snapShotShortcutRegistrationFailureMessage(shortcut, environment.platform),
+                ),
+              ).catch(() => undefined);
+            },
+          ),
+        catch: shortcutFailure,
+      }).pipe(
         Effect.tap((stop) =>
           Effect.sync(() => {
             stopShiftShortcut = stop;

@@ -26,8 +26,9 @@ function windowsForegroundFocusTarget(window: Electron.BrowserWindow) {
     windowId: window.id,
     processId: process.pid,
     title: window.getTitle(),
-    bounds: window.getBounds(),
-    contentBounds: window.getContentBounds(),
+    // xa11y reports physical desktop pixels on Windows; Electron bounds are DIPs.
+    bounds: Electron.screen.dipToScreenRect(window, window.getBounds()),
+    contentBounds: Electron.screen.dipToScreenRect(window, window.getContentBounds()),
   };
 }
 
@@ -121,6 +122,8 @@ export class ElectronWindow extends Context.Service<
     /** Keeps a created but not yet loaded window out of the main-or-first lookups until released. */
     readonly hold: (window: Electron.BrowserWindow) => Effect.Effect<void>;
     readonly release: (window: Electron.BrowserWindow) => Effect.Effect<void>;
+    /** The held window, whose page can load before it becomes the main window. */
+    readonly heldMain: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
     readonly prepareReveal: (window: Electron.BrowserWindow) => Effect.Effect<boolean>;
     readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
@@ -147,6 +150,7 @@ export const make = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => Effect.sync(() => windowsForegroundFocus?.close()));
   const mainWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const heldWindows = new WeakSet<Electron.BrowserWindow>();
+  const heldMainRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const auxiliaryWindows = new WeakSet<Electron.BrowserWindow>();
 
   const listWindows = Effect.try({
@@ -258,10 +262,25 @@ export const make = Effect.gen(function* () {
       return Ref.set(mainWindowRef, Option.some(window));
     }),
     hold: Effect.fn("ElectronWindow.hold")(function (window) {
-      return Effect.sync(() => void heldWindows.add(window));
+      return Effect.sync(() => void heldWindows.add(window)).pipe(
+        Effect.andThen(Ref.set(heldMainRef, Option.some(window))),
+      );
     }),
     release: Effect.fn("ElectronWindow.release")(function (window) {
-      return Effect.sync(() => void heldWindows.delete(window));
+      return Effect.sync(() => void heldWindows.delete(window)).pipe(
+        Effect.andThen(
+          Ref.update(heldMainRef, (held) =>
+            Option.isSome(held) && held.value === window ? Option.none() : held,
+          ),
+        ),
+      );
+    }),
+    heldMain: Effect.gen(function* () {
+      const held = yield* Ref.get(heldMainRef);
+      if (Option.isSome(held) && (yield* isWindowDestroyed(held.value))) {
+        return Option.none<Electron.BrowserWindow>();
+      }
+      return held;
     }),
     clearMain: Effect.fn("ElectronWindow.clearMain")(function (window) {
       return Ref.update(mainWindowRef, (current) => {

@@ -1,5 +1,5 @@
 import { CommandId, ThreadId, type OrchestrationV2DomainEvent } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -27,7 +27,7 @@ export const layer = Layer.effectDiscard(
     if (!channel.available) return;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const endTurn = (event: OrchestrationV2DomainEvent) => {
       if (event.type !== "run.updated" || !TERMINAL_RUN_STATUSES.has(event.payload.status)) {
@@ -47,7 +47,7 @@ export const layer = Layer.effectDiscard(
         const threadId = ThreadId.make(rawThreadId);
         const shell = yield* threads.getThreadShell(threadId);
         if (shell === null) return;
-        const id = yield* crypto.randomUUIDv4();
+        const id = yield* crypto.uuidV4();
         yield* threads.interruptThread({
           projectId: shell.projectId,
           commandId: CommandId.make(`computer-use-stop:${id}`),

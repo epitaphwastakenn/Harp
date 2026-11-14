@@ -4,6 +4,7 @@ import {
   buildPromptSuggestionPrompt,
   PROMPT_SUGGESTION_ASSISTANT_MESSAGE_CHARS,
   PROMPT_SUGGESTION_USER_MESSAGE_CHARS,
+  buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
 import { normalizeCliError } from "./textGenerationUtils.ts";
 
@@ -46,5 +47,18 @@ describe("buildPromptSuggestionPrompt", () => {
     expect(prompt).toContain("Add a jump button.");
     expect(prompt).toContain("Added it to the HUD.");
     expect(prompt).not.toContain("truncated");
+  });
+});
+
+describe("buildThreadTitlePrompt", () => {
+  it("names the project to leave out of initial and regenerated titles", () => {
+    for (const previousTitle of [undefined, "Hyperdrive Config Crash"]) {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "hyperdrive init crashes without a config",
+        previousTitle,
+        projectTitle: "Hyperdrive",
+      });
+      expect(prompt).toContain('Never include the project name ("Hyperdrive")');
+    }
   });
 });

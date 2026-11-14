@@ -41,6 +41,7 @@ function renderContent(content: ReactNode) {
         onRevertToTurnCount: () => {},
         onUseArtifactTemplate: () => {},
         onSendAppMessage: undefined,
+        onReplyToResponse: undefined,
         onAppFullscreenChange: () => {},
         onRunShellCommand: undefined,
         findActive: false,
@@ -81,8 +82,10 @@ function renderContent(content: ReactNode) {
           isRevertingCheckpoint: false,
           awaitingUser: false,
           isPreparingWorktree: false,
+          providerStartingLabel: null,
           latestRunId: null,
           backgroundWorktreeSetup: null,
+          liveAnswerPreview: null,
         }}
       >
         {content}
@@ -209,6 +212,7 @@ it("renders full reasoning when the row is expanded", () => {
     <WorkGroupViewCtx
       value={{
         state: { scrollPositions: new Map(), expandedEntries: new Set([entry.id]) },
+        viewedImages: [],
         onToggleEntry: () => {},
       }}
     >

@@ -1,5 +1,12 @@
-import { MousePointer2Icon, PaintbrushIcon, PlusIcon, XIcon } from "lucide-react";
-import { ChevronDown, ChevronUp } from "lucide";
+import {
+  MousePointer2Icon,
+  PaintbrushIcon,
+  PlusIcon,
+  XIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   adjustThemeColorsBrightness,
@@ -26,13 +33,13 @@ import {
 import { useViewportSize } from "../../hooks/useViewportSize";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
 import { settingsSliderStyle } from "./settingsLayout";
+import { ThemeCssEditor } from "./ThemeCssEditor";
 import {
   clearThemeInspectorHover,
   clearThemeInspectorHighlights,
@@ -347,6 +354,8 @@ export function ThemeEditorPanel({
     Record<ThemeAppearance, boolean>
   >({ light: false, dark: false });
   const [shouldRegenerateGuidedColors, setShouldRegenerateGuidedColors] = useState(false);
+  const [css, setCss] = useState("");
+  const [cssOpen, setCssOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
   const [roleQuery, setRoleQuery] = useState("");
@@ -405,6 +414,8 @@ export function ThemeEditorPanel({
       setSimpleColorsDirtyByAppearance({ light: false, dark: false });
       setShouldRegenerateGuidedColors(sourceTheme !== null && sourceTheme.managed !== true);
       setColorsByAppearance(nextColors);
+      setCss(sourceTheme?.css ?? "");
+      setCssOpen(Boolean(sourceTheme?.css));
       setSelectedRole(null);
       setUsageCount(null);
       setIsInspecting(false);
@@ -423,6 +434,8 @@ export function ThemeEditorPanel({
             (theme.id === nameTargetId || theme.label.trim().toLowerCase() === normalizedName),
         ) ?? null);
   const takenAppearances = mergeTarget ? getThemeModes(mergeTarget) : [];
+  // A merge keeps the target's CSS when this draft has none.
+  const cssForSave = css.trim() ? css : (mergeTarget?.css ?? "");
   const editableAppearances = editingTheme ? getThemeModes(editingTheme) : null;
 
   const appearanceLockReason = (appearance: ThemeAppearance): string | null => {
@@ -469,10 +482,11 @@ export function ThemeEditorPanel({
         adjustThemeColorsBrightness(colorsByAppearance[activeAppearance], brightness),
         activeAppearance,
         gradient,
+        cssForSave,
       );
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeAppearance, brightness, colorsByAppearance, gradient, open]);
+  }, [activeAppearance, brightness, colorsByAppearance, cssForSave, gradient, open]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- restores the document theme when the editor closes or unmounts
   useEffect(() => {
@@ -781,6 +795,13 @@ export function ThemeEditorPanel({
       return;
     }
 
+    if (mergeTarget?.css && css.trim() && mergeTarget.css !== css) {
+      setError(
+        `“${mergeTarget.label}” has different custom CSS. Use the same CSS or pick another name.`,
+      );
+      return;
+    }
+
     try {
       const colorsForSave = !isAdvanced
         ? {
@@ -818,6 +839,7 @@ export function ThemeEditorPanel({
             ...(gradient ? { gradient: true } : {}),
             ...(brightness !== 0 ? { brightness } : {}),
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
+            ...(cssForSave ? { css: cssForSave } : {}),
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -839,6 +861,7 @@ export function ThemeEditorPanel({
             ...(gradient ? { gradient: true } : {}),
             ...(brightness !== 0 ? { brightness } : {}),
             ...(isAdvanced ? {} : { managed: true }),
+            ...(cssForSave ? { css: cssForSave } : {}),
           }),
           ...(editingTheme.collection ? { collection: editingTheme.collection } : {}),
         });
@@ -864,6 +887,7 @@ export function ThemeEditorPanel({
             ...(gradient ? { gradient: true } : {}),
             ...(brightness !== 0 ? { brightness } : {}),
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
+            ...(cssForSave ? { css: cssForSave } : {}),
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -877,6 +901,7 @@ export function ThemeEditorPanel({
             ...(gradient ? { gradient: true } : {}),
             ...(brightness !== 0 ? { brightness } : {}),
             ...(isAdvanced ? {} : { managed: true }),
+            ...(cssForSave ? { css: cssForSave } : {}),
           }),
         );
       }
@@ -1263,7 +1288,7 @@ export function ThemeEditorPanel({
           variant="ghost"
           onClick={() => setIsMinimized(!isMinimized)}
         >
-          <MorphIcon icon={isMinimized ? ChevronUp : ChevronDown} />
+          {isMinimized ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
           aria-label="Close the theme editor"
@@ -1290,6 +1315,26 @@ export function ThemeEditorPanel({
             <div className="space-y-3">
               {renderColorsHeader()}
               {renderColorFields()}
+            </div>
+            <div className="space-y-2">
+              <Button
+                aria-expanded={cssOpen}
+                size="xs"
+                variant="ghost"
+                onClick={() => setCssOpen(!cssOpen)}
+              >
+                {cssOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                Custom CSS
+              </Button>
+              {cssOpen ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Saved with this theme and included when you export it. Web and desktop only.
+                    Rules that load remote files are ignored.
+                  </p>
+                  <ThemeCssEditor value={css} onChange={setCss} />
+                </>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">

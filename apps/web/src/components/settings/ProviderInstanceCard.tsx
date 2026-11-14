@@ -11,8 +11,9 @@ import {
   PlusIcon,
   Trash2Icon,
   XIcon,
+  LockIcon,
+  LockOpenIcon,
 } from "lucide-react";
-import { Lock as LockGlyph, LockOpen } from "lucide";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
@@ -41,7 +42,6 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { DraftInput } from "../ui/draft-input";
 import { SecretInput } from "./SecretInput";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -62,6 +62,7 @@ import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayo
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
+import { getProviderRestartNotice } from "../ProviderUpdateLaunchNotification.logic";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -91,7 +92,9 @@ function ProviderStatusDiagnostic({
 }
 
 let environmentVariableDraftId = 0;
-const nextEnvironmentVariableDraftId = () => `provider-env-${environmentVariableDraftId++}`;
+const DRAFT_ROW_ID_PREFIX = "provider-env-";
+const nextEnvironmentVariableDraftId = () =>
+  `${DRAFT_ROW_ID_PREFIX}${environmentVariableDraftId++}`;
 
 type EnvironmentDraftRow = {
   readonly id: string;
@@ -452,10 +455,11 @@ export function ProviderEnvironmentSection(props: {
                       aria-pressed={variable.sensitive}
                       aria-label={`Mark environment variable ${variable.name || index + 1} as sensitive`}
                     >
-                      <MorphIcon
-                        className="size-3"
-                        icon={variable.sensitive ? LockGlyph : LockOpen}
-                      />
+                      {variable.sensitive ? (
+                        <LockIcon className="size-3" />
+                      ) : (
+                        <LockOpenIcon className="size-3" />
+                      )}
                     </Button>
                   }
                 />
@@ -673,6 +677,8 @@ export function ProviderInstanceCard({
     !isUpdating && (updateState?.status === "failed" || updateState?.status === "unchanged")
       ? updateState.message
       : null;
+  const restartNotice =
+    enabled && !isUpdating && liveProvider ? getProviderRestartNotice(liveProvider) : null;
   const hasCompatibilityWarning =
     compatibility !== undefined &&
     compatibility.status !== "supported" &&
@@ -990,13 +996,13 @@ export function ProviderInstanceCard({
       <div
         data-slot="settings-row"
         className={cn(
-          "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
+          "group relative flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
           selected ? "bg-row-selected" : "hover:bg-row-hover",
         )}
       >
         <div
           className={cn(
-            "pointer-events-none relative flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity",
+            "pointer-events-none flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity",
             !enabled && !selected && "opacity-60 group-hover:opacity-100",
           )}
         >
@@ -1041,7 +1047,7 @@ export function ProviderInstanceCard({
             </span>
           </span>
         </div>
-        <span className="flex h-5 shrink-0 items-center gap-1">
+        <span className="pointer-events-none relative flex h-5 shrink-0 items-center gap-1 *:pointer-events-auto">
           {projectOverride?.value !== undefined ? (
             <span className="flex items-center">
               <ProjectOverrideInheritance
@@ -1110,6 +1116,11 @@ export function ProviderInstanceCard({
           {editorStatusNode}
         </div>
       </ProviderStatusDiagnostic>
+      {restartNotice ? (
+        <p aria-live="polite" className="text-xs leading-snug [overflow-wrap:anywhere]">
+          {restartNotice}
+        </p>
+      ) : null}
       {urlAuthAction && onAcceptUrlAuth ? (
         <div className="grid max-w-xl gap-1.5 pt-1 text-xs">
           <p>{urlAuthAction.message}</p>

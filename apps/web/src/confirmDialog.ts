@@ -5,6 +5,7 @@ type ConfirmDialogContent = {
   readonly variant: ConfirmDialogVariant;
   readonly confirmLabel: string | undefined;
   readonly title: string | undefined;
+  readonly initialFocus: ConfirmDialogOptions["initialFocus"];
 };
 
 export type ConfirmDialogState =
@@ -28,6 +29,7 @@ function contentOf(source: ConfirmDialogContent): ConfirmDialogContent {
     variant: source.variant,
     confirmLabel: source.confirmLabel,
     title: source.title,
+    initialFocus: source.initialFocus,
   };
 }
 
@@ -77,6 +79,7 @@ export function requestConfirmDialog(
       variant: options?.variant ?? "default",
       confirmLabel: options?.confirmLabel,
       title: options?.title,
+      initialFocus: options?.initialFocus,
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {

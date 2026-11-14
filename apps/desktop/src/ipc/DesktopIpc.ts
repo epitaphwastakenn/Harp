@@ -1,16 +1,23 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import type * as Electron from "electron";
+
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
 
 export interface DesktopIpcInvokeEvent {
   readonly sender: { readonly id: number };
+  readonly senderFrame?: unknown;
 }
 
-export interface DesktopIpcSyncEvent {
+export interface DesktopIpcSyncEvent extends DesktopIpcInvokeEvent {
   returnValue: unknown;
 }
+
+export type DesktopIpcSenderGuard = (event: DesktopIpcInvokeEvent) => Effect.Effect<boolean>;
 
 export type DesktopIpcHandleListener = (
   event: DesktopIpcInvokeEvent,
@@ -52,6 +59,15 @@ export class DesktopIpcUnregistrationError extends Schema.TaggedError<DesktopIpc
   }
 }
 
+export class DesktopIpcUntrustedSenderError extends Schema.TaggedError<DesktopIpcUntrustedSenderError>()(
+  "DesktopIpcUntrustedSenderError",
+  { channel: Schema.String },
+) {
+  override get message(): string {
+    return `Rejected ${this.channel} from a sender that is not the app window.`;
+  }
+}
+
 export const DesktopIpcError = Schema.Union([
   DesktopIpcRegistrationError,
   DesktopIpcUnregistrationError,
@@ -80,7 +96,11 @@ export class DesktopIpc extends Context.Service<
   }
 >()("@t3tools/desktop/ipc/DesktopIpc") {}
 
-export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
+// ipcMain is shared by every webContents, including preview guests that load arbitrary pages.
+export const make = (
+  ipcMain: DesktopIpcMain,
+  isTrustedSender: DesktopIpcSenderGuard,
+): DesktopIpc["Service"] =>
   DesktopIpc.of({
     handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
       channel,
@@ -98,6 +118,9 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
               runPromise(
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });
+                  if (!(yield* isTrustedSender(event))) {
+                    return yield* new DesktopIpcUntrustedSenderError({ channel });
+                  }
                   return yield* handler(raw, event);
                 }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
               ),
@@ -129,7 +152,16 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
             ipcMain.removeAllListeners(channel);
             // Renderers call these on hot paths and block on each one; a span per call floods the trace file.
             ipcMain.on(channel, (event) => {
-              event.returnValue = runSync(handler().pipe(Effect.annotateLogs({ channel })));
+              event.returnValue = runSync(
+                Effect.gen(function* () {
+                  // Throwing here would surface as an uncaught main-process exception.
+                  if (!(yield* isTrustedSender(event))) {
+                    yield* Effect.logWarning("Rejected sync IPC from an untrusted sender.");
+                    return undefined;
+                  }
+                  return yield* handler();
+                }).pipe(Effect.annotateLogs({ channel })),
+              );
             });
           },
           catch: (cause) =>
@@ -145,7 +177,33 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
     }),
   });
 
-export const layer = (ipcMain: DesktopIpcMain) => Layer.succeed(DesktopIpc, make(ipcMain));
+export const layer = (ipcMain: DesktopIpcMain) =>
+  Layer.effect(
+    DesktopIpc,
+    Effect.gen(function* () {
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const isRendererOf = (
+        window: Option.Option<Electron.BrowserWindow>,
+        event: DesktopIpcInvokeEvent,
+      ) =>
+        Option.isSome(window) &&
+        window.value.webContents.id === event.sender.id &&
+        window.value.webContents.mainFrame === event.senderFrame;
+      // The main window's page can load while it is still held for a starting backend.
+      return make(ipcMain, (event) =>
+        Effect.gen(function* () {
+          if (isRendererOf(yield* electronWindow.main, event)) return true;
+          return isRendererOf(yield* electronWindow.heldMain, event);
+        }),
+      );
+    }),
+  );
+
+export const layerTest = (ipcMain: DesktopIpcMain) =>
+  Layer.succeed(
+    DesktopIpc,
+    make(ipcMain, () => Effect.succeed(true)),
+  );
 
 export interface DesktopIpcMethodRegistration<
   Payload,

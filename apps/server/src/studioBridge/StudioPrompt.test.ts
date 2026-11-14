@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -147,7 +148,7 @@ const layerFor = (harness: Harness) => {
     Layer.provide(Layer.mergeAll(threads, projects, roblox, ServerSettings.layerTest())),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-studio-prompt-" })),
     Layer.provideMerge(DocumentText.layer),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 };
 

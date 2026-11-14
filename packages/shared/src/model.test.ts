@@ -18,6 +18,7 @@ import {
   modelSelectionsEqual,
   withoutPromptInjectedOptions,
   withUltracodeToggle,
+  withImplicitFastModeDefault,
 } from "./model.ts";
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
@@ -124,6 +125,32 @@ describe("descriptor helpers", () => {
         { id: "fastMode", value: true },
       ]),
     ).toEqual([{ id: "fastMode", value: true }]);
+  });
+
+  it("dispatches an old Ultracode effort as Extra High with the Ultracode toggle", () => {
+    const legacy = [{ id: "effort", value: "ultracode" }];
+    const descriptors = getProviderOptionDescriptors({
+      caps: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "high", label: "High", isDefault: true },
+              { id: "xhigh", label: "Extra High" },
+            ],
+          },
+          { id: "ultracode", label: "Ultracode", type: "boolean" },
+        ],
+      }),
+      selections: legacy,
+    });
+
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, legacy)).toEqual([
+      { id: "effort", value: "xhigh" },
+      { id: "ultracode", value: true },
+    ]);
   });
 
   it("compares complete model selections independent of option ordering", () => {
@@ -451,5 +478,21 @@ describe("modelHasVision", () => {
     ).toBe(true);
     expect(modelHasVision({ driverKind: "opencode" })).toBe(false);
     expect(modelHasVision({ driverKind: "grok", capabilities: null })).toBe(false);
+  });
+});
+
+describe("withImplicitFastModeDefault", () => {
+  // regression: #2981 a remembered Fast mode choice must survive the implicit default on new chats
+  it("injects fastMode false only when the model exposes fastMode and no selection exists", () => {
+    const caps = createModelCapabilities({
+      optionDescriptors: [{ id: "fastMode", label: "Fast", type: "boolean", currentValue: true }],
+    });
+
+    expect(withImplicitFastModeDefault(caps, undefined)).toEqual([
+      { id: "fastMode", value: false },
+    ]);
+    expect(withImplicitFastModeDefault(caps, [{ id: "fastMode", value: true }])).toEqual([
+      { id: "fastMode", value: true },
+    ]);
   });
 });

@@ -5,6 +5,7 @@ import * as NodeNet from "node:net";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 // The agent's bundled Python has no IPv4 fallback race, so broken IPv6 stalls each Google call
@@ -170,6 +171,15 @@ export const startConnectProxy = (timeouts?: DialTimeouts) =>
     });
   });
 
+class ConnectProxyStartError extends Schema.TaggedError<ConnectProxyStartError>()(
+  "ConnectProxyStartError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not start the Antigravity network proxy.";
+  }
+}
+
 /**
  * One proxy per server, shared by every Antigravity runtime. It starts on the first spawn and
  * starts again before the next spawn if it stopped listening.
@@ -186,7 +196,10 @@ export const makeAntigravityConnectProxy = Effect.fn("makeAntigravityConnectProx
     if (current?.server.listening === true) return current.url;
     current?.close();
     current = undefined;
-    const started = yield* Effect.tryPromise(start).pipe(Effect.option);
+    const started = yield* Effect.tryPromise({
+      try: start,
+      catch: (cause) => new ConnectProxyStartError({ cause }),
+    }).pipe(Effect.option);
     if (started._tag === "None") {
       yield* Effect.logWarning("Could not start the Antigravity network proxy.");
       return undefined;

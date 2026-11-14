@@ -1,3 +1,5 @@
+import { deriveProviderInstanceConfigMap } from "./provider/ProviderInstanceRegistryHydration.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -6,6 +8,7 @@ import {
   ProjectId,
   ProjectScript,
   ProviderDriverKind,
+  type ProviderInstanceEnvironment,
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
   SecretProviderId,
@@ -28,6 +31,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SchemaAST from "effect/SchemaAST";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { sourceControlHostSecretName } from "./sourceControl/sourceControlHostSecrets.ts";
@@ -35,6 +39,7 @@ import * as ServerConfig from "./config.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as ServerSettingsModule from "./serverSettings.ts";
+import { SECRET_REDACTED } from "./settingsSecrets.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
 
@@ -114,7 +119,37 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
     `;
   });
 
-it.layer(NodeServices.layer)("server settings", (it) => {
+/** Paths of fields typed `SettingsSecretValue` that clients decode with the settings schema itself. */
+function strictSecretReferencePaths(
+  ast: SchemaAST.AST,
+  path = "",
+  seen = new Set<SchemaAST.AST>(),
+): ReadonlyArray<string> {
+  if (seen.has(ast)) return [];
+  seen.add(ast);
+  const walk = (type: SchemaAST.AST, at: string): ReadonlyArray<string> =>
+    type.context?.annotations?.settingsSecretReference === true
+      ? [at]
+      : strictSecretReferencePaths(type, `${at}.`, seen);
+  if (SchemaAST.isObjects(ast)) {
+    return [
+      ...ast.propertySignatures.flatMap((property) =>
+        walk(property.type, `${path}${String(property.name)}`),
+      ),
+      ...ast.indexSignatures.flatMap((signature) => walk(signature.type, `${path}*`)),
+    ];
+  }
+  if (SchemaAST.isArrays(ast)) {
+    return [...ast.elements, ...ast.rest].flatMap((element) => walk(element, `${path}[]`));
+  }
+  if (SchemaAST.isUnion(ast)) {
+    return ast.types.flatMap((member) => strictSecretReferencePaths(member, path, seen));
+  }
+  if (SchemaAST.isSuspend(ast)) return strictSecretReferencePaths(ast.thunk(), path, seen);
+  return [];
+}
+
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
   it.effect("serializes concurrent model preference edits without cancelling duplicate adds", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;
@@ -290,7 +325,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       });
       assert.deepStrictEqual<unknown>(
-        ServerSettingsModule.redactServerSettingsForClient(settings).secretProviders,
+        ServerSettingsModule.redactServerSettingsForClient(settings, { secretReferences: true })
+          .secretProviders,
         {
           personal: { kind: "one_password", label: "Personal", config: { account: "my" } },
           vault: { kind: "openbao", label: "Vault" },
@@ -517,6 +553,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           (yield* serverSettings.getSettings).providerInstances[instanceId]?.displayName ?? "",
         ),
       );
+
+      // An inherited Object.prototype member is not an instance that already exists.
+      for (const name of ["constructor", "toString", "valueOf"]) {
+        const prototypeNamedId = ProviderInstanceId.make(name);
+        const created = yield* serverSettings.updateProviderInstance({
+          operation: "create",
+          instanceId: prototypeNamedId,
+          instance: { driver: ProviderDriverKind.make("codex") },
+        });
+        assert.isTrue(Object.hasOwn(created.providerInstances, prototypeNamedId));
+      }
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -585,7 +632,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const materialized = yield* serverSettings.updateSettings({
         mcpServers: { [serverId]: server },
       });
-      const clientSettings = ServerSettingsModule.redactServerSettingsForClient(materialized);
+      const clientSettings = ServerSettingsModule.redactServerSettingsForClient(materialized, {
+        secretReferences: true,
+      });
       assert.deepEqual(clientSettings.mcpServers[serverId]?.env[0], {
         name: "TOKEN",
         value: "",
@@ -1397,6 +1446,115 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect.each(
+    [
+      { label: "redacted then empty sensitive", duplicate: { value: "", sensitive: true } },
+      {
+        label: "empty sensitive then redacted",
+        duplicate: { value: "", sensitive: true },
+        redactedLast: true,
+      },
+      { label: "redacted then plain", duplicate: { value: "plain-foo", sensitive: false } },
+      {
+        label: "plain then redacted",
+        duplicate: { value: "plain-foo", sensitive: false },
+        redactedLast: true,
+      },
+      {
+        label: "secret reference then redacted",
+        duplicate: {
+          value: { provider: SecretProviderId.make("personal"), reference: "op://Private/FOO" },
+          sensitive: true,
+        },
+        redactedLast: true,
+      },
+      {
+        label: "inline seed, redacted then empty sensitive",
+        duplicate: { value: "", sensitive: true },
+        inline: '[{"name":"FOO","value":"stored-foo","sensitive":true}]',
+      },
+      {
+        label: "inline seed with an empty duplicate, redacted then empty sensitive",
+        duplicate: { value: "", sensitive: true },
+        inline:
+          '[{"name":"FOO","value":"stored-foo","sensitive":true},{"name":"FOO","value":"","sensitive":true}]',
+      },
+      {
+        label: "inline seed with an empty duplicate, new value then redacted",
+        duplicate: { value: "new-foo", sensitive: true },
+        redactedLast: true,
+        inline:
+          '[{"name":"FOO","value":"stored-foo","sensitive":true},{"name":"FOO","value":"","sensitive":true}]',
+        expected: "new-foo",
+      },
+    ].map((testCase) => [testCase.label, testCase] as const),
+  )(
+    "keeps a stored secret a redacted row still claims when a duplicate name is saved (%s)",
+    ([, { duplicate, redactedLast, inline, expected = "stored-foo" }]) =>
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        const instanceId = ProviderInstanceId.make("codex_personal");
+        const save = (environment: ProviderInstanceEnvironment) =>
+          service.updateSettings({
+            providerInstances: {
+              [instanceId]: { driver: ProviderDriverKind.make("codex"), environment, config: {} },
+            },
+          });
+        if (inline) {
+          const config = yield* ServerConfig.ServerConfig;
+          const fs = yield* FileSystem.FileSystem;
+          yield* fs.writeFileString(
+            config.settingsPath,
+            `{"providerInstances":{"codex_personal":{"driver":"codex","environment":${inline},"config":{}}}}`,
+          );
+          yield* service.getSettings;
+        } else {
+          yield* save([{ name: "FOO", value: "stored-foo", sensitive: true }]);
+        }
+        const redacted = { name: "FOO", value: "", sensitive: true, valueRedacted: true };
+        const copy = { name: "FOO", ...duplicate };
+        yield* save(redactedLast ? [copy, redacted] : [redacted, copy]);
+
+        const reloaded = yield* Effect.gen(function* () {
+          const fresh = yield* ServerSettingsModule.ServerSettingsService;
+          return yield* fresh.getSettings;
+        }).pipe(
+          Effect.provide(
+            Layer.fresh(ServerSettingsModule.layer).pipe(
+              Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
+            ),
+          ),
+        );
+        assert.equal(
+          reloaded.providerInstances[instanceId]?.environment?.[redactedLast ? 1 : 0]?.value,
+          expected,
+        );
+      }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("removes a kept secret once every row with its name is deleted", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const instanceId = ProviderInstanceId.make("codex_personal");
+      const save = (environment: ProviderInstanceEnvironment) =>
+        service.updateSettings({
+          providerInstances: {
+            [instanceId]: { driver: ProviderDriverKind.make("codex"), environment, config: {} },
+          },
+        });
+      yield* save([{ name: "FOO", value: "stored-foo", sensitive: true }]);
+      yield* save([
+        { name: "FOO", value: "", sensitive: true, valueRedacted: true },
+        { name: "FOO", value: "plain-foo", sensitive: false },
+      ]);
+      const secretName = "provider-env-Y29kZXhfcGVyc29uYWw-Rk9P";
+      assert.isTrue(Option.isSome(yield* store.get(secretName)));
+      yield* save([]);
+      assert.isTrue(Option.isNone(yield* store.get(secretName)));
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect.each([true, false])(
     "preserves duplicate secret operation order (sensitive last: %s)",
     (sensitiveLast) =>
@@ -1461,7 +1619,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
         });
         const values = ["config-secret", "env-secret", "github-secret", "quota-secret"];
-        const client = ServerSettingsModule.redactServerSettingsForClient(saved);
+        const client = ServerSettingsModule.redactServerSettingsForClient(saved, {
+          secretReferences: true,
+        });
         const disk = yield* fs.readFileString(config.settingsPath);
         for (const value of values) {
           assert.include(JSON.stringify(saved), value);
@@ -1494,7 +1654,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             instance: { ...client.providerInstances[instanceId]!, config: { apiKey } },
           });
           assert.propertyVal(changed.providerInstances[instanceId]?.config, "apiKey", apiKey);
-          const redacted = ServerSettingsModule.redactServerSettingsForClient(changed);
+          const redacted = ServerSettingsModule.redactServerSettingsForClient(changed, {
+            secretReferences: true,
+          });
           assert.propertyVal(
             redacted.providerInstances[instanceId]?.config,
             "apiKey",
@@ -1537,9 +1699,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         });
         assert.isTrue(Option.isNone(yield* store.get(secretNames[1]!)));
         assert.deepEqual(
-          ServerSettingsModule.redactServerSettingsForClient(referenced).providerInstances[
-            instanceId
-          ]?.environment,
+          ServerSettingsModule.redactServerSettingsForClient(referenced, { secretReferences: true })
+            .providerInstances[instanceId]?.environment,
           [{ name: "API_TOKEN", value: secret, sensitive: true }],
         );
         yield* service.updateSettings({
@@ -1584,7 +1745,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         "serverPassword",
         "legacy-password",
       );
-      const client = ServerSettingsModule.redactServerSettingsForClient(saved);
+      const client = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+      });
       for (const value of ["legacy-api-key", "legacy-password"]) {
         assert.notInclude(yield* fs.readFileString(config.settingsPath), value);
         assert.notInclude(JSON.stringify(client), value);
@@ -1626,8 +1789,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         for (const secret of ["ghp_dotcom", "ghp_ghe"]) assert.notInclude(raw, secret);
         assert.include(raw, "me@example.com");
 
-        const forClient =
-          ServerSettingsModule.redactServerSettingsForClient(saved).sourceControlHosts;
+        const forClient = ServerSettingsModule.redactServerSettingsForClient(saved, {
+          secretReferences: true,
+        }).sourceControlHosts;
         assert.deepEqual(forClient.github?.hosts, { "github.com": { account: "me@example.com" } });
         assert.notInclude(JSON.stringify(forClient.github?.tokens), "ghp_dotcom");
         assert.isAbove(JSON.stringify(forClient.github?.tokens).length, 0);
@@ -1679,12 +1843,177 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         });
         assert.isTrue(Option.isNone(yield* stored("github", "tokens", "github.com")));
         assert.isTrue(Option.isSome(yield* stored("github", "tokens", "ghe.acme.test")));
-        const redacted =
-          ServerSettingsModule.redactServerSettingsForClient(referenced).sourceControlHosts;
+        const redacted = ServerSettingsModule.redactServerSettingsForClient(referenced, {
+          secretReferences: true,
+        }).sourceControlHosts;
         const tokens = redacted.github?.tokens as Record<string, unknown>;
         assert.deepEqual(tokens["github.com"], gitHubReference);
         assert.notEqual(tokens["ghe.acme.test"], "ghp_ghe");
+
+        // A client that cannot decode references sees saved secrets and can send them back.
+        const usageReference = {
+          provider: SecretProviderId.make("personal"),
+          reference: "op://Private/Hub/key",
+        };
+        const antigravityReference = {
+          provider: SecretProviderId.make("personal"),
+          reference: "op://Private/Gemini/key",
+        };
+        const openCodeReference = {
+          provider: SecretProviderId.make("personal"),
+          reference: "op://Private/OpenCode/password",
+        };
+        const antigravity = ProviderInstanceId.make("antigravity");
+        const openCode = ProviderInstanceId.make("opencode");
+        const hub = UsageLimitSourceId.make("hub");
+        const router = ProviderInstanceId.make("openrouter");
+        const withUsage = yield* serverSettings.updateSettings({
+          cloudSpeechCredentials: { openai: usageReference, xai: "literal-fixture" },
+          textGenerators: {
+            [router]: {
+              kind: "openaiCompatible",
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: usageReference,
+              enabled: true,
+            },
+          },
+          usageLimitSources: {
+            [hub]: {
+              kind: "cliproxy",
+              url: "https://hub.test",
+              managementKey: usageReference,
+              enabled: true,
+            },
+          },
+          providerInstances: {
+            [antigravity]: {
+              driver: ProviderDriverKind.make("antigravity"),
+              config: { authMethod: "gemini-api-key", apiKey: antigravityReference },
+            },
+            [openCode]: {
+              driver: ProviderDriverKind.make("opencode"),
+              config: { serverUrl: "http://127.0.0.1:4096", serverPassword: openCodeReference },
+            },
+          },
+        });
+        const legacy = ServerSettingsModule.redactServerSettingsForClient(withUsage, {
+          secretReferences: false,
+        });
+        assert.notInclude(JSON.stringify(legacy), "op://");
+        assert.deepEqual(legacy.cloudSpeechCredentials, {
+          openai: SECRET_REDACTED,
+          xai: SECRET_REDACTED,
+          openrouter: "",
+        });
+        assert.equal(legacy.usageLimitSources[hub]?.managementKey, SECRET_REDACTED);
+        assert.equal(legacy.textGenerators[router]?.apiKey, SECRET_REDACTED);
+        const configOf = (settings: ServerSettings, id: ProviderInstanceId) =>
+          settings.providerInstances[id]?.config as Record<string, unknown> | undefined;
+        assert.equal(configOf(legacy, antigravity)?.apiKey, SECRET_REDACTED);
+        assert.equal(configOf(legacy, openCode)?.serverPassword, SECRET_REDACTED);
+        const echoed = yield* serverSettings.updateSettings({
+          cloudSpeechCredentials: legacy.cloudSpeechCredentials,
+          sourceControlHosts: legacy.sourceControlHosts,
+          usageLimitSources: legacy.usageLimitSources,
+          textGenerators: legacy.textGenerators,
+          providerInstances: legacy.providerInstances,
+        });
+        assert.deepEqual(echoed.sourceControlHosts.github?.tokens, {
+          "github.com": gitHubReference,
+          "ghe.acme.test": "ghp_ghe",
+        });
+        assert.deepEqual(echoed.usageLimitSources[hub]?.managementKey, usageReference);
+        assert.deepEqual(echoed.textGenerators[router]?.apiKey, usageReference);
+        assert.deepEqual(echoed.cloudSpeechCredentials, {
+          openai: usageReference,
+          xai: "literal-fixture",
+          openrouter: "",
+        });
+        assert.deepEqual(configOf(echoed, antigravity)?.apiKey, antigravityReference);
+        assert.deepEqual(configOf(echoed, openCode)?.serverPassword, openCodeReference);
+        assert.isTrue(Option.isSome(yield* stored("github", "tokens", "ghe.acme.test")));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("removing a secret provider unsets every field that read from it", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const personal = (reference: string) => ({
+        provider: SecretProviderId.make("personal"),
+        reference: `op://Private/${reference}`,
+      });
+      const work = { provider: SecretProviderId.make("work"), reference: "op://Work/token" };
+      const instanceId = ProviderInstanceId.make("antigravity_refs");
+      const hub = UsageLimitSourceId.make("hub");
+      yield* decodeServerSettingsPatch({
+        secretProviders: {
+          personal: { kind: "one_password", label: "Personal", config: { account: "my" } },
+          work: { kind: "one_password", label: "Work", config: { account: "work" } },
+        },
+      }).pipe(Effect.flatMap(service.updateSettings));
+      yield* service.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("antigravity"),
+            environment: [
+              { name: "API_TOKEN", value: personal("Antigravity/env"), sensitive: true },
+              { name: "WORK_TOKEN", value: work, sensitive: true },
+              { name: "PLAIN", value: "kept", sensitive: false },
+            ],
+          },
+        },
+        sourceControlHosts: {
+          github: { tokens: { "github.com": personal("GitHub/token"), "ghe.acme.test": work } },
+        },
+        cloudSpeechCredentials: { openai: personal("Voice/key"), xai: work },
+        usageLimitSources: {
+          [hub]: {
+            kind: "cliproxy",
+            url: "https://hub.test",
+            managementKey: personal("Hub/key"),
+            enabled: true,
+          },
+        },
+      });
+
+      // An older client's save echoes a reference it cannot decode as the redacted marker.
+      const removed = yield* service.updateSettings({
+        secretProviders: { [SecretProviderId.make("personal")]: null },
+        usageLimitSources: {
+          [hub]: {
+            kind: "cliproxy",
+            url: "https://hub.test",
+            managementKey: SECRET_REDACTED,
+            enabled: true,
+          },
+        },
+      });
+      assert.notInclude(JSON.stringify(removed), "op://Private");
+      assert.deepEqual(removed.providerInstances[instanceId]?.environment, [
+        { name: "WORK_TOKEN", value: work, sensitive: true },
+        { name: "PLAIN", value: "kept", sensitive: false },
+      ]);
+      assert.deepEqual(removed.sourceControlHosts.github?.tokens, {
+        "github.com": "",
+        "ghe.acme.test": work,
+      });
+      assert.equal(removed.usageLimitSources[hub]?.managementKey, "");
+      assert.deepEqual(removed.cloudSpeechCredentials, { openai: "", xai: work, openrouter: "" });
+      assert.deepEqual(Object.keys(removed.secretProviders), ["work"]);
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("knows every strictly decoded field that can hold a secret reference", () =>
+    Effect.sync(() => {
+      // Shipped clients decode these as strings. Each must be covered by the older-client case above.
+      assert.deepEqual(strictSecretReferencePaths(ServerSettings.ast), [
+        "cloudSpeechCredentials.openai",
+        "cloudSpeechCredentials.xai",
+        "cloudSpeechCredentials.openrouter",
+        "usageLimitSources.*.managementKey",
+        "textGenerators.*.apiKey",
+      ]);
+    }),
   );
 
   it.effect("keeps the retired keys for another load when a token cannot be copied", () => {
@@ -1808,7 +2137,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         assert.deepEqual(loaded.sourceControlHosts.github?.hosts, {
           "github.com": { account: "work" },
         });
-        const forClient = ServerSettingsModule.redactServerSettingsForClient(loaded);
+        const forClient = ServerSettingsModule.redactServerSettingsForClient(loaded, {
+          secretReferences: true,
+        });
         assert.deepEqual(forClient.sourceControlHosts.gitlab, loaded.sourceControlHosts.gitlab);
         const updated = yield* serverSettings.updateSettings({
           sourceControlHosts: { github: { tokens: {} } },
@@ -1838,6 +2169,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
 
       const environment = yield* resolveProviderInstanceTerminalEnvironment({
+        deriveProviderInstanceConfigMap,
         serverSettings,
         path,
         rawProviderInstanceId: instanceId,

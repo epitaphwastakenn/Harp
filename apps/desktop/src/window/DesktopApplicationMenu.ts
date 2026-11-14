@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -64,38 +64,6 @@ const runMainContentsCommand = Effect.fn("desktop.menu.runMainContentsCommand")(
 ): Effect.fn.Return<void, never, DesktopWindow.DesktopWindow> {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   yield* desktopWindow.runMainContentsCommand(command);
-});
-
-// Off macOS the main window is the whole app: closing it quits and stops
-// running agents. Ctrl+W is pressed in runs to close terminals and tabs, so the
-// press that lands on an empty main window asks first; Ctrl+Q stays the exit.
-const closeWindowFromShortcut = Effect.fn("desktop.menu.closeWindowFromShortcut")(function* (
-  window: Electron.BaseWindow,
-  displayName: string,
-): Effect.fn.Return<
-  void,
-  ElectronDialog.ElectronDialogShowMessageBoxError,
-  ElectronDialog.ElectronDialog | ElectronWindow.ElectronWindow
-> {
-  const main = yield* (yield* ElectronWindow.ElectronWindow).main;
-  if (Option.isSome(main) && main.value === window) {
-    const electronDialog = yield* ElectronDialog.ElectronDialog;
-    const { response } = yield* electronDialog.showMessageBox(
-      {
-        type: "question",
-        title: `Close ${displayName}?`,
-        message: `Close ${displayName}?`,
-        detail: `This is the last window. Closing it quits ${displayName} and stops any running agents.`,
-        buttons: ["Close", "Cancel"],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-      },
-      main.value,
-    );
-    if (response !== 0) return;
-  }
-  if (!window.isDestroyed()) window.close();
 });
 
 const checkForUpdatesFromMenu = Effect.gen(function* () {
@@ -191,13 +159,6 @@ export const make = Effect.gen(function* () {
     const mainContentsClick = (command: DesktopWindow.MainWindowContentsCommand) => () => {
       runMenuEffect(command, runMainContentsCommand(command));
     };
-    const closeWindowClick = (
-      _item: Electron.MenuItem,
-      window: Electron.BaseWindow | undefined,
-    ) => {
-      if (!window) return;
-      runMenuEffect("close-window", closeWindowFromShortcut(window, environment.displayName));
-    };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -241,6 +202,17 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
+          {
+            label: "Close Developer Tools",
+            accelerator: "CmdOrCtrl+W",
+            visible: false,
+            click: () => {
+              Electron.webContents
+                .getAllWebContents()
+                .find((contents) => !contents.isDestroyed() && contents.isDevToolsFocused())
+                ?.closeDevTools();
+            },
+          },
           // Cmd/Ctrl+W belongs to the renderer's tab close; it must never close the window.
           environment.platform === "darwin"
             ? { label: "Close Window", click: (_item, window) => window?.close() }
@@ -333,15 +305,17 @@ export const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
-      environment.platform === "darwin"
-        ? { role: "windowMenu" }
-        : {
-            label: "Window",
-            submenu: [
-              { role: "minimize" },
-              { label: "Close Window", accelerator: "CmdOrCtrl+W", click: closeWindowClick },
-            ],
-          },
+      {
+        // Electron's default Window submenu adds a Ctrl+W close role off macOS.
+        role: "windowMenu",
+        submenu: [
+          { role: "minimize" },
+          { role: "zoom" },
+          ...(environment.platform === "darwin"
+            ? [{ type: "separator" as const }, { role: "front" as const }]
+            : []),
+        ],
+      },
       {
         role: "help",
         submenu: [

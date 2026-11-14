@@ -86,7 +86,8 @@ function PopoverPopup({
         collisionPadding={variant === "panel" ? 0 : undefined}
         className={cn(
           "h-(--positioner-height) max-h-(--available-height) w-(--positioner-width) max-w-(--available-width)",
-          followContentSize
+          // Kept-mounted positioners first paint at the window origin, so a transform transition slides them in from there.
+          followContentSize || keepMounted
             ? "transition-none"
             : "transition-transform data-instant:transition-none",
           variant === "panel"
@@ -102,6 +103,8 @@ function PopoverPopup({
           className={cn(
             "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none transition-[width,height,scale,opacity] has-data-[slot=calendar]:rounded-xl data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
             variant !== "panel" && "dropdown-glass",
+            // Electron drag hit-testing ignores z-index; popups over a drag region would swallow hover.
+            "[-webkit-app-region:no-drag]",
             tooltipStyle && "w-fit text-balance rounded-md text-xs",
             width !== "auto" && ["max-w-[calc(100vw-2rem)]", popoverPopupWidthClassName[width]],
             variant === "panel" &&

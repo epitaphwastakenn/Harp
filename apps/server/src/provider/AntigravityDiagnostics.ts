@@ -32,7 +32,6 @@ import {
   resolveHost,
   type TlsResult,
 } from "./antigravityNetworkChecks.ts";
-import { resolveAntigravityReleaseAsset } from "./antigravityRelease.ts";
 import { systemCaCertificates } from "./antigravityTrust.ts";
 
 const AGENT_TEST_TIMEOUT_MS = 150_000;
@@ -55,7 +54,7 @@ const VPN_INTERFACE =
 
 export interface AntigravityInstallationInfo {
   readonly executablePath: string;
-  readonly harnessPath: string;
+  readonly harnessPath: string | null;
   readonly version: string | null;
   readonly managedVersionDirectory: string | null;
   readonly unpackedDirectory?: string;
@@ -362,7 +361,6 @@ export const runAntigravityDiagnostics = Effect.fn("runAntigravityDiagnostics")(
     `System: ${NodeOS.type()} ${NodeOS.release()} ${arch}, Node ${process.versions.node}`,
   ];
 
-  const release = resolveAntigravityReleaseAsset(input.platform, arch);
   if ("error" in input.installation) {
     report.push(`Antigravity runtime: NOT AVAILABLE (${input.installation.error})`);
   } else {
@@ -377,26 +375,19 @@ export const runAntigravityDiagnostics = Effect.fn("runAntigravityDiagnostics")(
         ? "  launch: unpacks itself into the temp folder on every start"
         : `  launch: unpacked once at ${redact(installation.unpackedDirectory)}`,
     );
-    for (const [label, file, expected] of [
-      ["agent", installation.executablePath, release?.executable.bytes],
-      ["harness", installation.harnessPath, release?.harness.bytes],
+    for (const [label, file] of [
+      ["agent", installation.executablePath],
+      ["harness", installation.harnessPath],
     ] as const) {
+      if (file === null) continue;
       const summary = yield* Effect.promise(() => fileSummary(file));
       report.push(
         "error" in summary
           ? `  ${label}: MISSING or unreadable (${redact(summary.error)})`
-          : `  ${label}: ${summary.bytes} bytes${
-              expected !== undefined && installation.managedVersionDirectory !== null
-                ? summary.bytes === expected
-                  ? " (matches the pinned release)"
-                  : ` (EXPECTED ${expected}: the install is damaged; remove it and install again)`
-                : ""
-            }, SHA-256 ${summary.sha256}`,
+          : `  ${label}: ${summary.bytes} bytes, SHA-256 ${summary.sha256}`,
       );
     }
   }
-  if (release !== null)
-    report.push(`Pinned release: ${release.version}, archive SHA-256 ${release.sha256}`);
 
   report.push("", "== Antigravity profile ==");
   const acpDirectory = path.join(input.profileDirectory, "antigravity-acp");

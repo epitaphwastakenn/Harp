@@ -64,14 +64,11 @@ function setup(overrides: Partial<HandlerInput> & { readonly menuOpen?: boolean 
 
 describe("accepting a prompt suggestion with Tab", () => {
   it("fills the composer with the suggestion", () => {
-    const { promptRef, setComposerDraftPrompt, press } = setup();
+    const applyPromptReplacement = vi.fn(() => true);
+    const { press } = setup({ applyPromptReplacement });
 
     expect(press()).toBe(true);
-    expect(promptRef.current).toBe("run the tests");
-    expect(setComposerDraftPrompt).toHaveBeenCalledWith(
-      { environmentId: "env", threadId: "thread" },
-      "run the tests",
-    );
+    expect(applyPromptReplacement).toHaveBeenCalledWith(0, 0, "run the tests");
   });
 
   it("leaves Tab alone when nothing is suggested", () => {

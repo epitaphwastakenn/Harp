@@ -13,6 +13,7 @@ import { afterEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../service/bootService.ts";
+import * as ServerConfig from "../config.ts";
 import {
   offerServiceDuringOnboarding,
   recoverServiceOnboardingOffer,
@@ -37,6 +38,7 @@ function makeTestService(
 ) {
   const installOptions: Array<Parameters<BootService.BootService["Service"]["install"]>[0]> = [];
   const restarts: Array<true> = [];
+  const uninstalls: Array<true> = [];
   const service = BootService.BootService.of({
     status: Effect.succeed(serviceStatus),
     withStopped: (operation) => operation,
@@ -54,19 +56,42 @@ function makeTestService(
           logPath: serviceStatus.logPath,
         };
       }),
-    uninstall: Effect.succeed(false),
+    uninstall: Effect.sync(() => {
+      uninstalls.push(true);
+      return serviceStatus.installed;
+    }),
   });
-  return { service, installOptions, restarts };
+  return { service, installOptions, restarts, uninstalls };
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands", (it) => {
-  it.effect.each(["install", "update"] as const)(
-    "%s refuses a downgrade before changing the service",
-    (command) =>
+  it.effect.each(
+    (["install", "update"] as const).flatMap((command) => [
+      {
+        command,
+        label: "a downgrade",
+        status: newerServiceStatus,
+        error: {
+          _tag: "BootServiceDowngradeRefusedError",
+          installedVersion: "999.0.0",
+          targetVersion: packageJson.version,
+        },
+      },
+      // This home's newer state must not ask for --allow-downgrade first.
+      {
+        command,
+        label: "another home's service",
+        status: { ...newerServiceStatus, otherBaseDir: "/srv/t3" },
+        error: { _tag: "BootServiceOtherBaseDirError", installedBaseDir: "/srv/t3" },
+      },
+    ]),
+  )(
+    "$command refuses $label before changing the service",
+    ({ command, status: serviceStatus, error: expected }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
-        const { service, installOptions } = makeTestService(newerServiceStatus);
+        const { service, installOptions } = makeTestService(serviceStatus);
         vi.spyOn(BootService, "layer").mockReturnValue(
           Layer.succeed(BootService.BootService, service),
         );
@@ -81,11 +106,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
           Effect.flip,
         );
 
-        expect(error).toMatchObject({
-          _tag: "BootServiceDowngradeRefusedError",
-          installedVersion: "999.0.0",
-          targetVersion: packageJson.version,
-        });
+        expect(error).toMatchObject(expected);
         expect(installOptions).toEqual([]);
       }),
   );
@@ -127,6 +148,50 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
         expect(installOptions).toEqual([]);
       }),
   );
+
+  it.effect.each([
+    { label: "this home's service", otherHome: false, unreadable: false, removed: [true] },
+    { label: "another home's service", otherHome: true, unreadable: false, removed: [] },
+    { label: "an unreadable service", otherHome: false, unreadable: true, removed: [true] },
+  ])("uninstall removes only $label", (input) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      const { service, uninstalls } = makeTestService({
+        ...status,
+        installedBaseDir: input.otherHome ? "/home/me/.t3" : baseDir,
+      });
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(
+          BootService.BootService,
+          input.unreadable
+            ? {
+                ...service,
+                status: Effect.fail(new BootService.BootServiceInstallError({ cause: "EACCES" })),
+              }
+            : service,
+        ),
+      );
+
+      const output = yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+        "uninstall",
+        "--base-dir",
+        baseDir,
+      ]).pipe(
+        Effect.andThen(TestConsole.logLines),
+        Effect.map((lines) => lines.join("\n")),
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            Layer.fresh(TestConsole.layer),
+          ),
+        ),
+      );
+      expect(uninstalls).toEqual(input.removed);
+      expect(output).toContain(input.otherHome ? "--base-dir '/home/me/.t3'" : "Removed");
+    }),
+  );
 });
 
 it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
@@ -135,6 +200,7 @@ it.effect("leaves a newer service unchanged during onboarding without prompting"
     const terminal = Terminal.make({
       columns: Effect.succeed(80),
       rows: Effect.succeed(24),
+      size: Effect.die("Onboarding must not watch the terminal size."),
       readInput: Effect.die("Onboarding must not prompt to replace a newer service."),
       readLine: Effect.die("Onboarding must not prompt to replace a newer service."),
       display: () => Effect.die("Onboarding must not prompt to replace a newer service."),
@@ -143,7 +209,11 @@ it.effect("leaves a newer service unchanged during onboarding without prompting"
     const ready = yield* offerServiceDuringOnboarding.pipe(
       Effect.provideService(BootService.BootService, service),
       Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-service-cli-test-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
     );
 
     expect(ready).toBe("skipped");

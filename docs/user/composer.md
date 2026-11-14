@@ -14,12 +14,19 @@ to keep a large paste editable in the composer instead.
 
 ## Formatting
 
-The composer writes Markdown and shows it styled as you type. Markers such as
-`**` stay in the text and show beside the styled words when your cursor is on
-them. Lines starting with `- `, `1. `, `- [ ] `, `> `, `# ` or `---` become lists,
-task lists, quotes, headings and rules; ` ``` ` followed by Enter opens a code
-block. What you typed is what the agent receives, markers and numbering
-included, and `#1234` without a space still looks up a pull request.
+The composer writes Markdown and shows it styled as you type. When your cursor
+is on styled text, its Markdown shows instead, such as `**bold**`, and the
+markers edit like any other text: delete them to remove the style, or change
+`**` to `*` for italic. The style updates when your cursor leaves. To write
+plain Markdown with no styling, turn off **Settings → Chat → Rich text
+composer**. Lines starting with `- `, `1. `, `- [ ] `, `> `, `# ` or `---`
+become lists, task lists, quotes, headings and rules; ` ``` ` followed by Enter
+opens a code block. What you typed is what the agent receives, markers and
+numbering included, and `#1234` without a space still looks up a pull request.
+
+Some styled text containing or touching literal Markdown characters, such as a
+bold `path\` or `2*3`, keeps its styling without showing markers. Use formatting
+shortcuts or turn off rich text to edit the formatting of those ranges.
 
 Enter sends. In a list or quote, **Shift+Enter** continues it, and Shift+Enter
 on an empty line leaves it; **Tab** nests a list item. In a code block, Enter
@@ -225,19 +232,25 @@ Provider commands must start the message to run. Harp commands such as
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
 
+Send `/clear` on its own, or pick it from the slash menu, to start a fresh session
+in the same thread. Your next message goes to a new provider session that doesn't see the
+earlier messages, and the thread marks where it began with **New session**.
+Earlier messages and diffs stay in the thread. Dismiss the notice above the
+composer to keep the current session instead.
+
 Claude instances can also compact idle threads for you. See
 [compact long conversations](./providers-claude.md#compact-long-conversations).
 
 ## Goals
 
-With Codex and Claude, send `/goal` followed by what "done" means, for example
+With Codex, Claude, and OpenCode 2.2.5 or later, send `/goal` followed by what "done" means, for example
 `/goal all tests in packages/api pass`. The agent keeps working across turns
 until it judges the goal met. The thread shows **Goal** while it works, and a
 row above the composer shows the goal and its progress.
 
 - `/goal` alone shows the current goal. `/goal clear` removes it.
-- Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
-  pauses it.
+- Codex and OpenCode also support `/goal pause` and `/goal resume`. Stopping
+  their goal pauses it. Codex also pauses when its work ends without meeting the goal.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 
@@ -271,6 +284,10 @@ environment must be connected and up to date. The transcript includes the visibl
 saved text context at the time of the drop; later messages and the contents of attached files
 are not copied. The agent can read the saved transcript after the source disconnects. Normal
 file attachment limits apply.
+
+Type `@` and part of a model or provider name, such as `@opus`, to name that model for the
+agent, for example when delegating. It does not change the thread's model. Join words with
+`:`, `/` or `-`, as in `@opus:opencode`.
 
 Images keep their thumbnail shelf above the text and also get a chip at your cursor, so you can
 say exactly which image you mean. Deleting an image chip leaves the image on the shelf; removing

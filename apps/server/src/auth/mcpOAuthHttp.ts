@@ -115,7 +115,7 @@ export const layer = HttpApiBuilder.group(
           const resolved = yield* forwardedAuthorization(oauth, payload);
           if ("redirectTo" in resolved) return resolved;
           const urls = yield* requestUrls;
-          const session = yield* oauth.approvingBrowserSession(request, resolved);
+          const session = yield* oauth.approvingSession(request, resolved);
           yield* noStore;
           return {
             clientName: resolved.client.name,

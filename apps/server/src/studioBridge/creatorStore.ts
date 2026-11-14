@@ -1,5 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off globalDateInEffect:off globalRandomInEffect:off globalTimers:off preferSchemaOverJson:off globalFetchInEffect:off
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+
+const decodeJsonUnknown = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 /**
  * Roblox's public Creator Store endpoints (no key needed). Results are trimmed to what an agent
@@ -65,7 +68,7 @@ const fetchJson = (url: string) =>
           `Creator Store answered HTTP ${String(response.status)}: ${text.slice(0, 200)}`,
         );
       }
-      return JSON.parse(text) as unknown;
+      return decodeJsonUnknown(text);
     },
     catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });

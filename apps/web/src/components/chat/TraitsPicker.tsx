@@ -86,10 +86,13 @@ type TraitsPersistence =
   | {
       threadRef?: ScopedThreadRef;
       draftId?: DraftId;
+      /** Runs after a change is written to the draft. */
+      onDraftModelOptionsChange?: () => void;
       onModelOptionsChange?: never;
     }
   | {
       threadRef?: undefined;
+      onDraftModelOptionsChange?: never;
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
 
@@ -106,15 +109,15 @@ function getSelectedTraits(
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
   modelOptions: ProviderOptions | null | undefined,
-  planModeEnabled: boolean,
+  includePlanAgent: boolean | undefined,
 ) {
-  const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
+  const caps = getProviderModelCapabilities(models, model, provider, includePlanAgent);
   const modelIsUnavailable =
-    provider === "opencode" &&
+    (provider === "opencode" || provider === "cursor") &&
     !models.some((candidate) => candidate.slug === normalizeModelSlug(model, provider));
   const descriptors = modelIsUnavailable
     ? buildUnavailableModelOptionDescriptors(
-        planModeEnabled
+        includePlanAgent
           ? modelOptions
           : modelOptions?.filter((option) => option.id !== "agent" || option.value !== "plan"),
       )
@@ -172,14 +175,14 @@ export function getTraitsSectionVisibility(input: {
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   modelOptions: ProviderOptions | null | undefined;
-  planModeEnabled: boolean;
+  includePlanAgent?: boolean | undefined;
 }) {
   const selected = getSelectedTraits(
     input.provider,
     input.models,
     input.model,
     input.modelOptions,
-    input.planModeEnabled,
+    input.includePlanAgent,
   );
 
   const showEffort = selected.primarySelectDescriptor !== null;
@@ -227,7 +230,7 @@ export function getReasoningTraitStep(input: {
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ProviderOptions | undefined;
   reportedModelSelection: ModelSelection | null | undefined;
-  planModeEnabled: boolean;
+  includePlanAgent?: boolean | undefined;
   direction: 1 | -1;
 }) {
   const selected = getSelectedTraits(
@@ -235,7 +238,7 @@ export function getReasoningTraitStep(input: {
     input.models,
     input.model,
     input.modelOptions,
-    input.planModeEnabled,
+    input.includePlanAgent,
   );
   if (selected.modelIsUnavailable) return null;
   const descriptor = selected.selectDescriptors.find((entry) =>
@@ -264,7 +267,7 @@ interface TraitsMenuContentProps {
   model: string | null | undefined;
   modelOptions?: ProviderOptions | null | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
-  planModeEnabled: boolean;
+  includePlanAgent?: boolean | undefined;
   triggerClassName?: string;
   isComposerOwned?: boolean;
 }
@@ -276,7 +279,7 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   model,
   modelOptions,
   reportedModelSelection,
-  planModeEnabled,
+  includePlanAgent,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const modelSelection =
@@ -296,13 +299,14 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       model,
       persistSticky: true,
     });
+    persistence.onDraftModelOptionsChange?.();
   };
   const selected = getTraitsSectionVisibility({
     provider,
     models,
     model,
     modelOptions,
-    planModeEnabled,
+    includePlanAgent,
   });
   const { descriptors, selectDescriptors, booleanDescriptors, hasAnyControls, modelIsUnavailable } =
     selected;
@@ -426,7 +430,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   model,
   modelOptions,
   reportedModelSelection,
-  planModeEnabled,
+  includePlanAgent,
   triggerClassName,
   isComposerOwned,
   size = "sm",
@@ -446,14 +450,13 @@ export const TraitsPicker = memo(function TraitsPicker({
     models,
     model,
     modelOptions,
-    planModeEnabled,
+    includePlanAgent,
   });
   if (!hasAnyControls) {
     return null;
   }
 
   const { label: triggerLabel } = buildTraitsTriggerDisplay({
-    provider,
     descriptors,
     primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled: false,
@@ -521,7 +524,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           model={model}
           modelOptions={modelOptions}
           reportedModelSelection={reportedModelSelection}
-          planModeEnabled={planModeEnabled}
+          includePlanAgent={includePlanAgent}
           {...persistence}
         />
       </MenuPopup>
