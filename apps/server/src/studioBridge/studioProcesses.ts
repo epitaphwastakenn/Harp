@@ -159,3 +159,17 @@ export const closeStudio = (pid: number, force: boolean) =>
     Effect.as(true),
     Effect.orElseSucceed(() => false),
   );
+
+/** Whether a Roblox Studio process runs on the machine the server runs on. */
+export const isStudioRunningHere = (platform: string) =>
+  platform === "win32"
+    ? listStudioWindows(platform).pipe(
+        Effect.map((windows) => windows.length > 0),
+        Effect.orElseSucceed(() => false),
+      )
+    : platform === "darwin"
+      ? run("pgrep", ["-x", "RobloxStudio"]).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        )
+      : Effect.succeed(false);

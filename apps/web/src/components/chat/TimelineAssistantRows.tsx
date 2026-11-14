@@ -10,6 +10,7 @@ import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Spinner } from "../ui/spinner";
 import { useAssetUrlState } from "../../assets/assetUrls";
+import { buildTurnImageTiles } from "./modelViewer/modelPreviewVersions";
 import {
   buildTurnImagesPreview,
   turnImageTileCounts,
@@ -33,6 +34,8 @@ import {
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { StudioEvidenceBadge } from "./StudioEvidenceBadge";
+import { ResultsButton } from "./results/ResultsButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -187,40 +190,72 @@ function AssistantMessageMeta({
 }) {
   const ctx = use(TimelineRowCtx);
 
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+
+  const itemRunId = projectedItem?.item.runId ?? null;
+  const evidenceRunId = isWorking && itemRunId === latestRunId ? null : itemRunId;
+  const runFlags = evidenceRunId === null ? undefined : ctx.resultRunFlags?.get(evidenceRunId);
+
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
-        alwaysVisible
-          ? "opacity-100"
-          : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
-        className,
-      )}
-    >
-      {projectedItem?.item.status === "failed" ? (
-        <Badge variant="error" size="sm">
-          Failed
-        </Badge>
-      ) : projectedItem?.item.status === "interrupted" ? (
-        <Badge variant="warning" size="sm">
-          Interrupted
-        </Badge>
-      ) : null}
-      <AssistantCopyButton
-        message={message}
-        showCopyButton={showCopyButton}
-        streaming={copyStreaming}
-      />
-      {projectedItem?.item.type === "assistant_message" ? (
-        <AssistantForkButton projectedItem={projectedItem} />
-      ) : null}
-      {!message.streaming && (
-        <TimelineRowTimestamp
-          createdAt={message.updatedAt}
-          timestampFormat={ctx.timestampFormat}
+    <div className={cn("flex items-center gap-2", className)}>
+      <div
+        className={cn(
+          "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
           alwaysVisible
+            ? "opacity-100"
+            : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
+        )}
+      >
+        {projectedItem?.item.status === "failed" ? (
+          <Badge variant="error" size="sm">
+            Failed
+          </Badge>
+        ) : projectedItem?.item.status === "interrupted" ? (
+          <Badge variant="warning" size="sm">
+            Interrupted
+          </Badge>
+        ) : null}
+        <AssistantCopyButton
+          message={message}
+          showCopyButton={showCopyButton}
+          streaming={copyStreaming}
         />
-      )}
+        {projectedItem?.item.type === "assistant_message" ? (
+          <AssistantForkButton projectedItem={projectedItem} />
+        ) : null}
+        {!message.streaming && (
+          <TimelineRowTimestamp
+            createdAt={message.updatedAt}
+            timestampFormat={ctx.timestampFormat}
+            alwaysVisible
+          />
+        )}
+      </div>
+      {projectedItem !== undefined &&
+      evidenceRunId !== null &&
+      !message.streaming &&
+      runFlags?.hasStudioTools === true ? (
+        <StudioEvidenceBadge
+          environmentId={ctx.activeThreadEnvironmentId}
+          threadId={projectedItem.sourceThreadId}
+          runId={evidenceRunId}
+        />
+      ) : null}
+      {projectedItem !== undefined &&
+      evidenceRunId !== null &&
+      !message.streaming &&
+      ctx.onOpenResults !== undefined &&
+      ctx.threadRef !== null &&
+      runFlags !== undefined ? (
+        <ResultsButton
+          environmentId={ctx.activeThreadEnvironmentId}
+          threadRef={ctx.threadRef}
+          runId={evidenceRunId}
+          hasImages={runFlags.hasImages}
+          hasStudioTools={runFlags.hasStudioTools}
+          onOpen={ctx.onOpenResults}
+        />
+      ) : null}
     </div>
   );
 }
@@ -306,9 +341,10 @@ export function TurnImagesTimelineRow({
       false,
   );
   const setCollapsed = useUiStateStore((store) => store.setTimelineGalleryCollapsed);
-  const { shown, hidden } = turnImageTileCounts(row.images.length);
+  const tiles = buildTurnImageTiles(row.images, row.models);
+  const { shown, hidden } = turnImageTileCounts(tiles.length);
   const openViewer = (index: number) =>
-    ctx.onImageExpand(buildTurnImagesPreview(ctx.activeThreadEnvironmentId, row.images, index));
+    ctx.onImageExpand(buildTurnImagesPreview(ctx.activeThreadEnvironmentId, tiles, index));
 
   return (
     <div className="min-w-0 px-1">
@@ -322,17 +358,18 @@ export function TurnImagesTimelineRow({
       >
         <DisclosureChevron open={!collapsed} />
         Screenshots
-        <span className="text-2xs tabular-nums">{row.images.length}</span>
+        <span className="text-2xs tabular-nums">{tiles.length}</span>
       </Button>
       {collapsed ? null : (
         <div className="mt-1.5 flex flex-wrap gap-2">
-          {row.images.slice(0, shown).map((resource, index) => (
+          {tiles.slice(0, shown).map(({ resource, versions }, index) => (
             <TurnImageTile
               key={`${resource.itemId}:${String(resource.index)}`}
               environmentId={ctx.activeThreadEnvironmentId}
               resource={resource}
-              label={`Open screenshot ${index + 1} of ${row.images.length}`}
-              single={row.images.length === 1}
+              model={versions !== undefined}
+              label={`Open ${versions === undefined ? "screenshot" : "3D model"} ${index + 1} of ${tiles.length}`}
+              single={tiles.length === 1}
               overflow={index === shown - 1 ? hidden : 0}
               onOpen={() => openViewer(index)}
             />
@@ -346,6 +383,7 @@ export function TurnImagesTimelineRow({
 function TurnImageTile({
   environmentId,
   resource,
+  model,
   label,
   single,
   overflow,
@@ -353,6 +391,7 @@ function TurnImageTile({
 }: {
   environmentId: EnvironmentId;
   resource: TurnImageResource;
+  model: boolean;
   label: string;
   single: boolean;
   overflow: number;
@@ -386,6 +425,11 @@ function TurnImageTile({
           className="size-full object-cover"
           onError={() => setFailed(true)}
         />
+      ) : null}
+      {model ? (
+        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-2xs font-semibold leading-4 text-white">
+          3D
+        </span>
       ) : null}
       {overflow > 0 ? (
         <span className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm font-medium tabular-nums text-foreground">

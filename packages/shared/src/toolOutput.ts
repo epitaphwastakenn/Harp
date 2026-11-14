@@ -32,8 +32,54 @@ interface ResultEnvelope {
   failed: boolean;
 }
 
+export const MODEL_PREVIEW_OUTPUT_KEY = "modelPreview";
+
+export interface ModelPreviewReference {
+  readonly previewId: string;
+  readonly triangles: number;
+  readonly dimensions: readonly [number, number, number];
+  readonly animationClips: number;
+  readonly sizeBytes: number;
+  /** The job folder name, and the one it continued from, so a viewer can chain versions of a model. */
+  readonly jobId?: string;
+  readonly continuedFrom?: string;
+}
+
+const MODEL_PREVIEW_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+
+export function readModelPreviewReference(value: unknown): ModelPreviewReference | undefined {
+  if (!Predicate.isObject(value)) return undefined;
+  const { previewId, triangles, dimensions, animationClips, sizeBytes } = value;
+  const count = (entry: unknown): entry is number =>
+    typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0;
+  if (
+    typeof previewId !== "string" ||
+    !MODEL_PREVIEW_ID_PATTERN.test(previewId) ||
+    !count(triangles) ||
+    !count(animationClips) ||
+    !count(sizeBytes) ||
+    !Array.isArray(dimensions) ||
+    dimensions.length !== 3 ||
+    !dimensions.every((entry) => typeof entry === "number" && Number.isFinite(entry))
+  ) {
+    return undefined;
+  }
+  const jobId = boundedId(value.jobId);
+  const continuedFrom = boundedId(value.continuedFrom);
+  return {
+    previewId,
+    triangles,
+    dimensions: [dimensions[0], dimensions[1], dimensions[2]],
+    animationClips,
+    sizeBytes,
+    ...(jobId === undefined ? {} : { jobId }),
+    ...(continuedFrom === undefined ? {} : { continuedFrom }),
+  };
+}
+
 interface CompactToolOutput {
   isError?: true;
+  [MODEL_PREVIEW_OUTPUT_KEY]?: ModelPreviewReference;
   threadId?: string;
   messageId?: string;
   taskId?: string;
@@ -131,6 +177,8 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
     }
     const htmlRender = readHtmlRenderReference(data.htmlRender);
     if (htmlRender !== undefined) output.htmlRender = htmlRender;
+    const modelPreview = readModelPreviewReference(data[MODEL_PREVIEW_OUTPUT_KEY]);
+    if (modelPreview !== undefined) output[MODEL_PREVIEW_OUTPUT_KEY] = modelPreview;
     const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
     if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
     const nestedThreadId = Predicate.isObject(data.thread)
@@ -189,6 +237,13 @@ export function htmlRenderFromToolItem(item: {
   if (resolveT3McpToolId(item.toolName) !== HTML_RENDER_TOOL_NAME) return undefined;
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? undefined : output?.htmlRender;
+}
+
+/** A Blender job's GLB preview. It survives output compaction, so a wire item still carries it. */
+export function modelPreviewFromToolItem(item: {
+  readonly output?: unknown;
+}): ModelPreviewReference | undefined {
+  return compactDynamicToolOutput(item.output)?.[MODEL_PREVIEW_OUTPUT_KEY];
 }
 
 /** Accept app references only when server and tool match the item, so tools cannot impersonate another app source. */

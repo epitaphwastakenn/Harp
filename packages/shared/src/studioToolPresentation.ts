@@ -55,6 +55,7 @@ const STUDIO_TOOLS: Readonly<Record<string, readonly [title: string, detail?: De
   set_script_source: ["Write script", target],
   edit_script: ["Edit script", target],
   grep_scripts: ["Search scripts for", (args) => text(args.pattern)],
+  find_and_replace_in_scripts: ["Replace in scripts", (args) => text(args.find)],
   selection: ["Studio selection", (args) => text(args.action)],
   execute_luau: ["Run Luau", (args) => firstLine(args.code)],
   eval_server_runtime: ["Run Luau in the play server", (args) => firstLine(args.code)],

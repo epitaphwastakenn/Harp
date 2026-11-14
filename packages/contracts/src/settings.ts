@@ -1161,6 +1161,21 @@ const RobloxStudioModeSetting = Schema.String.pipe(
 export const RobloxStudioScope = Schema.Literals(["roblox-projects", "all-projects"]);
 export type RobloxStudioScope = typeof RobloxStudioScope.Type;
 
+export const ImageGenerationProvider = Schema.Literals(["openai", "openrouter", "custom"]);
+export type ImageGenerationProvider = typeof ImageGenerationProvider.Type;
+export const MAX_IMAGE_GENERATIONS_PER_TURN = 20;
+const ImageGenerationPerTurnCap = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_IMAGE_GENERATIONS_PER_TURN }),
+);
+
+/** Instance paths agents may read in one place but never change, such as `game.ServerStorage.Data`. */
+export const RobloxStudioProtectedPlace = Schema.Struct({
+  placeKey: TrimmedNonEmptyString,
+  placeName: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  paths: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type RobloxStudioProtectedPlace = typeof RobloxStudioProtectedPlace.Type;
+
 export const RobloxStudioSettings = Schema.Struct({
   mode: RobloxStudioModeSetting.pipe(Schema.withDecodingDefault(Effect.succeed("off" as const))),
   scope: RobloxStudioScope.pipe(
@@ -1188,6 +1203,21 @@ export const RobloxStudioSettings = Schema.Struct({
   /** Empty means a detected MCP for Blender install, else `uvx blender-mcp`. */
   blenderMcpCommand: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   blenderMcpArgs: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** A patch replaces the whole list. */
+  protectedPlaces: Schema.Array(RobloxStudioProtectedPlace).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  /** Off by default: image generation calls a service the user chose, which may cost money. */
+  imageGeneration: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  imageProvider: ImageGenerationProvider.pipe(
+    Schema.withDecodingDefault(Effect.succeed("openai" as const)),
+  ),
+  /** Empty means the preset's own address. */
+  imageBaseUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  imageModel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  imageApiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
+  imageMaxPerTurn: ImageGenerationPerTurnCap.pipe(Schema.withDecodingDefault(Effect.succeed(6))),
+  imageRequireApproval: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type RobloxStudioSettings = typeof RobloxStudioSettings.Type;
 
@@ -2064,6 +2094,14 @@ export const ServerSettingsPatch = Schema.Struct({
       blenderMcp: Schema.optionalKey(Schema.Boolean),
       blenderMcpCommand: Schema.optionalKey(TrimmedString),
       blenderMcpArgs: Schema.optionalKey(Schema.Array(Schema.String)),
+      protectedPlaces: Schema.optionalKey(Schema.Array(RobloxStudioProtectedPlace)),
+      imageGeneration: Schema.optionalKey(Schema.Boolean),
+      imageProvider: Schema.optionalKey(ImageGenerationProvider),
+      imageBaseUrl: Schema.optionalKey(TrimmedString),
+      imageModel: Schema.optionalKey(TrimmedString),
+      imageApiKey: Schema.optionalKey(TrimmedString),
+      imageMaxPerTurn: Schema.optionalKey(ImageGenerationPerTurnCap),
+      imageRequireApproval: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   computerUse: Schema.optionalKey(

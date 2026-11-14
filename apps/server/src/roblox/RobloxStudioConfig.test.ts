@@ -25,6 +25,7 @@ const environment: RobloxStudioEnvironment = {
   officialMcpPath: "C:\\Users\\me\\AppData\\Local\\Roblox\\mcp.bat",
   studioInstalled: true,
   blenderJobsRoot: "/state/blender-jobs",
+  imageJobsRoot: "/state/image-jobs",
   docsCacheRoot: "",
   detectedBlender: "C:\\Blender\\blender.exe",
   detectedBlenderMcp: undefined,

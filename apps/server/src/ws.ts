@@ -116,6 +116,8 @@ import { McpToolVisibility } from "./mcp/McpToolVisibility.ts";
 import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
 import * as RojoWorkspaces from "./roblox/RojoWorkspaces.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
+import { StudioEvidence } from "./studioBridge/studioEvidence.ts";
+import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as VoiceTranscription from "./voiceTranscription.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
@@ -1227,6 +1229,8 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
     const rojoWorkspaces = yield* RojoWorkspaces.RojoWorkspaces;
     const noRojo = { layout: "none", rojoFound: false, projects: [] } as const;
     const studioBridge = yield* StudioBridge.StudioBridge;
+    const studioEvidence = yield* StudioEvidence;
+    const studioTools = yield* StudioTools.StudioTools;
     const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
     return ServerSealCodeWsRpcGroup.of({
       [ORCHESTRATION_V2_WS_METHODS.getProjectDiffIndex]: (input) =>
@@ -1274,6 +1278,14 @@ const layerSealCodeWsRpc = ServerSealCodeWsRpcGroup.toLayer(
           ? noRojo
           : yield* rojoWorkspaces.control(project.value.workspaceRoot, input);
       }),
+      [WS_METHODS.getStudioTurnEvidence]: (input) => studioEvidence.evidence(input),
+      [WS_METHODS.getStudioUndoPreview]: (input) => studioTools.undoPreview(input),
+      [WS_METHODS.studioUndoTurnChanges]: (input) =>
+        studioTools.undoTurnChanges({
+          threadId: input.threadId,
+          runId: input.runId,
+          fromAgent: false,
+        }),
       [WS_METHODS.voiceTranscribe]: (input) => voiceTranscription.transcribe(input),
       [WS_METHODS.subscribeRobloxStudioAlerts]: (_input) => studioBridge.alerts,
       [WS_METHODS.subscribeMcpStatus]: (_input) =>

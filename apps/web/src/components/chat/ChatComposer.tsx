@@ -90,6 +90,7 @@ import { onToggleComposerVoice } from "../../composerVoiceBus";
 import { appendTranscriptToPrompt } from "../../lib/voiceRecorder";
 import { getTraitsSectionVisibility } from "./TraitsPicker";
 import { ComposerUsageMeter } from "./ComposerUsageMeter";
+import { useUsageWarningBanner } from "./useUsageWarningBanner";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -140,6 +141,7 @@ import {
 } from "./composerContextUndo";
 import type { ThreadSyncPhase } from "../../threadSync";
 import { ComposerBanner } from "./ComposerBanner";
+import { ComposerStudioSelectionChip } from "./ComposerStudioSelectionChip";
 import { ComposerSurface } from "./ComposerSurface";
 import {
   ComposerBannerStack,
@@ -546,6 +548,7 @@ export interface ChatComposerProps {
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
   studioControls?: OrchestrationV2StudioControls | undefined;
+  studioSelectionChip?: { readonly label: string; readonly onDismiss: () => void } | undefined;
   onStudioControlsChange?: ((change: StudioControlsChange) => void) | undefined;
 
   focusComposer: () => void;
@@ -657,6 +660,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     handleRuntimeModeChange,
     handleInteractionModeChange,
     studioControls,
+    studioSelectionChip,
     onStudioControlsChange,
     focusComposer,
     scheduleComposerFocus,
@@ -2830,9 +2834,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         title: submissionError,
       }
     : null;
+  const usageWarningItem = useUsageWarningBanner({
+    environmentId,
+    instanceId: selectedInstanceId,
+    provider: selectedProviderStatus,
+    model: selectedModel,
+    running: phase === "running",
+  });
   const bannerStackItems = [
     ...(activityStackItem ? [activityStackItem] : []),
     ...(submissionErrorItem ? [submissionErrorItem] : []),
+    ...(usageWarningItem ? [usageWarningItem] : []),
     ...props.bannerItems,
   ];
   const [tasksDrawerThreadId, setTasksDrawerThreadId] = useState(activeThreadId);
@@ -3945,6 +3957,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               {composerAttachmentMediaRow}
 
               {composerAttachmentFileList}
+
+              {studioSelectionChip !== undefined && !isComposerCollapsedMobile ? (
+                <ComposerStudioSelectionChip {...studioSelectionChip} />
+              ) : null}
 
               <div
                 className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}

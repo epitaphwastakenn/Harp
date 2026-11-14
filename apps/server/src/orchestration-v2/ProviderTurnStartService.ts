@@ -1,5 +1,6 @@
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
+import { studioSelectionOptedOut } from "@t3tools/shared/studioSelection";
 import {
   CommandId,
   latestProviderTurnForAttempt,
@@ -731,6 +732,7 @@ export const layer: Layer.Layer<
           freshConversation: providerThread.nativeThreadRef === null,
           modelSelection: run.modelSelection,
           studioControls: projection.thread.studioControls,
+          includeStudioSelection: !studioSelectionOptedOut(message.context?.records ?? []),
           text: projectComposerContextForProvider({
             text: message.text,
             records: message.context?.records ?? [],

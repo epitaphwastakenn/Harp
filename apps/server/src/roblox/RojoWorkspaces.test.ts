@@ -100,3 +100,203 @@ describe("RojoWorkspaces", () => {
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 });
+
+describe("RojoWorkspaces structural saves", () => {
+  const workspace = Effect.fn("structuralWorkspace")(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "harp-rojo-struct-" });
+    yield* fs.makeDirectory(`${root}/src/server/Combat`, { recursive: true });
+    yield* fs.writeFileString(
+      `${root}/default.project.json`,
+      JSON.stringify({
+        name: "game",
+        servePort: 45872,
+        tree: { $className: "DataModel", ServerScriptService: { $path: "src/server" } },
+      }),
+    );
+    yield* fs.writeFileString(`${root}/src/server/Main.server.luau`, "print(1)\n");
+    yield* fs.writeFileString(`${root}/src/server/Main.meta.json`, "{}");
+    yield* fs.writeFileString(`${root}/src/server/Util.luau`, "return {}\n");
+    yield* fs.writeFileString(`${root}/src/server/Combat/Hit.luau`, "return 1\n");
+    return root;
+  });
+
+  it.live("creates files and folders under a synced folder and promotes a script parent", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* workspace();
+      const rojo = yield* RojoWorkspaces.RojoWorkspaces;
+      const folder = yield* rojo.locateParent({
+        root,
+        instancePath: "game.ServerScriptService.Combat",
+      });
+      expect(folder).toMatchObject({ kind: "directory", serving: false });
+      const made = yield* rojo.createEntries({
+        root,
+        parent: folder!,
+        nodes: [
+          { name: "Swing", className: "Script", source: "print('swing')", children: [] },
+          { name: "Fx", className: "Folder", children: [] },
+        ],
+      });
+      expect(made).toEqual({
+        ok: true,
+        files: ["src/server/Combat/Swing.server.luau", "src/server/Combat/Fx"],
+      });
+      expect(yield* fs.readFileString(`${root}/src/server/Combat/Swing.server.luau`)).toBe(
+        "print('swing')",
+      );
+      expect((yield* fs.stat(`${root}/src/server/Combat/Fx`)).type).toBe("Directory");
+      const again = yield* rojo.createEntries({
+        root,
+        parent: folder!,
+        nodes: [{ name: "Swing", className: "ModuleScript", children: [] }],
+      });
+      expect(again.ok).toBe(false);
+
+      const script = yield* rojo.locateParent({
+        root,
+        instancePath: "game.ServerScriptService.Util",
+      });
+      expect(script).toMatchObject({ kind: "script" });
+      const child = yield* rojo.createEntries({
+        root,
+        parent: script!,
+        nodes: [{ name: "Types", className: "ModuleScript", children: [] }],
+      });
+      expect(child.ok).toBe(true);
+      expect(yield* fs.readFileString(`${root}/src/server/Util/init.luau`)).toBe("return {}\n");
+      expect(yield* fs.exists(`${root}/src/server/Util/Types.luau`)).toBe(true);
+      expect(yield* fs.exists(`${root}/src/server/Util.luau`)).toBe(false);
+      expect(
+        yield* rojo.locateParent({ root, instancePath: "game.Workspace.Map" }),
+      ).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.live(
+    "moves deleted files to the trash folder and renames or moves files with their meta",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* workspace();
+        const rojo = yield* RojoWorkspaces.RojoWorkspaces;
+        const main = yield* rojo.locateEntry({
+          root,
+          instancePath: "game.ServerScriptService.Main",
+        });
+        expect(main).toMatchObject({
+          entry: "file",
+          script: true,
+          relative: "src/server/Main.server.luau",
+        });
+
+        const renamed = yield* rojo.moveEntry({ root, location: main!, name: "Boot" });
+        expect(renamed).toEqual({ ok: true, files: ["src/server/Boot.server.luau"] });
+        expect(yield* fs.exists(`${root}/src/server/Boot.meta.json`)).toBe(true);
+        expect(yield* fs.exists(`${root}/src/server/Main.meta.json`)).toBe(false);
+
+        const boot = yield* rojo.locateEntry({
+          root,
+          instancePath: "game.ServerScriptService.Boot",
+        });
+        const combat = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Combat",
+        });
+        const moved = yield* rojo.moveEntry({ root, location: boot!, to: combat! });
+        expect(moved).toEqual({ ok: true, files: ["src/server/Combat/Boot.server.luau"] });
+        const into = yield* rojo.moveEntry({
+          root,
+          location: (yield* rojo.locateEntry({
+            root,
+            instancePath: "game.ServerScriptService.Combat",
+          }))!,
+          to: combat!,
+        });
+        expect(into.ok).toBe(false);
+
+        const hit = yield* rojo.locateEntry({
+          root,
+          instancePath: "game.ServerScriptService.Combat.Hit",
+        });
+        const trashed = yield* rojo.trashEntry({ root, location: hit! });
+        expect(trashed.ok).toBe(true);
+        const files = trashed.ok ? trashed.files : [];
+        expect(files[0]).toMatch(/^\.harp\/rojo-trash\/[^/]+\/src\/server\/Combat\/Hit\.luau$/u);
+        expect(yield* fs.readFileString(`${root}/${files[0]}`)).toBe("return 1\n");
+        expect(yield* fs.exists(`${root}/src/server/Combat/Hit.luau`)).toBe(false);
+        expect(yield* fs.readFileString(`${root}/.harp/.gitignore`)).toBe("*\n");
+        expect(
+          yield* rojo.locateEntry({ root, instancePath: "game.ServerScriptService" }),
+        ).toBeUndefined();
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.live(
+    "refuses children for a path-mapped script, duplicates and moving a script into itself",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* workspace();
+        yield* fs.writeFileString(`${root}/src/boot.server.luau`, "print(2)");
+        yield* fs.writeFileString(
+          `${root}/default.project.json`,
+          JSON.stringify({
+            name: "game",
+            servePort: 45872,
+            tree: {
+              $className: "DataModel",
+              ServerScriptService: { $path: "src/server", Boot: { $path: "src/boot.server.luau" } },
+            },
+          }),
+        );
+        const rojo = yield* RojoWorkspaces.RojoWorkspaces;
+        const mapped = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Boot",
+        });
+        expect(mapped).toMatchObject({ kind: "script", mappedByPath: true });
+        const refused = yield* rojo.createEntries({
+          root,
+          parent: mapped!,
+          nodes: [{ name: "Types", className: "ModuleScript", children: [] }],
+        });
+        expect(refused.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/boot.server.luau`)).toBe(true);
+
+        const folder = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Combat",
+        });
+        const twice = yield* rojo.createEntries({
+          root,
+          parent: folder!,
+          nodes: [
+            { name: "A", className: "Folder", children: [] },
+            { name: "a", className: "Script", children: [] },
+          ],
+        });
+        expect(twice.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/server/Combat/A`)).toBe(false);
+        const reserved = yield* rojo.createEntries({
+          root,
+          parent: folder!,
+          nodes: [{ name: "init", className: "ModuleScript", children: [] }],
+        });
+        expect(reserved.ok).toBe(false);
+
+        const util = yield* rojo.locateEntry({
+          root,
+          instancePath: "game.ServerScriptService.Util",
+        });
+        const self = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Util",
+        });
+        const moved = yield* rojo.moveEntry({ root, location: util!, to: self! });
+        expect(moved.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/server/Util.luau`)).toBe(true);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+});

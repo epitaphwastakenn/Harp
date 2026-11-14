@@ -17,6 +17,7 @@ import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
 import { mcpToolKey } from "../mcp/McpToolVisibility.ts";
+import { resolveImageProvider } from "../studioBridge/imageGeneration.ts";
 import { studioBridgeInstructions } from "../studioBridge/instructions.ts";
 import { loadStudioSkills, skillCatalog } from "../studioBridge/studioSkills.ts";
 import { DEFAULT_STUDIO_BRIDGE_PORT } from "../studioBridge/protocol.ts";
@@ -78,6 +79,7 @@ export interface RobloxStudioEnvironment {
   readonly officialMcpPath: string | undefined;
   readonly studioInstalled: boolean;
   readonly blenderJobsRoot: string;
+  readonly imageJobsRoot: string;
   readonly docsCacheRoot: string;
   /** Found in the usual install folders; a configured path wins over it. */
   readonly detectedBlender: string | undefined;
@@ -141,7 +143,17 @@ export const managedServersFor = (
       url: `http://127.0.0.1:${String(bridge.port)}/mcp`,
       args: [],
       env: [],
-      headers: [setting({ name: "Authorization", value: `Bearer ${bridge.mcpToken}` }, true)],
+      headers: [
+        setting({ name: "Authorization", value: `Bearer ${bridge.mcpToken}` }, true),
+        ...(resolveImageProvider(roblox).ok
+          ? [
+              setting({
+                name: "X-Harp-Image-Tools",
+                value: roblox.imageRequireApproval ? "approval" : "on",
+              }),
+            ]
+          : []),
+      ],
     };
   }
 
@@ -240,6 +252,7 @@ const disabledEnvironment: RobloxStudioEnvironment = {
   officialMcpPath: undefined,
   studioInstalled: false,
   blenderJobsRoot: "",
+  imageJobsRoot: "",
   docsCacheRoot: "",
   detectedBlender: undefined,
   detectedBlenderMcp: undefined,
@@ -383,6 +396,7 @@ const make = Effect.gen(function* () {
     officialMcpPath: officialAvailable ? officialMcpPath : undefined,
     studioInstalled,
     blenderJobsRoot: path.join(config.stateDir, "blender-jobs"),
+    imageJobsRoot: path.join(config.stateDir, "image-jobs"),
     docsCacheRoot: path.join(config.stateDir, "roblox-docs"),
     detectedBlender: yield* detectBlender().pipe(Effect.orElseSucceed(() => undefined)),
     detectedBlenderMcp,

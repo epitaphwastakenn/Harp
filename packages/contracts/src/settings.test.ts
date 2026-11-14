@@ -601,3 +601,33 @@ describe("next prompt suggestion settings", () => {
     expect(decodeServerSettings(patch)).toMatchObject(patch);
   });
 });
+
+describe("image generation settings", () => {
+  const decode = Schema.decodeUnknownSync(ServerSettings);
+  const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+  it("is off by default, keyless, with a cap of six and approval on", () => {
+    expect(decode({}).robloxStudio).toMatchObject({
+      imageGeneration: false,
+      imageProvider: "openai",
+      imageBaseUrl: "",
+      imageModel: "",
+      imageApiKey: "",
+      imageMaxPerTurn: 6,
+      imageRequireApproval: true,
+    });
+  });
+
+  it("keeps a custom provider and rejects a cap outside 1-20", () => {
+    expect(
+      decode({
+        robloxStudio: { imageProvider: "custom", imageBaseUrl: " http://localhost:8080/v1 " },
+      }).robloxStudio,
+    ).toMatchObject({ imageProvider: "custom", imageBaseUrl: "http://localhost:8080/v1" });
+    expect(() => decode({ robloxStudio: { imageMaxPerTurn: 0 } })).toThrow();
+    expect(() => decode({ robloxStudio: { imageMaxPerTurn: 21 } })).toThrow();
+    expect(decodePatch({ robloxStudio: { imageGeneration: true, imageMaxPerTurn: 3 } })).toEqual({
+      robloxStudio: { imageGeneration: true, imageMaxPerTurn: 3 },
+    });
+  });
+});

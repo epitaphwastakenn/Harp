@@ -57,6 +57,26 @@ export const studioBridgeStatus = (
   })),
 });
 
+export const selectionSummaries = (
+  selections: ReadonlyArray<StudioBridge.StudioSelection>,
+): NonNullable<RobloxStudioBridgeStatus["selections"]> =>
+  selections.flatMap((selection) =>
+    selection.count === 0 && selection.activeScript === undefined
+      ? []
+      : [
+          {
+            instanceId: selection.instanceId,
+            count: selection.count,
+            names: selection.items
+              .slice(0, 3)
+              .map((item) => item.path.split(".").at(-1) ?? item.path),
+            ...(selection.activeScript === undefined
+              ? {}
+              : { activeScript: selection.activeScript }),
+          },
+        ],
+  );
+
 export class RobloxStudioStatusService extends Context.Service<
   RobloxStudioStatusService,
   {
@@ -139,7 +159,12 @@ const make = Effect.gen(function* () {
     );
 
     const bridge: RobloxStudioBridgeStatus | undefined =
-      roblox.mode === "sealcode" ? studioBridgeStatus(yield* studioBridge.snapshot) : undefined;
+      roblox.mode === "sealcode"
+        ? {
+            ...studioBridgeStatus(yield* studioBridge.snapshot),
+            selections: selectionSummaries(yield* studioBridge.selections),
+          }
+        : undefined;
 
     // The bridge's `blender` tool exists whenever Harp mode is on.
     const executable = blenderExecutableFor(roblox, environment);

@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   ScopedThreadRef,
   ThreadId,
+  OrchestrationV2ApprovalStudioCode,
   OrchestrationV2ThreadProjection,
   OrchestrationV2RuntimeRequest,
   OrchestrationV2UserInputQuestion,
@@ -57,6 +58,7 @@ export interface ThreadPendingApproval {
   readonly fullAccessOverride?: ProviderApprovalFullAccessOverride;
   readonly appName?: string;
   readonly options?: ReadonlyArray<ProviderApprovalOption>;
+  readonly studioCode?: OrchestrationV2ApprovalStudioCode;
   readonly responseCapability: "live" | "not_resumable";
   readonly supportsFeedback?: boolean;
 }
@@ -272,6 +274,9 @@ export function derivePendingThreadRequests(
       ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
       ...(item?.type === "approval_request" && item.options !== undefined
         ? { options: item.options }
+        : {}),
+      ...(item?.type === "approval_request" && item.studioCode !== undefined
+        ? { studioCode: item.studioCode }
         : {}),
       responseCapability: responseCapability === "live" ? "live" : "not_resumable",
       ...(request.responseCapability.type === "live" && request.responseCapability.supportsFeedback

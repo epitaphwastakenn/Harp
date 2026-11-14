@@ -1,3 +1,4 @@
+import { studioCodeToolRisks } from "@t3tools/shared/studioCode";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -8,10 +9,12 @@ import * as Layer from "effect/Layer";
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
 import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { decodePng } from "./png.ts";
 import { STUDIO_PROTOCOL_VERSION } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 import { handleMcpMessage } from "./studioMcp.ts";
 import * as StudioTools from "./StudioTools.ts";
+import { StudioEvidence } from "./studioEvidence.ts";
 
 const layer = StudioTools.layer.pipe(
   Layer.provideMerge(StudioBridge.layer),
@@ -390,6 +393,80 @@ describe("StudioTools", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("returns motion checks with create and refuses errors when strict", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const plugin = yield* fakePlugin(() => ({ success: true, temporaryId: "abc" }));
+      const keyframes = [
+        { time: 0, poses: {} },
+        { time: 0.5, poses: { LeftKnee: { rotation: [60, 0, 0] } } },
+      ];
+      const refused = yield* tools.call(
+        "animation",
+        { action: "create", rig: "game.Workspace.Rig", keyframes, strict: true },
+        {},
+      );
+      expect(refused.isError).toBe(true);
+      expect(textOf(refused)).toContain("animation_checks_failed");
+      expect(textOf(refused)).toContain("LeftKnee");
+      expect(plugin.calls).toHaveLength(0);
+      const created = yield* tools.call(
+        "animation",
+        { action: "create", rig: "game.Workspace.Rig", keyframes },
+        {},
+      );
+      expect(created.isError).toBeUndefined();
+      expect(plugin.calls).toHaveLength(1);
+      expect(created.structuredContent).toMatchObject({
+        temporaryId: "abc",
+        checks: { errors: 1, findings: [{ kind: "range", joint: "LeftKnee", severity: "error" }] },
+      });
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("tiles posed captures into one contact sheet image in time order", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const pixel = Buffer.alloc(8 * 6 * 4, 120).toString("base64");
+      const plugin = yield* fakePlugin((endpoint) =>
+        endpoint === "capture-screenshot"
+          ? { success: true, width: 8, height: 6, data: pixel }
+          : { success: true, length: 2, looped: false },
+      );
+      const sheet = yield* tools.call(
+        "animation",
+        {
+          action: "contactSheet",
+          rig: "game.Workspace.Rig",
+          sequence: "game.Workspace.Rig.Swing",
+          frames: 4,
+          settleSeconds: 0,
+        },
+        {},
+      );
+      expect(sheet.isError).toBeUndefined();
+      const info = JSON.parse(textOf(sheet));
+      expect(info.frames.map((frame: { time: number }) => frame.time)).toEqual([
+        0, 0.667, 1.333, 2,
+      ]);
+      expect(info.grid).toMatchObject({ columns: 4, rows: 1 });
+      const image = sheet.content[1] as { type: string; data: string };
+      expect(image.type).toBe("image");
+      const decoded = decodePng(Buffer.from(image.data, "base64"));
+      expect(decoded.width).toBe(4 * 8 + 5 * 4);
+      const plays = plugin.calls.filter((call) => call.endpoint === "animation-play");
+      expect(plays.map((call) => call.data.time ?? call.data.action)).toEqual([
+        0,
+        0.667,
+        1.333,
+        2,
+        "stop",
+      ]);
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("serves the tool list and calls over JSON-RPC with the thread id", () =>
     Effect.gen(function* () {
       const tools = yield* StudioTools.StudioTools;
@@ -440,6 +517,17 @@ describe("Studio panel catalog", () => {
       );
       const listed = [...catalog.matchAll(/\{ "([a-z_]+)", "/gu)].map((match) => match[1]);
       expect(listed.toSorted()).toEqual(tools.list.map((tool) => tool.name).toSorted());
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("code tools", () => {
+  it.effect("share their risk with the approval card", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      for (const [name, risk] of Object.entries(studioCodeToolRisks)) {
+        expect(tools.list.find((tool) => tool.name === name)?.risk).toBe(risk);
+      }
     }).pipe(Effect.provide(layer)),
   );
 });
@@ -538,5 +626,382 @@ describe("script tools in a Rojo workspace", () => {
       expect(plugin.calls.some((call) => call.endpoint === "edit-script")).toBe(true);
       yield* Fiber.interrupt(plugin.fiber);
     }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+});
+
+describe("find_and_replace_in_scripts", () => {
+  const plan = {
+    totalReplacements: 3,
+    scriptsSearched: 5,
+    scriptsMatched: 2,
+    truncated: false,
+    results: [
+      {
+        path: "game.Workspace.A",
+        instanceRef: "ref-a",
+        className: "Script",
+        revision: "ra",
+        count: 2,
+        snippets: [{ line: 1, context: "old()", old: "old", new: "fresh" }],
+        newText: "fresh() fresh()",
+      },
+      {
+        path: "game.Workspace.B",
+        instanceRef: "ref-b",
+        className: "ModuleScript",
+        revision: "rb",
+        count: 1,
+        snippets: [],
+        newText: "fresh()",
+      },
+    ],
+  };
+
+  it.effect("lists counts and snippets without writing anything by default", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const plugin = yield* fakePlugin(() => plan);
+      const result = yield* tools.call(
+        "find_and_replace_in_scripts",
+        { find: "old", replace: "fresh" },
+        {},
+      );
+      const body = JSON.parse(textOf(result));
+      expect(body).toMatchObject({ success: true, dryRun: true, totalReplacements: 3 });
+      expect(body.results[0].newText).toBeUndefined();
+      expect(plugin.calls.map((call) => call.endpoint)).toEqual(["find-replace-scripts"]);
+      expect(plugin.calls[0]!.data).toMatchObject({ includeText: false, usePattern: false });
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("writes each script with its revision and keeps going past a failure", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const plugin = yield* fakePlugin((endpoint, data) => {
+        if (endpoint === "find-replace-scripts") return plan;
+        if (endpoint === "get-script-source") {
+          return { rawSource: "x", revision: data.path === "game.Workspace.A" ? "wa" : "wb" };
+        }
+        return data.path === "game.Workspace.A"
+          ? { error: "Source revision conflict", errorCode: "source_revision_conflict" }
+          : { success: true, path: data.path, revision: "wb" };
+      });
+      const result = yield* tools.call(
+        "find_and_replace_in_scripts",
+        { find: "old", replace: "fresh", dryRun: false },
+        {},
+      );
+      const body = JSON.parse(textOf(result));
+      expect(body.written).toEqual([
+        {
+          path: "game.Workspace.B",
+          count: 1,
+          verification: "Read the script back and verified revision wb.",
+        },
+      ]);
+      expect(body.failed).toHaveLength(1);
+      expect(body.failed[0].path).toBe("game.Workspace.A");
+      const writes = plugin.calls.filter((call) => call.endpoint === "set-script-source");
+      expect(
+        writes.map((call) => [call.data.path, call.data.source, call.data.expectedRevision]),
+      ).toEqual([
+        ["game.Workspace.A", "fresh() fresh()", "ra"],
+        ["game.Workspace.B", "fresh()", "rb"],
+      ]);
+      expect(plugin.calls[0]!.data.includeText).toBe(true);
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("refuses an empty find and unknown classes before asking Studio", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const empty = yield* tools.call(
+        "find_and_replace_in_scripts",
+        { find: "", replace: "x" },
+        {},
+      );
+      expect(empty.isError).toBe(true);
+      const classes = yield* tools.call(
+        "find_and_replace_in_scripts",
+        { find: "a", replace: "b", classes: ["Part"] },
+        {},
+      );
+      expect(textOf(classes)).toContain("invalid_arguments");
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("scene analysis modes and scatter", () => {
+  it.effect("forwards the scene analysis mode and a scatter step to Studio", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const plugin = yield* fakePlugin(() => ({ success: true }));
+      yield* tools.call("get_scene_analysis", { mode: "unparented", topN: 5 }, {});
+      const scatter = {
+        op: "scatter",
+        name: "Trees",
+        templates: [{ path: "game.ReplicatedStorage.Tree", weight: 2 }],
+        zone: { min: [0, 0, 0], max: [50, 10, 50] },
+        density: 3,
+        seed: 7,
+      };
+      yield* tools.call(
+        "build_instances",
+        { path: "game.Workspace.Forest", operations: [scatter] },
+        {},
+      );
+      expect(plugin.calls[0]).toMatchObject({
+        endpoint: "scene-analysis",
+        data: { mode: "unparented", topN: 5 },
+      });
+      expect(plugin.calls[1]).toMatchObject({
+        endpoint: "build-instances",
+        data: { path: "game.Workspace.Forest", operations: [scatter] },
+      });
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("Rojo sync guard and structural saves", () => {
+  const rojoLayer = StudioTools.layer.pipe(
+    Layer.provideMerge(StudioBridge.layer),
+    Layer.provide(ServerSettingsService.layerTest()),
+    Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+    Layer.provide(RojoWorkspaces.layer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  const makeWorkspace = Effect.fn("makeStructuralWorkspace")(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "harp-rojo-structure-" });
+    yield* fs.makeDirectory(`${root}/src/server`, { recursive: true });
+    yield* fs.writeFileString(
+      `${root}/default.project.json`,
+      JSON.stringify({
+        name: "game",
+        servePort: 45873,
+        tree: { $className: "DataModel", ServerScriptService: { $path: "src/server" } },
+      }),
+    );
+    yield* fs.writeFileString(`${root}/src/server/Main.server.luau`, "print('a')\n");
+    return root;
+  });
+
+  const mainPath = "game.ServerScriptService.Main";
+
+  it.effect("reports the sync status and refuses a playtest while Studio is behind the file", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace();
+      const plugin = yield* fakePlugin((endpoint) => {
+        if (endpoint === "set-script-source") return { success: true, revision: "r2" };
+        if (endpoint === "start-playtest") return { error: "stopped here" };
+        return { path: mainPath, rawSource: "print('a')\n", revision: "r1" };
+      });
+      const written = yield* tools.call(
+        "edit_script",
+        { path: mainPath, edits: [{ old_string: "'a'", new_string: "'b'" }] },
+        { workspaceRoot: root, threadId: "t1" },
+      );
+      expect(JSON.parse(textOf(written))).toMatchObject({ success: true, syncStatus: "diverged" });
+
+      const refused = yield* tools.call(
+        "playtest",
+        { action: "start" },
+        { workspaceRoot: root, threadId: "t1" },
+      );
+      expect(refused.isError).toBe(true);
+      expect(textOf(refused)).toContain("rojo_sync_diverged");
+      expect(textOf(refused)).toContain(mainPath);
+      expect(plugin.calls.some((call) => call.endpoint === "start-playtest")).toBe(false);
+
+      const otherThread = yield* tools.call(
+        "playtest",
+        { action: "start" },
+        { workspaceRoot: root, threadId: "t2" },
+      );
+      expect(textOf(otherThread)).not.toContain("rojo_sync_diverged");
+      const forced = yield* tools.call(
+        "playtest",
+        { action: "start", force: true },
+        { workspaceRoot: root, threadId: "t1" },
+      );
+      expect(textOf(forced)).not.toContain("rojo_sync_diverged");
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+
+  it.effect("refuses to overwrite a file when Studio holds unsaved edits", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace();
+      let studio = "print('a')\n";
+      const plugin = yield* fakePlugin((endpoint, data) => {
+        if (endpoint === "set-script-source") {
+          studio = data.source;
+          return { success: true, revision: "r3" };
+        }
+        return { path: mainPath, rawSource: studio, revision: "r1" };
+      });
+      const context = { workspaceRoot: root, threadId: "t1" };
+      yield* tools.call("get_script_source", { path: mainPath }, context);
+      studio = "print('typed in Studio')\n";
+      const refused = yield* tools.call(
+        "edit_script",
+        { path: mainPath, edits: [{ old_string: "'a'", new_string: "'b'" }] },
+        context,
+      );
+      expect(refused.isError).toBe(true);
+      expect(textOf(refused)).toContain("studio_unsaved_changes");
+      expect(yield* fs.readFileString(`${root}/src/server/Main.server.luau`)).toBe("print('a')\n");
+      const forced = yield* tools.call(
+        "edit_script",
+        { path: mainPath, edits: [{ old_string: "'a'", new_string: "'b'" }], force: true },
+        context,
+      );
+      expect(forced.isError).toBeUndefined();
+      expect(yield* fs.readFileString(`${root}/src/server/Main.server.luau`)).toBe("print('b')\n");
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+
+  it.effect("saves new scripts and folders as files and says what stays Studio-only", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace();
+      const plugin = yield* fakePlugin(() => ({ success: true }));
+      const result = yield* tools.call(
+        "build_instances",
+        {
+          path: "game.ServerScriptService",
+          operations: [
+            {
+              op: "create",
+              className: "ModuleScript",
+              name: "Service",
+              id: "svc",
+              properties: { Source: "return {}" },
+            },
+            { op: "create", className: "ModuleScript", name: "Types", parent: "$svc" },
+            { op: "create", className: "Folder", name: "Data" },
+            { op: "create", className: "StringValue", name: "Version" },
+          ],
+        },
+        { workspaceRoot: root, threadId: "t1" },
+      );
+      expect(result.isError).toBeUndefined();
+      const body = JSON.parse(textOf(result));
+      expect(body.rojo.files).toEqual([
+        "src/server/Service",
+        "src/server/Service/init.luau",
+        "src/server/Service/Types.luau",
+        "src/server/Data",
+      ]);
+      expect(body.rojo.studioOnly).toEqual(["StringValue"]);
+      expect(yield* fs.readFileString(`${root}/src/server/Service/init.luau`)).toBe("return {}");
+      const sent = plugin.calls.find((call) => call.endpoint === "build-instances");
+      expect(sent?.data.operations).toHaveLength(4);
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+
+  it.effect("moves deleted synced scripts to the trash folder and renames their files", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tools = yield* StudioTools.StudioTools;
+      const root = yield* makeWorkspace();
+      yield* fs.writeFileString(`${root}/src/server/Old.luau`, "return 1\n");
+      const plugin = yield* fakePlugin(() => ({ success: true }));
+      const context = { workspaceRoot: root, threadId: "t1" };
+      const renamed = yield* tools.call(
+        "set_properties",
+        { path: "game.ServerScriptService.Old", properties: { Name: "Fresh" } },
+        context,
+      );
+      expect(JSON.parse(textOf(renamed)).rojo.files).toEqual(["src/server/Fresh.luau"]);
+      expect(yield* fs.exists(`${root}/src/server/Old.luau`)).toBe(false);
+      const deleted = yield* tools.call(
+        "delete_instances",
+        { paths: ["game.ServerScriptService.Fresh", "game.Workspace.Part"] },
+        context,
+      );
+      const body = JSON.parse(textOf(deleted));
+      const trashed: string = body.rojo.trashedTo[0];
+      expect(trashed).toMatch(/^\.harp\/rojo-trash\/[^/]+\/src\/server\/Fresh\.luau$/u);
+      expect(yield* fs.readFileString(`${root}/${trashed}`)).toBe("return 1\n");
+      expect(yield* fs.exists(`${root}/src/server/Fresh.luau`)).toBe(false);
+      const sent = plugin.calls.filter((call) => call.endpoint === "delete-instances");
+      expect(sent.at(-1)?.data.paths).toEqual([
+        "game.ServerScriptService.Fresh",
+        "game.Workspace.Part",
+      ]);
+      yield* Fiber.interrupt(plugin.fiber);
+    }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+});
+
+describe("image generation tools", () => {
+  const imageLayer = (robloxStudio: Record<string, unknown>) =>
+    StudioTools.layer.pipe(
+      Layer.provideMerge(StudioBridge.layer),
+      Layer.provide(ServerSettingsService.layerTest({ robloxStudio })),
+      Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+      Layer.provide(RojoWorkspaces.layerNone),
+      Layer.provide(NodeServices.layer),
+    );
+
+  it.effect("are advertised only once image generation is on and configured", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const names = (yield* tools.advertised).map((tool) => tool.name);
+      expect(names).not.toContain("generate_image");
+      expect(names).toContain("stage_texture_preview");
+      expect(tools.list.map((tool) => tool.name)).toContain("generate_image");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("advertise generate_image as destructive while approval is required", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const advertised = yield* tools.advertised;
+      expect(advertised.find((tool) => tool.name === "generate_image")?.risk).toBe("irreversible");
+    }).pipe(
+      Effect.provide(
+        imageLayer({ imageGeneration: true, imageApiKey: "k", imageRequireApproval: true }),
+      ),
+    ),
+  );
+
+  it.effect("stop at the per-turn cap before calling the service", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const evidence = yield* StudioEvidence;
+      yield* evidence.reserveImages({ threadId: "thread-1", wanted: 2, cap: 2 });
+      const result = yield* tools.call(
+        "generate_image",
+        { prompt: "a spark", purpose: "particle" },
+        { threadId: "thread-1" },
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({
+        text: expect.stringContaining("image_cap_reached"),
+      });
+    }).pipe(
+      Effect.provide(
+        imageLayer({
+          imageGeneration: true,
+          imageApiKey: "k",
+          imageMaxPerTurn: 2,
+          imageProvider: "custom",
+          imageBaseUrl: "http://127.0.0.1:9/v1",
+          imageModel: "test-model",
+        }),
+      ),
+    ),
   );
 });

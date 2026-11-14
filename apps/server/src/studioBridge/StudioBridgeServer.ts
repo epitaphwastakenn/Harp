@@ -289,7 +289,7 @@ const routesFor = (input: {
           : json(200, reply.body);
       }),
     ),
-    // No server-initiated stream: the tool list never changes while the bridge runs.
+    // No server-initiated stream and listChanged is false: tools/list depends on the image settings, so a session open before they change must restart to see the new list.
     HttpRouter.add(
       "GET",
       StudioRoutes.mcp,

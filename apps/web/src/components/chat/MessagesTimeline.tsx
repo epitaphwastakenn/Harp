@@ -1,3 +1,5 @@
+import { indexResultRunFlags } from "./results/turnResults.logic";
+import { useQuietThreadVisibleTurnItems } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
@@ -270,6 +272,7 @@ interface MessagesTimelineProps {
   announceTurnStatus?: boolean;
   onOpenToolDiff?: (target: ToolCallDiffTarget) => void;
   onOpenTurnDiff?: (runId: RunId, filePath?: string) => void;
+  onOpenResults?: (runId: RunId) => void;
   onReviewTurnDiff?: (runId: RunId) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   renderHtmlRender?: TimelineRowSharedState["renderHtmlRender"];
@@ -389,6 +392,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   announceTurnStatus = true,
   onOpenToolDiff,
   onOpenTurnDiff,
+  onOpenResults,
   onReviewTurnDiff = NOOP_REVIEW_TURN_DIFF,
   onOpenThread,
   renderHtmlRender,
@@ -487,6 +491,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }
   const citationThreadRef = parseScopedThreadKey(routeThreadKey);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
+  const resultRunFlags = indexResultRunFlags(useQuietThreadVisibleTurnItems(citationThreadRef));
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
@@ -1093,6 +1098,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     openPullRequest,
     onOpenToolDiff,
     onOpenTurnDiff,
+    onOpenResults,
+    resultRunFlags,
     onReviewTurnDiff,
     diffPresentation,
     diffIgnoreWhitespace,

@@ -19,14 +19,25 @@ import {
   maxRojoScannedFolders,
   parseInstancePath,
   parseRojoProject,
+  planRojoCreation,
+  renameRojoEntry,
+  rojoEntryParent,
+  rojoEntryNameProblem,
   rojoLayout,
+  rojoParentTarget,
   rojoPortHints,
   rojoProjectsForPlace,
   rojoScriptCandidates,
+  rojoScriptSuffixes,
+  rojoSidecarName,
+  rojoTrashStamp,
+  rojoTrashTarget,
   rojoTreePaths,
   servedRojoProjects,
   shouldScanRojoFolder,
+  splitRojoScriptName,
   type ParsedRojoProject,
+  type RojoNewNode,
   type RojoProject,
 } from "./rojoProjects.ts";
 
@@ -49,6 +60,35 @@ export type RojoScriptLocation =
     }
   | { readonly kind: "ambiguous"; readonly files: ReadonlyArray<string> };
 
+export interface RojoInstanceQuery {
+  readonly root: string;
+  readonly instancePath: string;
+  readonly placeId?: number | undefined;
+  readonly placeName?: string | undefined;
+}
+
+export type RojoParentLocation = {
+  readonly kind: "directory" | "script";
+  readonly project: RojoProject;
+  readonly absolute: string;
+  readonly relative: string;
+  readonly serving: boolean;
+  readonly mappedByPath?: boolean;
+};
+
+export interface RojoEntryLocation {
+  readonly project: RojoProject;
+  readonly entry: "file" | "directory";
+  readonly script: boolean;
+  readonly absolute: string;
+  readonly relative: string;
+  readonly serving: boolean;
+}
+
+export type RojoStructuralResult =
+  | { readonly ok: true; readonly files: ReadonlyArray<string> }
+  | { readonly ok: false; readonly reason: string };
+
 export interface RojoWorkspacesShape {
   readonly projects: (root: string) => Effect.Effect<ReadonlyArray<RojoProject>>;
   readonly status: (root: string) => Effect.Effect<RojoWorkspaceStatus>;
@@ -63,6 +103,25 @@ export interface RojoWorkspacesShape {
     readonly placeName?: string | undefined;
     readonly studioSource?: string | undefined;
   }) => Effect.Effect<RojoScriptLocation | undefined>;
+  readonly locateParent: (
+    input: RojoInstanceQuery,
+  ) => Effect.Effect<RojoParentLocation | undefined>;
+  readonly locateEntry: (input: RojoInstanceQuery) => Effect.Effect<RojoEntryLocation | undefined>;
+  readonly createEntries: (input: {
+    readonly root: string;
+    readonly parent: RojoParentLocation;
+    readonly nodes: ReadonlyArray<RojoNewNode>;
+  }) => Effect.Effect<RojoStructuralResult>;
+  readonly trashEntry: (input: {
+    readonly root: string;
+    readonly location: RojoEntryLocation;
+  }) => Effect.Effect<RojoStructuralResult>;
+  readonly moveEntry: (input: {
+    readonly root: string;
+    readonly location: RojoEntryLocation;
+    readonly name?: string | undefined;
+    readonly to?: RojoParentLocation | undefined;
+  }) => Effect.Effect<RojoStructuralResult>;
 }
 
 export class RojoWorkspaces extends Context.Service<RojoWorkspaces, RojoWorkspacesShape>()(
@@ -75,11 +134,14 @@ interface OwnedServer {
   exited: boolean;
 }
 
+const mappedScriptReason =
+  "the script is mapped directly by the project file, so giving it children would move it";
+
 const stripAnsi = (text: string) => text.replace(/\u001B\[[0-9;?]*[A-Za-z]/gu, "");
 
 const normalizeEol = (text: string) => text.replaceAll("\r\n", "\n");
 
-const probe = (port: number) =>
+const probe = (port: number, projectName?: string) =>
   Effect.promise(async () => {
     try {
       const response = await fetch(`http://127.0.0.1:${String(port)}/api/rojo`, {
@@ -87,11 +149,15 @@ const probe = (port: number) =>
       });
       if (!response.ok) return false;
       const body: unknown = await response.json();
-      return (
-        typeof body === "object" &&
-        body !== null &&
-        ("serverVersion" in body || "projectName" in body || "sessionId" in body)
-      );
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !("serverVersion" in body || "projectName" in body || "sessionId" in body)
+      ) {
+        return false;
+      }
+      if (projectName === undefined || !("projectName" in body)) return true;
+      return body.projectName === projectName;
     } catch {
       return false;
     }
@@ -197,7 +263,7 @@ const make = Effect.gen(function* () {
     project: RojoProject,
   ) {
     const server = owned.get(serverKey(root, project.file));
-    const alive = yield* probe(project.port);
+    const alive = yield* probe(project.port, project.name);
     const base = {
       file: project.file,
       label: project.label,
@@ -263,7 +329,8 @@ const make = Effect.gen(function* () {
   const start = Effect.fn("RojoWorkspaces.start")(function* (root: string, project: RojoProject) {
     const key = serverKey(root, project.file);
     const current = owned.get(key);
-    if ((current !== undefined && !current.exited) || (yield* probe(project.port))) return;
+    if ((current !== undefined && !current.exited) || (yield* probe(project.port, project.name)))
+      return;
     const rojo = yield* findRojo();
     if (rojo === undefined) {
       owned.set(key, { child: undefined, lines: [rojoMissing], exited: true });
@@ -298,7 +365,7 @@ const make = Effect.gen(function* () {
     });
     owned.set(key, server);
     yield* waitFor(
-      probe(project.port).pipe(Effect.map((alive) => alive || server.exited)),
+      probe(project.port, project.name).pipe(Effect.map((alive) => alive || server.exited)),
       startTimeoutMs,
     );
   });
@@ -369,9 +436,273 @@ const make = Effect.gen(function* () {
       project,
       absolute,
       relative: relativeOf(absolute),
-      serving: yield* probe(project.port),
+      serving: yield* probe(project.port, project.name),
     };
   });
+
+  const isDirectory = (target: string) =>
+    fs.stat(target).pipe(
+      Effect.map((info) => info.type === "Directory"),
+      Effect.orElseSucceed(() => false),
+    );
+
+  const exists = (target: string) => fs.exists(target).pipe(Effect.orElseSucceed(() => false));
+
+  const relativeTo = (root: string, absolute: string) =>
+    path.relative(root, absolute).split(path.sep).join("/");
+
+  const projectFolder = (root: string, project: RojoProject) =>
+    path.dirname(path.join(root, project.file));
+
+  const scriptStem = (script: string) =>
+    path.join(
+      path.dirname(script),
+      splitRojoScriptName(path.basename(script))?.stem ?? path.basename(script),
+    );
+
+  const locateParent: RojoWorkspacesShape["locateParent"] = Effect.fn(
+    "RojoWorkspaces.locateParent",
+  )(function* (input) {
+    const segments = parseInstancePath(input.instancePath);
+    if (segments === undefined) return undefined;
+    const all = yield* projects(input.root);
+    for (const project of rojoProjectsForPlace(all, input)) {
+      const target = rojoParentTarget(project, segments);
+      if (target === undefined) continue;
+      const folder = projectFolder(input.root, project);
+      const found = (kind: "directory" | "script", absolute: string, mappedByPath = false) =>
+        Effect.map(probe(project.port, project.name), (serving): RojoParentLocation => ({
+          kind,
+          project,
+          absolute,
+          relative: relativeTo(input.root, absolute),
+          serving,
+          ...(mappedByPath ? { mappedByPath } : {}),
+        }));
+      if (target.kind === "file") {
+        const absolute = path.resolve(folder, target.file);
+        if (yield* isFile(absolute)) return yield* found("script", absolute, true);
+        continue;
+      }
+      let directory = path.resolve(folder, target.base);
+      if (!(yield* isDirectory(directory))) continue;
+      let reachable = true;
+      for (const [index, segment] of target.rest.entries()) {
+        const next = path.join(directory, segment);
+        if (yield* isDirectory(next)) {
+          directory = next;
+          continue;
+        }
+        if (index === target.rest.length - 1) {
+          for (const suffix of rojoScriptSuffixes) {
+            if (yield* isFile(next + suffix)) return yield* found("script", next + suffix);
+          }
+        }
+        reachable = false;
+        break;
+      }
+      if (reachable) return yield* found("directory", directory);
+    }
+    return undefined;
+  });
+
+  const locateEntry: RojoWorkspacesShape["locateEntry"] = Effect.fn("RojoWorkspaces.locateEntry")(
+    function* (input) {
+      const segments = parseInstancePath(input.instancePath);
+      if (segments === undefined) return undefined;
+      const all = yield* projects(input.root);
+      for (const project of rojoProjectsForPlace(all, input)) {
+        const parent = rojoEntryParent(project, segments);
+        if (parent === undefined) continue;
+        const folder = path.resolve(projectFolder(input.root, project), parent.directory);
+        const directory = path.join(folder, parent.name);
+        let found: { entry: "file" | "directory"; script: boolean; absolute: string } | undefined;
+        if (yield* isDirectory(directory)) {
+          let script = false;
+          for (const suffix of rojoScriptSuffixes) {
+            if (yield* isFile(path.join(directory, `init${suffix}`))) script = true;
+          }
+          found = { entry: "directory", script, absolute: directory };
+        } else {
+          for (const suffix of rojoScriptSuffixes) {
+            if (yield* isFile(directory + suffix)) {
+              found = { entry: "file", script: true, absolute: directory + suffix };
+              break;
+            }
+          }
+        }
+        if (found === undefined) continue;
+        return {
+          project,
+          ...found,
+          relative: relativeTo(input.root, found.absolute),
+          serving: yield* probe(project.port, project.name),
+        };
+      }
+      return undefined;
+    },
+  );
+
+  const moveSidecar = Effect.fn("RojoWorkspaces.moveSidecar")(function* (
+    from: string,
+    toFolder: string,
+    toBase: string,
+  ) {
+    const oldName = rojoSidecarName(path.basename(from));
+    const newName = rojoSidecarName(toBase);
+    if (oldName === undefined || newName === undefined) return;
+    const source = path.join(path.dirname(from), oldName);
+    if (yield* exists(source)) {
+      yield* fs.rename(source, path.join(toFolder, newName)).pipe(Effect.ignore);
+    }
+  });
+
+  const moveSidecarIfFile = (location: RojoEntryLocation, toFolder: string, toBase: string) =>
+    location.entry === "file" ? moveSidecar(location.absolute, toFolder, toBase) : Effect.void;
+
+  const promote = Effect.fn("RojoWorkspaces.promote")(function* (script: string) {
+    const parts = splitRojoScriptName(path.basename(script));
+    const directory = scriptStem(script);
+    yield* fs.makeDirectory(directory, { recursive: true });
+    yield* fs.rename(script, path.join(directory, `init${parts?.suffix ?? ".luau"}`));
+    const sidecar = `${directory}.meta.json`;
+    if (parts !== undefined && (yield* exists(sidecar))) {
+      yield* fs.rename(sidecar, path.join(directory, "init.meta.json"));
+    }
+    return directory;
+  });
+
+  const guard = <A, E>(work: Effect.Effect<A, E>, fallback: string) =>
+    work.pipe(
+      Effect.catch((error) =>
+        Effect.succeed({
+          ok: false as const,
+          reason: `${fallback}: ${error instanceof Error ? error.message : String(error)}`,
+        }),
+      ),
+    );
+
+  const createEntries: RojoWorkspacesShape["createEntries"] = Effect.fn(
+    "RojoWorkspaces.createEntries",
+  )(function* (input) {
+    if (input.parent.mappedByPath === true) return { ok: false, reason: mappedScriptReason };
+    const planned = planRojoCreation("", input.nodes);
+    const nodeProblem = (siblings: ReadonlyArray<RojoNewNode>): string | undefined => {
+      const seen = new Set<string>();
+      for (const node of siblings) {
+        const problem = rojoEntryNameProblem(node.name);
+        if (problem !== undefined) return problem;
+        const key = node.name.toLowerCase();
+        if (seen.has(key)) return `"${node.name}" is created twice in the same place`;
+        seen.add(key);
+        const inner = nodeProblem(node.children);
+        if (inner !== undefined) return inner;
+      }
+      return undefined;
+    };
+    const problem = nodeProblem(input.nodes);
+    if (problem !== undefined) return { ok: false, reason: problem };
+    const base =
+      input.parent.kind === "script" ? scriptStem(input.parent.absolute) : input.parent.absolute;
+    for (const node of input.nodes) {
+      for (const taken of [node.name, ...rojoScriptSuffixes.map((suffix) => node.name + suffix)]) {
+        const clash = path.join(base, taken);
+        if (yield* exists(clash)) {
+          return { ok: false, reason: `${relativeTo(input.root, clash)} already exists` };
+        }
+      }
+    }
+    return yield* guard(
+      Effect.gen(function* () {
+        const directory =
+          input.parent.kind === "script" ? yield* promote(input.parent.absolute) : base;
+        const files: string[] = [];
+        for (const entry of planned) {
+          const target = path.join(directory, entry.path);
+          if (entry.kind === "directory") {
+            yield* fs.makeDirectory(target, { recursive: true });
+          } else {
+            yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+            yield* fs.writeFileString(target, entry.content ?? "");
+          }
+          files.push(relativeTo(input.root, target));
+        }
+        return { ok: true as const, files };
+      }),
+      "Could not create the files",
+    );
+  });
+
+  const trashEntry: RojoWorkspacesShape["trashEntry"] = Effect.fn("RojoWorkspaces.trashEntry")(
+    function* (input) {
+      if (input.location.relative.startsWith("..")) {
+        return { ok: false, reason: "the files are outside the workspace, so they are left alone" };
+      }
+      const stamp = rojoTrashStamp(yield* Clock.currentTimeMillis);
+      const target = path.join(input.root, rojoTrashTarget(stamp, input.location.relative));
+      return yield* guard(
+        Effect.gen(function* () {
+          yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+          const ignore = path.join(input.root, ".harp", ".gitignore");
+          if (!(yield* exists(ignore))) yield* fs.writeFileString(ignore, "*\n");
+          yield* moveSidecarIfFile(input.location, path.dirname(target), path.basename(target));
+          yield* fs.rename(input.location.absolute, target);
+          return { ok: true as const, files: [relativeTo(input.root, target)] };
+        }),
+        "Could not move the files to the trash folder",
+      );
+    },
+  );
+
+  const moveEntry: RojoWorkspacesShape["moveEntry"] = Effect.fn("RojoWorkspaces.moveEntry")(
+    function* (input) {
+      const { location } = input;
+      const basename = path.basename(location.absolute);
+      if (input.name !== undefined) {
+        const problem = rojoEntryNameProblem(input.name);
+        if (problem !== undefined) return { ok: false, reason: problem };
+      }
+      const renamed =
+        input.name === undefined ? basename : renameRojoEntry(basename, location.entry, input.name);
+      if (renamed === undefined) return { ok: false, reason: "the file name is not a script name" };
+      const into =
+        input.to === undefined
+          ? path.dirname(location.absolute)
+          : input.to.kind === "script"
+            ? scriptStem(input.to.absolute)
+            : input.to.absolute;
+      if (
+        into === location.absolute ||
+        (into + path.sep).startsWith(location.absolute + path.sep)
+      ) {
+        return { ok: false, reason: "an instance cannot move into itself" };
+      }
+      if (
+        input.to !== undefined &&
+        (input.to.absolute === location.absolute ||
+          into === scriptStem(location.absolute) ||
+          (into + path.sep).startsWith(scriptStem(location.absolute) + path.sep))
+      ) {
+        return { ok: false, reason: "an instance cannot move into itself" };
+      }
+      if (input.to?.mappedByPath === true) return { ok: false, reason: mappedScriptReason };
+      const clash = path.join(into, renamed);
+      if (yield* exists(clash)) {
+        return { ok: false, reason: `${relativeTo(input.root, clash)} already exists` };
+      }
+      return yield* guard(
+        Effect.gen(function* () {
+          const folder = input.to?.kind === "script" ? yield* promote(input.to.absolute) : into;
+          const target = path.join(folder, renamed);
+          yield* fs.makeDirectory(folder, { recursive: true });
+          yield* moveSidecarIfFile(location, folder, renamed);
+          yield* fs.rename(location.absolute, target);
+          return { ok: true as const, files: [relativeTo(input.root, target)] };
+        }),
+        "Could not move the files",
+      );
+    },
+  );
 
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -380,7 +711,17 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  return RojoWorkspaces.of({ projects, status, control, locateScript });
+  return RojoWorkspaces.of({
+    projects,
+    status,
+    control,
+    locateScript,
+    locateParent,
+    locateEntry,
+    createEntries,
+    trashEntry,
+    moveEntry,
+  });
 });
 
 export const layer = Layer.effect(RojoWorkspaces, make);
@@ -393,6 +734,11 @@ const noStatus = Effect.succeed<RojoWorkspaceStatus>({
 });
 // @effect-diagnostics-next-line effectSucceedWithVoid:off - No file is a value, not a void step.
 const noScript = Effect.succeed<RojoScriptLocation | undefined>(undefined);
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - No parent is a value, not a void step.
+const noParent = Effect.succeed<RojoParentLocation | undefined>(undefined);
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - No entry is a value, not a void step.
+const noEntry = Effect.succeed<RojoEntryLocation | undefined>(undefined);
+const noStructure = Effect.succeed<RojoStructuralResult>({ ok: false, reason: "no Rojo project" });
 
 export const layerNone = Layer.succeed(
   RojoWorkspaces,
@@ -401,5 +747,10 @@ export const layerNone = Layer.succeed(
     status: Effect.fn("RojoWorkspaces.status")(() => noStatus),
     control: Effect.fn("RojoWorkspaces.control")(() => noStatus),
     locateScript: Effect.fn("RojoWorkspaces.locateScript")(() => noScript),
+    locateParent: Effect.fn("RojoWorkspaces.locateParent")(() => noParent),
+    locateEntry: Effect.fn("RojoWorkspaces.locateEntry")(() => noEntry),
+    createEntries: Effect.fn("RojoWorkspaces.createEntries")(() => noStructure),
+    trashEntry: Effect.fn("RojoWorkspaces.trashEntry")(() => noStructure),
+    moveEntry: Effect.fn("RojoWorkspaces.moveEntry")(() => noStructure),
   }),
 );

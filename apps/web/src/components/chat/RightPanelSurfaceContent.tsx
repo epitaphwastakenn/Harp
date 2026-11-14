@@ -4,6 +4,7 @@ import type {
   PreviewAnnotationPayload,
   ProjectId,
   ResolvedKeybindingsConfig,
+  RunId,
   ScopedThreadRef,
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -31,6 +32,9 @@ const PreviewPanel = lazy(() =>
 const DiffPanel = lazy(() => import("../DiffPanel"));
 const ProjectDiffCenter = lazy(() => import("../ProjectDiffCenter"));
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+const ResultsPanel = lazy(() =>
+  import("./results/ResultsPanel").then((module) => ({ default: module.ResultsPanel })),
+);
 
 type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -77,6 +81,7 @@ export function RightPanelSurfaceContent(props: {
   readonly pullRequest: RightPanelPullRequestProps;
   readonly files: RightPanelFileProps;
   readonly sideChatParentPanel: SideChatParentPanel;
+  readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
 }) {
   const { surface, threadRef, visible, onCloseSurface } = props;
   if (surface === null) return null;
@@ -172,6 +177,17 @@ export function RightPanelSurfaceContent(props: {
     }
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
+    case "results":
+      return (
+        <Suspense fallback={null}>
+          <ResultsPanel
+            key={scopedThreadKey(threadRef)}
+            threadRef={threadRef}
+            requestedRunId={surface.runId}
+            onOpenTurnDiff={props.onOpenTurnDiff}
+          />
+        </Suspense>
+      );
     case "side-chat":
       // Not lazy: revealing a suspended tiptap editor tears down its view and crashes the composer.
       return (

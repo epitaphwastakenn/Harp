@@ -30,7 +30,12 @@ import {
   turnItemOutputImages,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+  modelPreviewFromToolItem,
+  type ModelPreviewReference,
+} from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -154,6 +159,10 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly images: ReturnType<typeof turnItemOutputImages>;
+      readonly models: ReadonlyArray<{
+        readonly itemId: string;
+        readonly preview: ModelPreviewReference;
+      }>;
     }
   | {
       readonly id: string;
@@ -834,12 +843,15 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     });
     const images = turnItemOutputImages(item);
     if (images.length > 0 && item.status === "completed") {
+      const modelPreview =
+        item.type === "dynamic_tool" ? modelPreviewFromToolItem(item) : undefined;
       entries.push({
         id: `${item.id}:images`,
         kind: "tool-images",
         createdAt,
         runId: item.runId,
         images,
+        models: modelPreview === undefined ? [] : [{ itemId: item.id, preview: modelPreview }],
         ...attemptMetadata,
       });
     }

@@ -1,3 +1,4 @@
+import { studioCodeOfCall, type StudioCodeCall } from "@t3tools/shared/studioCode";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
@@ -7255,7 +7256,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly appName?: string;
           readonly options?: ReadonlyArray<ProviderApprovalOption>;
           readonly presentation?: ReturnType<typeof claudeApprovalPresentation>;
-
+          readonly studioCode?: StudioCodeCall;
           readonly questions?: ReadonlyArray<OrchestrationV2UserInputQuestion>;
         }) {
           const createdAt = yield* DateTime.now;
@@ -7347,6 +7348,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
                   ...(input.appName === undefined ? {} : { appName: input.appName }),
                   ...(input.options === undefined ? {} : { options: input.options }),
+                  ...(input.studioCode === undefined ? {} : { studioCode: input.studioCode }),
                   ...input.presentation,
                 }
               : {
@@ -10007,6 +10009,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
 
           const requestKind = providerRequestKindFromClaudeTool(toolName);
           const studio = studioPresentation(toolName, toolInput);
+          const studioCode = /(?:^|__)studio__/u.test(toolName)
+            ? studioCodeOfCall(toolName, toolInput)
+            : undefined;
           const command = inputRecordValue(nativeToolInput, "command");
           const prompt =
             (studio?.title === undefined ? undefined : `Roblox Studio: ${studio.title}`) ??
@@ -10021,6 +10026,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeRequestId,
             requestKind,
             prompt,
+            ...(studioCode === undefined ? {} : { studioCode }),
             presentation: claudeApprovalPresentation({
               permissionMode: context.queryPolicy.permissionMode,
               prompt,

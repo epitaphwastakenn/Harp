@@ -14,6 +14,7 @@ import { ProjectId } from "@t3tools/contracts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as StudioBridge from "../studioBridge/StudioBridge.ts";
 import { loadedSkillResources } from "../studioBridge/studioSkills.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as SealTurnInput from "./SealTurnInput.ts";
@@ -403,6 +404,62 @@ describe("SealTurnInput", () => {
         expect(compacted.frame(compacted.text)).toBe("/compact keep the shop work");
         expect(loadedSkillResources("thread-1").size).toBe(0);
         expect(yield* turn("conversation-2", false)).toContain("<studio_instructions>");
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("leaves the Studio selection out when the user dismissed its chip", () =>
+    Effect.gen(function* () {
+      const layer = SealTurnInput.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ServerSettings.ServerSettingsService)({
+              getSettings: Effect.succeed({
+                sealsInstructions: "",
+                imageViewerEnabled: false,
+                robloxStudio: { mode: "sealcode", studioContext: true },
+              } as never),
+            }),
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              // @effect-diagnostics-next-line effectSucceedWithVoid:off - A missing instance is a value, not a void step.
+              getInstance: () => Effect.succeed(undefined),
+            }),
+            Layer.mock(TextGeneration.TextGeneration)({}),
+            Layer.succeed(RobloxStudioConfig, {
+              ...RobloxStudioConfig.defaultValue(),
+              appliesTo: () => Effect.succeed(true),
+            }),
+            Layer.mock(StudioBridge.StudioBridge)({
+              peers: Effect.succeed([]),
+              selections: Effect.succeed([
+                {
+                  instanceId: "place-1",
+                  placeName: "Obby",
+                  at: 0,
+                  count: 1,
+                  items: [{ path: "game.Workspace.Door", className: "Part" }],
+                },
+              ]),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* SealTurnInput.SealTurnInputV2;
+        const turn = (includeStudioSelection: boolean | undefined) =>
+          service
+            .prepare({
+              cwd: "/game",
+              workspaceRoot: "/game",
+              modelSelection: mainSelection,
+              includeStudioSelection,
+              text: "open it",
+              attachments: [],
+            })
+            .pipe(Effect.map((prepared) => prepared.frame(prepared.text)));
+        expect(yield* turn(undefined)).toContain("game.Workspace.Door");
+        expect(yield* turn(true)).toContain("game.Workspace.Door");
+        expect(yield* turn(false)).toBe("open it");
       }).pipe(Effect.provide(layer));
     }),
   );
