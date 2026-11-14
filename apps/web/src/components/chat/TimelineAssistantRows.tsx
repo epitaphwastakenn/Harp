@@ -33,6 +33,7 @@ import {
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { StudioEvidenceBadge } from "./StudioEvidenceBadge";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -187,40 +188,50 @@ function AssistantMessageMeta({
 }) {
   const ctx = use(TimelineRowCtx);
 
+  const evidenceRunId = projectedItem?.item.runId ?? null;
+
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
-        alwaysVisible
-          ? "opacity-100"
-          : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
-        className,
-      )}
-    >
-      {projectedItem?.item.status === "failed" ? (
-        <Badge variant="error" size="sm">
-          Failed
-        </Badge>
-      ) : projectedItem?.item.status === "interrupted" ? (
-        <Badge variant="warning" size="sm">
-          Interrupted
-        </Badge>
-      ) : null}
-      <AssistantCopyButton
-        message={message}
-        showCopyButton={showCopyButton}
-        streaming={copyStreaming}
-      />
-      {projectedItem?.item.type === "assistant_message" ? (
-        <AssistantForkButton projectedItem={projectedItem} />
-      ) : null}
-      {!message.streaming && (
-        <TimelineRowTimestamp
-          createdAt={message.updatedAt}
-          timestampFormat={ctx.timestampFormat}
+    <div className={cn("flex items-center gap-2", className)}>
+      <div
+        className={cn(
+          "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
           alwaysVisible
+            ? "opacity-100"
+            : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
+        )}
+      >
+        {projectedItem?.item.status === "failed" ? (
+          <Badge variant="error" size="sm">
+            Failed
+          </Badge>
+        ) : projectedItem?.item.status === "interrupted" ? (
+          <Badge variant="warning" size="sm">
+            Interrupted
+          </Badge>
+        ) : null}
+        <AssistantCopyButton
+          message={message}
+          showCopyButton={showCopyButton}
+          streaming={copyStreaming}
         />
-      )}
+        {projectedItem?.item.type === "assistant_message" ? (
+          <AssistantForkButton projectedItem={projectedItem} />
+        ) : null}
+        {!message.streaming && (
+          <TimelineRowTimestamp
+            createdAt={message.updatedAt}
+            timestampFormat={ctx.timestampFormat}
+            alwaysVisible
+          />
+        )}
+      </div>
+      {projectedItem !== undefined && evidenceRunId !== null && !message.streaming ? (
+        <StudioEvidenceBadge
+          environmentId={ctx.activeThreadEnvironmentId}
+          threadId={projectedItem.sourceThreadId}
+          runId={evidenceRunId}
+        />
+      ) : null}
     </div>
   );
 }

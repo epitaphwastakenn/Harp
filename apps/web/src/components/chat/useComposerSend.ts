@@ -1,4 +1,8 @@
 import {
+  studioSelectionContextRecord,
+  type StudioSelectionSummary,
+} from "@t3tools/shared/studioSelection";
+import {
   mergeDirectPreviewAnnotation,
   resolveBackgroundDraftWorkspaceOptions,
   shouldDockDraftHeroForSubmission,
@@ -165,6 +169,13 @@ type UsageLimitsPanel = ReturnType<typeof useUsageLimitsPanel>;
 type TimelineFollow = ReturnType<typeof useTimelineFollow>;
 
 interface ComposerSendInput {
+  readonly studioSelection?:
+    | {
+        readonly summary: StudioSelectionSummary;
+        readonly included: boolean;
+        readonly onSent: () => void;
+      }
+    | undefined;
   readonly environmentId: EnvironmentId;
   readonly routeThreadKey: string;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
@@ -888,8 +899,16 @@ export function useComposerSend(input: ComposerSendInput) {
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
+    const studioSelectionRecord =
+      input.studioSelection === undefined
+        ? undefined
+        : studioSelectionContextRecord(
+            input.studioSelection.summary,
+            input.studioSelection.included,
+          );
     const buildOutgoingMessageContext = (attachmentIds: ReadonlyArray<string>) =>
       buildMessageContext({
+        studioSelection: studioSelectionRecord,
         terminalContexts: composerTerminalContextsSnapshot,
         reviewComments: composerReviewCommentsSnapshot,
         previewAnnotations: composerPreviewAnnotationsSnapshot,
@@ -903,6 +922,7 @@ export function useComposerSend(input: ComposerSendInput) {
     const outgoingMessageContext = buildOutgoingMessageContext(
       composerAttachmentsSnapshot.map((attachment) => attachment.id),
     );
+    input.studioSelection?.onSent();
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({

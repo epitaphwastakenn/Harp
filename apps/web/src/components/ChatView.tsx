@@ -36,7 +36,12 @@ import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import { useStableCallback } from "../hooks/useStableCallback";
-import { useStudioControlsApply, useThreadStudioControls } from "../hooks/useThreadStudioControls";
+import {
+  useStudioControlsApply,
+  useStudioSelections,
+  useThreadStudioControls,
+} from "../hooks/useThreadStudioControls";
+import { studioSelectionLabel, summarizeStudioSelections } from "@t3tools/shared/studioSelection";
 import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -3053,6 +3058,19 @@ export default function ChatView(props: ChatViewProps) {
     serverControls: serverThread?.studioControls,
   });
   const changeStudioControlsStable = useStableCallback(changeStudioControls);
+  const studioSelections = useStudioSelections(environmentId, studioControlsApply);
+  const studioSelection = summarizeStudioSelections(studioSelections, studioControls);
+  const studioSelectionKey =
+    studioSelection === undefined
+      ? null
+      : `${studioSelectionLabel(studioSelection)}:${String(studioSelection.count)}`;
+  const [dismissedSelectionKey, setDismissedSelectionKey] = useState<string | null>(null);
+  const studioSelectionDismissed =
+    studioSelectionKey !== null && dismissedSelectionKey === studioSelectionKey;
+  const dismissStudioSelection = useStableCallback(() =>
+    setDismissedSelectionKey(studioSelectionKey),
+  );
+  const resetStudioSelectionDismissal = useStableCallback(() => setDismissedSelectionKey(null));
   const { onResume, isResuming } = useComposerResume({
     environmentId,
     routeThreadKey,
@@ -3089,6 +3107,14 @@ export default function ChatView(props: ChatViewProps) {
     defaultRuntimeMode,
   });
   const { onSend } = useComposerSend({
+    studioSelection:
+      studioSelection === undefined
+        ? undefined
+        : {
+            summary: studioSelection,
+            included: !studioSelectionDismissed,
+            onSent: resetStudioSelectionDismissal,
+          },
     environmentId,
     routeThreadKey,
     currentRouteThreadKeyRef,
@@ -3909,6 +3935,14 @@ export default function ChatView(props: ChatViewProps) {
                               handleRuntimeModeChange={handleRuntimeModeChangeStable}
                               handleInteractionModeChange={handleInteractionModeChangeStable}
                               studioControls={studioControls}
+                              studioSelectionChip={
+                                studioSelection === undefined || studioSelectionDismissed
+                                  ? undefined
+                                  : {
+                                      label: studioSelectionLabel(studioSelection),
+                                      onDismiss: dismissStudioSelection,
+                                    }
+                              }
                               onStudioControlsChange={
                                 studioControlsApply && threadSession.receivesMcpServers
                                   ? changeStudioControlsStable

@@ -3,6 +3,7 @@ import type {
   OrchestrationV2StudioControls,
   ProjectId,
   RobloxStudioPlace,
+  RobloxStudioSelectionSummary,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -62,6 +63,16 @@ export function useStudioPlaces(
     enabled ? serverEnvironment.robloxStudioStatus({ environmentId, input: {} }) : null,
   );
   return status.data?.bridge?.places;
+}
+
+export function useStudioSelections(
+  environmentId: EnvironmentId,
+  enabled: boolean,
+): ReadonlyArray<RobloxStudioSelectionSummary> | undefined {
+  const status = useEnvironmentQuery(
+    enabled ? serverEnvironment.robloxStudioStatus({ environmentId, input: {} }) : null,
+  );
+  return status.data?.bridge?.selections;
 }
 
 export function useThreadStudioControls(input: {
