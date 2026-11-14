@@ -1,3 +1,4 @@
+import { parseInstancePath } from "@t3tools/shared/instancePath";
 import * as DateTime from "effect/DateTime";
 
 export type RojoProjectKind = "place" | "model";
@@ -170,38 +171,7 @@ export const rojoLayout = (projects: ReadonlyArray<RojoProject>): RojoLayout => 
   return served.length === 0 ? "none" : served.length === 1 ? "single" : "multi";
 };
 
-export const parseInstancePath = (path: string): ReadonlyArray<string> | undefined => {
-  const segments: string[] = [];
-  let index = 0;
-  const text = path.trim();
-  while (index < text.length) {
-    if (text[index] === ".") {
-      index += 1;
-      continue;
-    }
-    if (text[index] === "[") {
-      const quote = text[index + 1];
-      if (quote !== '"' && quote !== "'") return undefined;
-      let value = "";
-      index += 2;
-      while (index < text.length && text[index] !== quote) {
-        if (text[index] === "\\" && index + 1 < text.length) index += 1;
-        value += text[index];
-        index += 1;
-      }
-      if (text[index] !== quote || text[index + 1] !== "]") return undefined;
-      segments.push(value);
-      index += 2;
-      continue;
-    }
-    const match = /^[^.[]+/u.exec(text.slice(index));
-    if (match === null) return undefined;
-    segments.push(match[0]);
-    index += match[0].length;
-  }
-  if (segments[0] === "game") segments.shift();
-  return segments.length === 0 ? undefined : segments;
-};
+export { parseInstancePath };
 
 const joinPath = (base: string, ...rest: ReadonlyArray<string>) =>
   [base, ...rest]

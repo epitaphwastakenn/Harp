@@ -240,7 +240,7 @@ export const layer = Layer.effect(
               )
             : undefined;
         const studioLimits = studioApplies
-          ? studioControlsContext(input.studioControls)
+          ? studioControlsContext(input.studioControls, current.robloxStudio.protectedPlaces)
           : undefined;
         const rojoRoot = target.workspaceRoot;
         const rojo =

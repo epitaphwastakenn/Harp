@@ -23,6 +23,7 @@ local Animation = require(script.Parent.Handlers.Animation)
 local Perf = require(script.Parent.Handlers.Perf)
 local Files = require(script.Parent.Handlers.Files)
 local Debug = require(script.Parent.Handlers.Debug)
+local Undo = require(script.Parent.Undo)
 
 local Router = {}
 
@@ -35,6 +36,7 @@ local ROUTES = {
 	["set-properties"] = Instances.setProperties,
 	["create-instances"] = Instances.create,
 	["delete-instances"] = Instances.delete,
+	["resolve-refs"] = Instances.resolveRefs,
 	["build-instances"] = Build.run,
 	["get-script-source"] = Scripts.get,
 	["set-script-source"] = Scripts.set,
@@ -74,6 +76,7 @@ local ROUTES = {
 	["import-rbxm"] = Files.import,
 	["network-profile"] = Debug.network,
 	["breakpoints"] = Debug.breakpoints,
+	["undo-apply"] = Undo.apply,
 }
 
 local MUTATING = {}

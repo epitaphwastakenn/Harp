@@ -6,6 +6,7 @@ local RunService = game:GetService("RunService")
 
 local Util = require(script.Parent.Parent.Util)
 local ScriptIndex = require(script.Parent.Parent.ScriptIndex)
+local Protected = require(script.Parent.Parent.Protected)
 
 local Luau = {}
 
@@ -95,6 +96,8 @@ function Luau.execute(args)
 
 	local guardScripts = RunService:IsEdit() and args.allowScriptChanges ~= true
 	local before = if RunService:IsEdit() then snapshotSources() else nil
+	local protectedPaths = if RunService:IsEdit() and type(args.protectedPaths) == "table" and #args.protectedPaths > 0 then args.protectedPaths else nil
+	local protectedBefore = if protectedPaths then Protected.snapshot(protectedPaths) else nil
 	local recording = Util.beginRecording("Run Luau")
 	local results = table.pack(xpcall(fn, function(err)
 		local trace = debug.traceback(tostring(err), 2)
@@ -129,6 +132,13 @@ function Luau.execute(args)
 		scriptsChanged = if #changed > 0 then changed else nil,
 		undoable = recording ~= nil,
 	}
+	if protectedPaths then
+		local touched = Protected.changed(protectedBefore, protectedPaths)
+		if #touched > 0 then
+			result.protectedChanged = touched
+			result.protectedWarning = "PROTECTED PATH CHANGED: this run changed " .. table.concat(touched, ", ") .. ", which the user protected. Harp cannot stop raw Luau. Tell the user plainly, and undo it (Ctrl+Z in Studio) unless they accept it."
+		end
+	end
 	if #reverted > 0 then
 		result.warning = "The code changed script sources, which were put back. Write script bodies with set_script_source or edit_script."
 	end

@@ -1578,6 +1578,16 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 600_000,
       idleTtlMs: 60_000,
     }),
+    studioUndoPreview: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:studio-undo-preview",
+      tag: WS_METHODS.getStudioUndoPreview,
+      staleTimeMs: 30_000,
+      idleTtlMs: 60_000,
+    }),
+    undoStudioTurn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:studio-undo-turn",
+      tag: WS_METHODS.studioUndoTurnChanges,
+    }),
     controlRojo: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:control-rojo",
       tag: WS_METHODS.serverControlRojo,

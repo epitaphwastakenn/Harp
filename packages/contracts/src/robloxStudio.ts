@@ -146,3 +146,37 @@ export const StudioTurnEvidence = Schema.Struct({
   failures: Schema.Number,
 });
 export type StudioTurnEvidence = typeof StudioTurnEvidence.Type;
+
+export const StudioUndoCounts = Schema.Struct({
+  scripts: Schema.Number,
+  files: Schema.Number,
+  properties: Schema.Number,
+  created: Schema.Number,
+  deleted: Schema.Number,
+  builds: Schema.Number,
+});
+export type StudioUndoCounts = typeof StudioUndoCounts.Type;
+
+export const StudioUndoNote = Schema.Struct({
+  what: Schema.String,
+  reason: Schema.String,
+});
+export type StudioUndoNote = typeof StudioUndoNote.Type;
+
+export const StudioUndoPreview = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.optionalKey(Schema.String),
+  studioConnected: Schema.Boolean,
+  counts: StudioUndoCounts,
+  notUndoable: Schema.Array(StudioUndoNote),
+});
+export type StudioUndoPreview = typeof StudioUndoPreview.Type;
+
+export const StudioUndoResult = Schema.Struct({
+  status: Schema.Literals(["done", "unavailable"]),
+  message: Schema.optionalKey(Schema.String),
+  restored: StudioUndoCounts,
+  skipped: Schema.Array(StudioUndoNote),
+  notUndoable: Schema.Array(StudioUndoNote),
+});
+export type StudioUndoResult = typeof StudioUndoResult.Type;

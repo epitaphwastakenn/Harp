@@ -127,6 +127,7 @@ const numberTriple = (value: unknown): [number, number, number] | undefined =>
 const readModelPreview = (
   jobDir: string,
   status: Record<string, unknown>,
+  openBlend?: string,
 ): { modelPreview?: ModelPreviewReference; modelPreviewError?: string } => {
   if (typeof status.glbError === "string") {
     return { modelPreviewError: `GLB export failed: ${status.glbError}` };
@@ -140,6 +141,7 @@ const readModelPreview = (
   }
   const checked = validateGlb(bytes);
   if (!checked.ok) return { modelPreviewError: checked.reason };
+  const continuedFrom = openBlend?.split(/[\\/]/u).filter(Boolean).at(-2);
   const model = (
     status.lint as { model?: { dimensions?: unknown; triangles?: unknown } } | undefined
   )?.model;
@@ -153,6 +155,8 @@ const readModelPreview = (
       dimensions: numberTriple(model?.dimensions) ?? [0, 0, 0],
       animationClips: checked.info.animationClips,
       sizeBytes: checked.info.sizeBytes,
+      jobId: NodePath.basename(jobDir),
+      ...(continuedFrom === undefined ? {} : { continuedFrom }),
     }),
   };
 };
@@ -270,7 +274,7 @@ export const runBlenderJob = (input: {
         ),
         previewPng: NodeFS.existsSync(previewPath) ? NodeFS.readFileSync(previewPath) : undefined,
         objPath: NodeFS.existsSync(objPath) ? objPath : undefined,
-        ...readModelPreview(jobDir, status),
+        ...readModelPreview(jobDir, status, input.openBlend),
       };
     },
     catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),

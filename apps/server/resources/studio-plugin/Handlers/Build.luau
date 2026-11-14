@@ -6,6 +6,7 @@
 local CollectionService = game:GetService("CollectionService")
 
 local Util = require(script.Parent.Parent.Util)
+local Undo = require(script.Parent.Parent.Undo)
 
 local Build = {}
 
@@ -189,6 +190,9 @@ function Build.run(args)
 			apply = function()
 				root.Parent = rootParent
 			end,
+			holds = function()
+				return root.Parent == rootParent
+			end,
 			undo = function()
 				root.Parent = nil
 			end,
@@ -321,6 +325,9 @@ function Build.run(args)
 				label = "attach " .. instance.Name,
 				apply = function()
 					instance.Parent = parent
+				end,
+				holds = function()
+					return instance.Parent == parent
 				end,
 				undo = function()
 					instance.Parent = nil
@@ -659,6 +666,9 @@ function Build.run(args)
 				apply = function()
 					old.Parent = nil
 				end,
+				holds = function()
+					return old.Parent == nil
+				end,
 				undo = function()
 					old.Parent = parent
 				end,
@@ -836,6 +846,10 @@ function Build.run(args)
 								error(string.format("%s.%s did not take the requested value", path, name), 0)
 							end
 						end,
+						holds = function()
+							local now = target[name]
+							return Util.same(now, value) or (value == nil and now == nil)
+						end,
 						undo = function()
 							target[name] = current
 						end,
@@ -852,6 +866,9 @@ function Build.run(args)
 						apply = function()
 							target:SetAttribute(key, value)
 						end,
+						holds = function()
+							return target:GetAttribute(key) == value
+						end,
 						undo = function()
 							target:SetAttribute(key, old)
 						end,
@@ -864,6 +881,9 @@ function Build.run(args)
 							label = "tag " .. tag,
 							apply = function()
 								CollectionService:AddTag(target, tag)
+							end,
+							holds = function()
+								return CollectionService:HasTag(target, tag)
 							end,
 							undo = function()
 								CollectionService:RemoveTag(target, tag)
@@ -882,6 +902,9 @@ function Build.run(args)
 						label = "pivot",
 						apply = function()
 							target:PivotTo(after)
+						end,
+						holds = function()
+							return Util.same(target:GetPivot(), after)
 						end,
 						undo = function()
 							target:PivotTo(before)
@@ -914,6 +937,9 @@ function Build.run(args)
 				label = "remove " .. target.Name,
 				apply = function()
 					target.Parent = nil
+				end,
+				holds = function()
+					return target.Parent == nil
 				end,
 				undo = function()
 					target.Parent = oldParent
@@ -958,6 +984,20 @@ function Build.run(args)
 	end
 	Util.finishRecording(recording, true)
 
+	local undoKey = Undo.requested(args)
+	local undoEntry = nil
+	if undoKey then
+		undoEntry = {
+			kind = "journal",
+			token = Undo.journal(undoKey, actions),
+			path = rootPathText,
+			created = counts.created,
+			cloned = counts.cloned,
+			updated = counts.updated,
+			removed = counts.removed,
+		}
+	end
+
 	if soleRootRemoval then
 		return {
 			success = true,
@@ -968,6 +1008,7 @@ function Build.run(args)
 			updated = 0,
 			removed = 1,
 			undoable = recording ~= nil,
+			undo = undoEntry,
 		}
 	end
 
@@ -1040,6 +1081,7 @@ function Build.run(args)
 		updated = counts.updated,
 		removed = counts.removed,
 		undoable = recording ~= nil,
+		undo = undoEntry,
 		scatter = if #scatterReports > 0 then reports else nil,
 		descendants = #scope,
 		classes = classes,

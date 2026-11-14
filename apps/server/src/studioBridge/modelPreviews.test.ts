@@ -146,6 +146,19 @@ describe("modelPreview in tool output", () => {
     expect(modelPreviewFromToolItem({ output })).toEqual(preview);
   });
 
+  it("keeps the job lineage and drops an oversized one", () => {
+    const lineage = { ...preview, jobId: "job-2", continuedFrom: "job-1" };
+    const output = [{ type: "text", text: JSON.stringify({ modelPreview: lineage }) }];
+    expect(modelPreviewFromToolItem({ output })).toEqual(lineage);
+    const long = [
+      {
+        type: "text",
+        text: JSON.stringify({ modelPreview: { ...preview, jobId: "x".repeat(300) } }),
+      },
+    ];
+    expect(modelPreviewFromToolItem({ output: long })).toEqual(preview);
+  });
+
   it("ignores malformed references", () => {
     const output = [
       { type: "text", text: JSON.stringify({ modelPreview: { ...preview, previewId: "../x" } }) },

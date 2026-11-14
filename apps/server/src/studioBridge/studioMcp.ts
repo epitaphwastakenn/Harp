@@ -34,6 +34,7 @@ export const handleMcpMessage = (
   message: unknown,
   tools: {
     readonly list: ReadonlyArray<StudioToolDefinition>;
+    readonly advertised?: Effect.Effect<ReadonlyArray<StudioToolDefinition>>;
     readonly call: (
       name: string,
       args: Record<string, unknown>,
@@ -81,7 +82,7 @@ export const handleMcpMessage = (
       case "tools/list":
         yield* onLinked;
         return reply({
-          tools: tools.list.map((tool) => ({
+          tools: (yield* tools.advertised ?? Effect.succeed(tools.list)).map((tool) => ({
             name: tool.name,
             title: tool.title,
             description: tool.description,

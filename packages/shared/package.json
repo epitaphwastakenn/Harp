@@ -63,6 +63,10 @@
       "types": "./src/studioSelection.ts",
       "import": "./src/studioSelection.ts"
     },
+    "./instancePath": {
+      "types": "./src/instancePath.ts",
+      "import": "./src/instancePath.ts"
+    },
     "./studioControls": {
       "types": "./src/studioControls.ts",
       "import": "./src/studioControls.ts"

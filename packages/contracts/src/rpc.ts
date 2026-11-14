@@ -43,6 +43,8 @@ import {
   RojoWorkspaceStatus,
   StudioTurnEvidence,
   StudioTurnEvidenceInput,
+  StudioUndoPreview,
+  StudioUndoResult,
 } from "./robloxStudio.ts";
 import {
   ServerVoiceTranscriptionInput,
@@ -483,6 +485,8 @@ export const WS_METHODS = {
   serverDetectRobloxProject: "server.detectRobloxProject",
   serverGetRojoStatus: "server.getRojoStatus",
   getStudioTurnEvidence: "server.getStudioTurnEvidence",
+  getStudioUndoPreview: "server.getStudioUndoPreview",
+  studioUndoTurnChanges: "server.studioUndoTurnChanges",
   serverControlRojo: "server.controlRojo",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
@@ -1400,6 +1404,18 @@ const WsGetStudioTurnEvidenceRpc = Rpc.make(WS_METHODS.getStudioTurnEvidence, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsGetStudioUndoPreviewRpc = Rpc.make(WS_METHODS.getStudioUndoPreview, {
+  payload: StudioTurnEvidenceInput,
+  success: StudioUndoPreview,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsStudioUndoTurnChangesRpc = Rpc.make(WS_METHODS.studioUndoTurnChanges, {
+  payload: StudioTurnEvidenceInput,
+  success: StudioUndoResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsServerControlRojoRpc = Rpc.make(WS_METHODS.serverControlRojo, {
   payload: RojoControlInput,
   success: RojoWorkspaceStatus,
@@ -1949,6 +1965,8 @@ export const SealCodeWsRpcGroup = RpcGroup.make(
   WsServerDetectRobloxProjectRpc,
   WsServerGetRojoStatusRpc,
   WsGetStudioTurnEvidenceRpc,
+  WsGetStudioUndoPreviewRpc,
+  WsStudioUndoTurnChangesRpc,
   WsServerControlRojoRpc,
   WsServerReconnectMcpRpc,
   WsSubscribeMcpStatusRpc,

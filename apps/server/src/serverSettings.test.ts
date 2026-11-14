@@ -281,6 +281,18 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("never sends the image generation API key to clients", () =>
+    Effect.gen(function* () {
+      const settings = yield* decodeServerSettings({
+        robloxStudio: { imageGeneration: true, imageApiKey: "sk-image-key", imageModel: "m" },
+      });
+      const sent = ServerSettingsModule.redactServerSettingsForClient(settings).robloxStudio;
+      assert.notInclude(JSON.stringify(sent), "sk-image-key");
+      assert.strictEqual(sent.imageModel, "m");
+      assert.strictEqual(sent.imageGeneration, true);
+    }),
+  );
+
   it.effect("sends clients a known secret provider's config but never an unknown kind's", () =>
     Effect.gen(function* () {
       const settings = yield* decodeServerSettings({

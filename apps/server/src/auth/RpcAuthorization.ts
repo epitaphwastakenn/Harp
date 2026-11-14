@@ -94,6 +94,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverDetectRobloxProject]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetRojoStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.getStudioTurnEvidence]: AuthOrchestrationReadScope,
+  [WS_METHODS.getStudioUndoPreview]: AuthOrchestrationReadScope,
   [WS_METHODS.serverControlRojo]: AuthTerminalOperateScope,
   [WS_METHODS.serverSearchAcpRegistry]: AuthOrchestrationReadScope,
   [WS_METHODS.serverPrepareAcpRegistryAgent]: AuthProvidersManageScope,

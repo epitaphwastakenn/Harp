@@ -179,6 +179,20 @@ local function apply(container: LuaSourceContainer, baseText: string, newText: s
 	end
 	return "direct", nil
 end
+Scripts.apply = apply
+
+local function undoOf(args, container: LuaSourceContainer, baseText: string, newText: string)
+	if type(args.captureUndo) ~= "string" or args.captureUndo == "" then
+		return nil
+	end
+	return {
+		kind = "script",
+		ref = Util.refOf(container),
+		path = Util.pathOf(container),
+		source = baseText,
+		expectedRevision = Util.revision(newText),
+	}
+end
 
 local function commit(container: LuaSourceContainer, baseText: string, newText: string, expectedRevision: string?, action: string, extra)
 	local previous = Util.revision(baseText)
@@ -232,7 +246,7 @@ function Scripts.set(args)
 		return { error = "expectedRevision is required" }
 	end
 	local base = sourceOf(container)
-	return commit(container, base, args.source, args.expectedRevision, "Write")
+	return commit(container, base, args.source, args.expectedRevision, "Write", { undo = undoOf(args, container, base, args.source) })
 end
 
 local function lineAt(text: string, position: number): number
@@ -310,7 +324,7 @@ function Scripts.edit(args)
 	table.insert(parts, string.sub(base, cursor))
 	local newText = table.concat(parts)
 	local expected = if type(args.expectedRevision) == "string" then args.expectedRevision else nil
-	return commit(container, base, newText, expected, "Edit", { editsApplied = #spans })
+	return commit(container, base, newText, expected, "Edit", { editsApplied = #spans, undo = undoOf(args, container, base, newText) })
 end
 
 function Scripts.grep(args)

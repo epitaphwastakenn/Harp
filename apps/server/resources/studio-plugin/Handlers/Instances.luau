@@ -4,6 +4,7 @@
 local CollectionService = game:GetService("CollectionService")
 
 local Util = require(script.Parent.Parent.Util)
+local Undo = require(script.Parent.Parent.Undo)
 
 local Instances = {}
 
@@ -201,7 +202,39 @@ local function applyProperties(instance: Instance, properties, attributes, tags)
 		end
 		table.insert(applied, step)
 	end
-	return #planned, nil
+	return #planned, nil, nil, planned
+end
+
+local function propertiesUndo(instance: Instance, planned)
+	local props = {}
+	local attrs = {}
+	local added = {}
+	local removed = {}
+	for _, step in planned do
+		if step.kind == "property" then
+			local before = Undo.snapshotValue(step.old)
+			local after = Undo.snapshotValue(instance[step.name])
+			props[step.name] = { before = before, after = after }
+		elseif step.kind == "attribute" then
+			local before = if step.old == nil then false else Undo.snapshotValue(step.old)
+			local now = instance:GetAttribute(step.name)
+			local after = if now == nil then false else Undo.snapshotValue(now)
+			attrs[step.name] = { before = before, after = after }
+		elseif step.kind == "addTag" then
+			table.insert(added, step.name)
+		else
+			table.insert(removed, step.name)
+		end
+	end
+	return {
+		kind = "properties",
+		ref = Util.refOf(instance),
+		path = Util.pathOf(instance),
+		props = props,
+		attrs = attrs,
+		tagsAdded = added,
+		tagsRemoved = removed,
+	}
 end
 
 function Instances.setProperties(args)
@@ -213,7 +246,7 @@ function Instances.setProperties(args)
 		return { error = "game and services cannot be reparented" }
 	end
 	local recording = Util.beginRecording("Set properties on " .. instance.Name)
-	local count, err, rollbackFailures = applyProperties(instance, args.properties or {}, args.attributes, args.tags)
+	local count, err, rollbackFailures, planned = applyProperties(instance, args.properties or {}, args.attributes, args.tags)
 	if count == nil then
 		Util.finishRecording(recording, false)
 		return {
@@ -229,6 +262,7 @@ function Instances.setProperties(args)
 		instanceRef = Util.refOf(instance),
 		changed = count,
 		undoable = recording ~= nil,
+		undo = if Undo.requested(args) then propertiesUndo(instance, planned) else nil,
 	}
 end
 
@@ -323,7 +357,17 @@ function Instances.create(args)
 			instanceRef = Util.refOf(entry.instance),
 		})
 	end
-	return { success = true, created = created, undoable = recording ~= nil }
+	local undo = nil
+	if Undo.requested(args) then
+		local refs = {}
+		for _, entry in made do
+			if entry.instance.Parent ~= nil then
+				table.insert(refs, { kind = "created", ref = Util.refOf(entry.instance), path = Util.pathOf(entry.instance) })
+			end
+		end
+		undo = refs
+	end
+	return { success = true, created = created, undoable = recording ~= nil, undo = undo }
 end
 
 function Instances.delete(args)
@@ -355,14 +399,20 @@ function Instances.delete(args)
 	end
 	local recording = Util.beginRecording(string.format("Remove %d instance(s)", #targets))
 	local removed = {}
+	local undoKey = Undo.requested(args)
+	local held = {}
 	for _, instance in targets do
 		local path = Util.pathOf(instance)
+		local token = if undoKey then Undo.hold(undoKey, instance) else nil
 		-- Unparented rather than destroyed, so undo brings it back like Studio's own Delete.
 		local ok = pcall(function()
 			instance.Parent = nil
 		end)
 		if ok then
 			table.insert(removed, path)
+			if token then
+				table.insert(held, { kind = "deleted", token = token, path = path, className = instance.ClassName })
+			end
 		end
 	end
 	Util.finishRecording(recording, true)
@@ -371,7 +421,22 @@ function Instances.delete(args)
 		removed = removed,
 		missing = if #missing > 0 then missing else nil,
 		undoable = recording ~= nil,
+		undo = if undoKey then held else nil,
 	}
+end
+
+function Instances.resolveRefs(args)
+	local paths = {}
+	if type(args.refs) == "table" then
+		for index, ref in args.refs do
+			if index > 500 then
+				break
+			end
+			local instance = Util.resolve({ instanceRef = ref })
+			paths[ref] = if instance then Util.pathOf(instance) or false else false
+		end
+	end
+	return { paths = paths }
 end
 
 return Instances

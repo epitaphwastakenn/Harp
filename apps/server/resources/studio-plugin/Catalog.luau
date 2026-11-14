@@ -30,6 +30,7 @@ return {
 			{ "set_properties", "Set properties" },
 			{ "delete_instances", "Delete instances" },
 			{ "build_instances", "Atomic builds" },
+			{ "undo_turn_changes", "Undo the last turn's changes" },
 		},
 	},
 	{
@@ -97,6 +98,14 @@ return {
 		tools = {
 			{ "blender", "Run Blender jobs" },
 			{ "import_mesh", "Import meshes into Studio" },
+		},
+	},
+	{
+		id = "images",
+		title = "Images",
+		tools = {
+			{ "generate_image", "Generate images with your image service" },
+			{ "stage_texture_preview", "Preview a PNG in Studio before upload" },
 		},
 	},
 	{

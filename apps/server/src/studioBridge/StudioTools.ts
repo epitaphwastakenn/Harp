@@ -21,12 +21,26 @@ import * as ServerSettings from "../serverSettings.ts";
 import { agentScriptSizeError, fitJobSummary, parseObj, runBlenderJob } from "./blenderJobs.ts";
 import { assetDetails, assetThumbnail, searchStore } from "./creatorStore.ts";
 import { checkAnimation } from "./animationChecks.ts";
-import { downscaleRgba, encodePng, tileRgba } from "./png.ts";
+import { decodePng, downscaleRgba, encodePng, tileRgba } from "./png.ts";
+import { analyzeImage, displayPng, type ImagePurpose } from "./imagePixelChecks.ts";
+import {
+  hostOf,
+  imageGenerationReady,
+  imagePurposes,
+  maxImagesPerCall,
+  promptFor,
+  requestImage,
+  resolveImageProvider,
+  sizePattern,
+  writeImageJob,
+} from "./imageGeneration.ts";
+import { readStageSource, stageIntoContent, studioContentDirectory } from "./textureStaging.ts";
 import { lookupRobloxDocs, makeDocsFetcher } from "./robloxDocs.ts";
 import {
   closeStudio,
   findStudioExecutable,
   launchStudio,
+  isStudioRunningHere,
   listStudioWindows,
   normalizePlaceName,
 } from "./studioProcesses.ts";
@@ -34,8 +48,19 @@ import { loadedSkillResources, loadStudioSkills, renderSkillResources } from "./
 import { StudioEndpoints, type StudioRole } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 import { isPlaceWrite, leaseIdleMs, StudioEvidence } from "./studioEvidence.ts";
+import { makeStudioUndo, takeUndo, type UndoCapture } from "./studioUndo.ts";
 import { playtestGate, type StudioControlsPolicy } from "./studioControls.ts";
 import { placeKey, preferRuntimeClient } from "./StudioRouter.ts";
+import {
+  firstProtectedHit,
+  instanceRefsOf,
+  isProtectedPath,
+  protectedPlacesFor,
+  protectedRefusal,
+  protectedTargetsOf,
+  refTargetReach,
+  type ProtectedTarget,
+} from "./protectedPaths.ts";
 import { withSecretWarning } from "./secretWarning.ts";
 import {
   auditUi,
@@ -49,6 +74,7 @@ import {
   isFailurePayload,
   jsonResult,
   jsonText,
+  type StudioContentBlock,
   type StudioToolResult,
 } from "./toolResult.ts";
 
@@ -58,6 +84,8 @@ export interface StudioToolContext {
   readonly threadId?: string | undefined;
   readonly controls?: StudioControlsPolicy | undefined;
   readonly workspaceRoot?: string | undefined;
+  readonly protectedPaths?: ReadonlyArray<string> | undefined;
+  readonly undo?: UndoCapture | undefined;
 }
 
 type Args = Record<string, unknown>;
@@ -72,6 +100,17 @@ export interface StudioToolDefinition {
 }
 
 const MAX_INLINE_IMAGE_BYTES = 6_000_000;
+
+const undoEndpoints: ReadonlySet<string> = new Set([
+  StudioEndpoints.setProperties,
+  StudioEndpoints.createInstances,
+  StudioEndpoints.deleteInstances,
+  StudioEndpoints.buildInstances,
+  StudioEndpoints.setScriptSource,
+  StudioEndpoints.editScript,
+  StudioEndpoints.insertAsset,
+  StudioEndpoints.importRbxm,
+]);
 
 const str = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value : undefined;
@@ -264,6 +303,10 @@ export class StudioTools extends Context.Service<
   StudioTools,
   {
     readonly list: ReadonlyArray<StudioToolDefinition>;
+    /** The tools to send to the model: `list` without the ones that are switched off or not set up. */
+    readonly advertised: Effect.Effect<ReadonlyArray<StudioToolDefinition>>;
+    readonly undoPreview: Effect.Success<typeof makeStudioUndo>["preview"];
+    readonly undoTurnChanges: Effect.Success<typeof makeStudioUndo>["revert"];
     readonly call: (
       name: string,
       args: Args,
@@ -278,6 +321,7 @@ const make = Effect.gen(function* () {
   const rojo = yield* RojoWorkspaces.RojoWorkspaces;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const evidence = yield* StudioEvidence;
+  const undo = yield* makeStudioUndo;
   const fileSystem = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   const hostEnv = yield* HostProcess.Environment;
@@ -295,27 +339,45 @@ const make = Effect.gen(function* () {
     readonly instanceId?: string | undefined;
     readonly timeoutMs?: number;
     readonly summary?: string | undefined;
-  }) =>
-    bridge.request({
-      instanceId: input.instanceId ?? str(input.args.instance_id),
-      target: input.target ?? str(input.args.target),
-      defaultRole: input.defaultRole,
-      endpoint: input.endpoint,
-      data: input.data,
-      timeoutMs: input.timeoutMs,
-      meta: {
-        tool: input.tool,
-        summary: input.summary,
-        threadId: input.context.threadId,
-      },
-    });
+    readonly skipUndo?: boolean;
+  }) => {
+    const capture =
+      input.skipUndo === true || !undoEndpoints.has(input.endpoint)
+        ? undefined
+        : input.context.undo;
+    return bridge
+      .request({
+        instanceId: input.instanceId ?? str(input.args.instance_id),
+        target: input.target ?? str(input.args.target),
+        defaultRole: input.defaultRole,
+        endpoint: input.endpoint,
+        data:
+          capture !== undefined && isRecord(input.data)
+            ? { ...input.data, captureUndo: input.context.threadId }
+            : input.data,
+        timeoutMs: input.timeoutMs,
+        meta: {
+          tool: input.tool,
+          summary: input.summary,
+          threadId: input.context.threadId,
+        },
+      })
+      .pipe(
+        Effect.map((response) => {
+          if (capture === undefined) return response;
+          const taken = takeUndo(response.payload);
+          capture.entries.push(...taken.entries);
+          return { ...response, payload: taken.payload };
+        }),
+      );
+  };
 
   /** The usual shape: forward to the plugin, return its answer. */
   const forward =
     (
       tool: string,
       endpoint: string,
-      data: (args: Args) => unknown,
+      data: (args: Args, context: StudioToolContext) => unknown,
       options: {
         readonly defaultRole?: StudioRole;
         readonly timeoutMs?: number;
@@ -328,7 +390,7 @@ const make = Effect.gen(function* () {
         args,
         context,
         endpoint,
-        data: data(args),
+        data: data(args, context),
         ...(options.defaultRole === undefined ? {} : { defaultRole: options.defaultRole }),
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         summary: options.summary?.(args),
@@ -562,6 +624,23 @@ const make = Effect.gen(function* () {
       if (!saved) {
         return errorResult("file_write_failed", `Could not write ${located.relative}.`);
       }
+      context.undo?.entries.push({
+        source: "file",
+        absolute: located.absolute,
+        relative: located.relative,
+        previous: original,
+        written: original.includes("\r\n") ? next.text.replaceAll("\n", "\r\n") : next.text,
+        studio:
+          script.path === undefined
+            ? undefined
+            : {
+                kind: "script",
+                path: script.path,
+                source: script.text,
+                expectedSource: next.text,
+                lenient: true,
+              },
+      });
       const studioHolds = (wanted: string) =>
         readWholeScript(tool, args, context).pipe(
           Effect.map((read) => read !== undefined && read.text.replaceAll("\r\n", "\n") === wanted),
@@ -583,6 +662,7 @@ const make = Effect.gen(function* () {
           context,
           endpoint: StudioEndpoints.setScriptSource,
           data: { ...addressOf(args), source: next.text, expectedRevision: current?.revision },
+          skipUndo: true,
         }).pipe(
           Effect.map(({ payload }) => payload),
           Effect.orElseSucceed(() => undefined),
@@ -870,6 +950,11 @@ const make = Effect.gen(function* () {
         );
       }
       files.push(...created.files);
+      context.undo?.entries.push({
+        source: "opaque",
+        what: "build_instances",
+        reason: "It created Rojo-synced files; delete them from the project to undo",
+      });
     }
     const trashed: string[] = [];
     for (const removal of removals.values()) {
@@ -879,6 +964,11 @@ const make = Effect.gen(function* () {
       }
       trashed.push(...moved.files);
       forgetRojo(removal.path);
+      context.undo?.entries.push({
+        source: "opaque",
+        what: "build_instances",
+        reason: "It moved Rojo-synced files to the trash; restore them from there",
+      });
     }
 
     const keep = operations.filter((_, index) => !throughRojo.has(index));
@@ -993,6 +1083,11 @@ const make = Effect.gen(function* () {
       }
       trashed.push(...moved.files);
       forgetRojo(path);
+      context.undo?.entries.push({
+        source: "opaque",
+        what: "delete_instances",
+        reason: "It moved Rojo-synced files to the trash; restore them from there",
+      });
       if (location.serving) {
         waiting.push(path);
         if (location.script) {
@@ -1070,6 +1165,11 @@ const make = Effect.gen(function* () {
       return errorResult("rojo_move_failed", `${moved.reason}. Nothing changed.`);
     }
     forgetRojo(path);
+    context.undo?.entries.push({
+      source: "opaque",
+      what: "set_properties",
+      reason: "It moved or renamed a Rojo-synced file",
+    });
     const newParent = parentRef ?? studioPathOf(segments.slice(0, -1));
     const newPath = childPathOf(newParent, name ?? segments.at(-1)!);
     const rest = Object.fromEntries(
@@ -2360,8 +2460,20 @@ const make = Effect.gen(function* () {
     if (isFailurePayload(plan) || !isRecord(plan) || !Array.isArray(plan.results)) {
       return jsonResult(plan);
     }
-    const entries = plan.results.filter(isRecord);
+    const protectedPaths = context.protectedPaths ?? [];
+    const allEntries = plan.results.filter(isRecord);
+    const entries = allEntries.filter(
+      (entry) => !isProtectedPath(protectedPaths, str(entry.path) ?? ""),
+    );
+    const skippedProtected = allEntries.length - entries.length;
     const summary = {
+      ...(skippedProtected === 0
+        ? {}
+        : {
+            skippedProtected,
+            protectedNote:
+              "Scripts under the user's protected paths were left out and not changed.",
+          }),
       totalReplacements: plan.totalReplacements,
       scriptsSearched: plan.scriptsSearched,
       scriptsMatched: plan.scriptsMatched,
@@ -2533,6 +2645,25 @@ const make = Effect.gen(function* () {
             : undefined,
       });
     });
+
+  const undoTurnChanges = (
+    _args: Args,
+    context: StudioToolContext,
+  ): Effect.Effect<StudioToolResult> =>
+    context.threadId === undefined
+      ? Effect.succeed(errorResult("no_thread", "Undo needs the thread that made the changes."))
+      : undo.revert({ threadId: context.threadId, fromAgent: true }).pipe(
+          Effect.map((result) =>
+            result.status === "done"
+              ? jsonResult({
+                  success: true,
+                  restored: result.restored,
+                  skippedBecauseChanged: result.skipped,
+                  notUndoable: result.notUndoable,
+                })
+              : errorResult("undo_unavailable", result.message ?? "Nothing to undo."),
+          ),
+        );
 
   const loadSkill = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.sync(() => {
@@ -2900,6 +3031,149 @@ const make = Effect.gen(function* () {
         ...(job.ok ? {} : { isError: true }),
       } satisfies StudioToolResult;
     }).pipe(Effect.catch((error) => Effect.succeed(errorResult("blender_failed", String(error)))));
+
+  const generateImage = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
+    Effect.gen(function* () {
+      const settings = (yield* serverSettings.getSettings).robloxStudio;
+      const resolved = resolveImageProvider(settings);
+      if (!resolved.ok) return errorResult("image_generation_unavailable", resolved.reason);
+      const prompt = str(args.prompt);
+      if (prompt === undefined) return errorResult("invalid_arguments", "prompt is required.");
+      const purpose = imagePurposes.find((candidate) => candidate === args.purpose) ?? "decal";
+      const size = str(args.size) ?? "1024x1024";
+      if (!sizePattern.test(size)) {
+        return errorResult("invalid_arguments", "size must look like 1024x1024.");
+      }
+      const transparent = args.transparent === true;
+      const wanted = Math.min(Math.max(Math.floor(num(args.count) ?? 1), 1), maxImagesPerCall);
+      const used =
+        context.threadId === undefined ? 0 : yield* evidence.imagesThisTurn(context.threadId);
+      const remaining = settings.imageMaxPerTurn - used;
+      if (remaining <= 0) {
+        return errorResult(
+          "image_cap_reached",
+          `This turn already generated ${String(used)} images, the per-turn limit in Harp's settings. Work with those, or ask the user to raise the limit.`,
+        );
+      }
+      const count = Math.min(wanted, remaining);
+      const fullPrompt = promptFor({ prompt, purpose, transparent });
+      const images: Buffer[] = [];
+      let failure: string | undefined;
+      for (let index = 0; index < count; index += 1) {
+        const made = yield* requestImage(resolved.config, {
+          prompt: fullPrompt,
+          size,
+          transparent,
+        }).pipe(Effect.result);
+        if (made._tag === "Failure") {
+          failure = made.failure.message;
+          break;
+        }
+        images.push(made.success);
+      }
+      if (images.length === 0) {
+        return errorResult("image_generation_failed", failure ?? "No image was generated.");
+      }
+      const now = yield* Clock.currentTimeMillis;
+      const job = writeImageJob(
+        robloxConfig.environment.imageJobsRoot,
+        images,
+        {
+          prompt: fullPrompt,
+          purpose,
+          model: resolved.config.model,
+          provider: resolved.config.provider,
+          host: hostOf(resolved.config.baseUrl),
+          size,
+          transparentRequested: transparent,
+        },
+        now,
+      );
+      const blocks: StudioContentBlock[] = [];
+      const results = images.map((bytes, index) => {
+        const file = job.files[index]!;
+        try {
+          const decoded = decodePng(bytes);
+          const facts = analyzeImage(decoded, { purpose, transparentRequested: transparent });
+          const shown = displayPng(decoded, bytes, purpose);
+          blocks.push({ type: "image", data: shown.png.toString("base64"), mimeType: "image/png" });
+          return { index: index + 1, path: file, shown: shown.note, facts };
+        } catch (cause) {
+          return {
+            index: index + 1,
+            path: file,
+            checkError: cause instanceof Error ? cause.message : String(cause),
+          };
+        }
+      });
+      const structured = {
+        success: true,
+        generated: images.length,
+        jobDir: job.jobDir,
+        purpose,
+        model: resolved.config.model,
+        imagesLeftThisTurn: remaining - images.length,
+        images: results,
+        ...(failure === undefined
+          ? {}
+          : { stoppedEarly: `${failure} (${String(images.length)} of ${String(count)} made)` }),
+        next: "Look at the images and the facts. Regenerate only for a concrete flaw the facts or your eyes show. stage_texture_preview puts one on a Decal, Texture, ParticleEmitter or ImageLabel in Studio; the user uploads the final one through Asset Manager.",
+      };
+      return {
+        content: [jsonText(structured), ...blocks],
+        structuredContent: structured,
+      } satisfies StudioToolResult;
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(errorResult("image_generation_failed", String(error))),
+      ),
+    );
+
+  const stageTexturePreview = (
+    args: Args,
+    context: StudioToolContext,
+  ): Effect.Effect<StudioToolResult> =>
+    Effect.gen(function* () {
+      const jobDir = str(args.jobDir);
+      const path =
+        str(args.path) ??
+        (jobDir === undefined ? undefined : `${jobDir}/image-${String(num(args.image) ?? 1)}.png`);
+      if (path === undefined)
+        return errorResult("invalid_arguments", "path or jobDir is required.");
+      if (!(yield* isStudioRunningHere(platform))) {
+        return errorResult(
+          "studio_not_local",
+          "No Roblox Studio is running on the machine where the Harp server runs, so there is no content folder to stage into. rbxasset previews only work with Studio on the same machine as the server; ask the user to upload the image through Asset Manager instead.",
+        );
+      }
+      const source = readStageSource(path, [
+        robloxConfig.environment.imageJobsRoot,
+        robloxConfig.environment.blenderJobsRoot,
+        context.workspaceRoot,
+      ]);
+      if (!source.ok) return errorResult("stage_refused", source.reason);
+      const executable = yield* findStudioExecutable(platform, hostEnv.LOCALAPPDATA);
+      const contentDir = studioContentDirectory({
+        platform,
+        executable,
+        home: hostEnv.HOME,
+      });
+      if (contentDir === undefined) {
+        return errorResult(
+          "studio_content_not_found",
+          "Harp could not find Roblox Studio's content folder on this machine.",
+        );
+      }
+      const staged = stageIntoContent(contentDir, source.bytes);
+      if (!staged.ok) return errorResult("stage_failed", staged.reason);
+      return jsonResult({
+        success: true,
+        rbxasset: staged.url,
+        stagedAs: staged.path,
+        bytes: source.bytes.length,
+        note: "This rbxasset path works only on this machine, inside Studio. Put it on a Decal, Texture, ParticleEmitter, ImageLabel or similar in edit mode to look at it; if it does not show, set it again once. It is not an asset: before the game is published the user must upload the image themselves (Asset Manager) and the Image property must use the uploaded rbxassetid. Harp does not upload. A Studio update clears staged files.",
+      });
+    });
 
   const importMesh = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -3934,9 +4208,10 @@ const make = Effect.gen(function* () {
       run: forward(
         "execute_luau",
         StudioEndpoints.executeLuau,
-        (args) => ({
+        (args, context) => ({
           code: typeof args.code === "string" ? args.code : "",
           allowScriptChanges: bool(args.allowScriptChanges) ?? false,
+          protectedPaths: context.protectedPaths ?? [],
         }),
         {
           timeoutMs: 60_000,
@@ -4380,6 +4655,37 @@ const make = Effect.gen(function* () {
       run: blender,
     },
     {
+      name: "generate_image",
+      title: "Generate image",
+      description:
+        "Makes PNG images with the image service the user set up (costs their money or quota; the per-turn cap is enforced). Saves a job folder and returns the images plus pixel facts: alpha coverage, whether the background is really transparent, edge bleed (particles), seam difference (tiles), brightness, saturation and crisp vs soft. Particles are shown on a dark ground, tiles repeated 2x2. Fix only what the facts or the picture show.",
+      inputSchema: object(
+        {
+          prompt: { type: "string" },
+          purpose: { type: "string", enum: [...imagePurposes] },
+          size: { type: "string", description: "WxH, default 1024x1024." },
+          transparent: { type: "boolean", description: "Ask for a transparent background." },
+          count: { type: "number", description: "1-4, default 1." },
+        },
+        ["prompt", "purpose"],
+      ),
+      risk: "mutation",
+      run: generateImage,
+    },
+    {
+      name: "stage_texture_preview",
+      title: "Stage texture preview",
+      description:
+        "Copies a PNG (a generate_image or blender job file, or a file in the thread's workspace) into Studio's content folder and returns an rbxasset://harp/... URL to put on a Decal, Texture, ParticleEmitter or ImageLabel in edit mode. Local to this machine's Studio only; the user must upload the final image (Asset Manager) before publishing. Harp does not upload.",
+      inputSchema: object({
+        path: { type: "string", description: "PNG file path." },
+        jobDir: { type: "string", description: "A generate_image jobDir, with image (1-based)." },
+        image: { type: "number" },
+      }),
+      risk: "mutation",
+      run: stageTexturePreview,
+    },
+    {
       name: "import_mesh",
       title: "Import mesh",
       description:
@@ -4648,6 +4954,15 @@ const make = Effect.gen(function* () {
         ),
     },
     {
+      name: "undo_turn_changes",
+      title: "Undo last turn",
+      description:
+        "Reverts the Studio changes this thread's last finished turn made (scripts, properties, builds, removals, inserts) as one Ctrl+Z step, and skips anything changed since. Luau runs and other opaque calls stay. Only when the user asked to undo.",
+      inputSchema: object({}),
+      risk: "irreversible",
+      run: undoTurnChanges,
+    },
+    {
       name: "get_roblox_docs",
       title: "Roblox docs",
       description:
@@ -4665,10 +4980,76 @@ const make = Effect.gen(function* () {
     },
   ];
 
+  const protectedGate = Effect.fn("StudioTools.protectedGate")(function* (
+    name: string,
+    risk: StudioRisk,
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const none = { paths: [] as ReadonlyArray<string>, refusal: undefined };
+    if (!isPlaceWrite(name, risk, args)) return none;
+    const routed = yield* placeOf(args).pipe(Effect.result);
+    if (routed._tag !== "Success") return none;
+    const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => undefined));
+    const paths = protectedPlacesFor(
+      settings?.robloxStudio.protectedPlaces ?? [],
+      placeKey(routed.success),
+    );
+    if (paths.length === 0) return none;
+    const targets: ProtectedTarget[] = [...protectedTargetsOf(name, args)];
+    const refs = instanceRefsOf(name, args);
+    if (refs.length > 0) {
+      const resolved = yield* call({
+        tool: name,
+        args,
+        context,
+        endpoint: StudioEndpoints.resolveRefs,
+        data: { refs },
+        timeoutMs: 15_000,
+      }).pipe(Effect.result);
+      const map =
+        resolved._tag === "Success" && isRecord(resolved.success.payload)
+          ? resolved.success.payload.paths
+          : undefined;
+      if (!isRecord(map)) {
+        return {
+          paths,
+          refusal: errorResult(
+            "protected_check_failed",
+            "This place has protected paths and Harp could not resolve the instanceRef values to check them. Pass path instead, or update the Studio plugin.",
+          ),
+        };
+      }
+      const reach = refTargetReach(name, args);
+      for (const ref of refs) {
+        const path = map[ref];
+        if (typeof path === "string") targets.push({ path, reach });
+      }
+    }
+    const hit = firstProtectedHit(paths, targets);
+    return { paths, refusal: hit === undefined ? undefined : protectedRefusal(hit, name) };
+  });
+
   const byName = new Map(list.map((tool) => [tool.name, tool]));
+
+  const advertised = serverSettings.getSettings.pipe(
+    Effect.map(({ robloxStudio }) =>
+      imageGenerationReady(robloxStudio)
+        ? list.map((tool) =>
+            tool.name === "generate_image" && robloxStudio.imageRequireApproval
+              ? { ...tool, risk: "irreversible" as const }
+              : tool,
+          )
+        : list.filter((tool) => tool.name !== "generate_image"),
+    ),
+    Effect.orElseSucceed(() => list.filter((tool) => tool.name !== "generate_image")),
+  );
 
   return StudioTools.of({
     list,
+    advertised,
+    undoPreview: undo.preview,
+    undoTurnChanges: undo.revert,
     call: Effect.fn("StudioTools.call")((name, args, context) => {
       const tool = byName.get(name);
       if (tool === undefined) {
@@ -4689,12 +5070,21 @@ const make = Effect.gen(function* () {
         const normalized = normalizeArgs(name, args);
         const blocked = playtestGate(name, normalized, context.controls);
         if (blocked !== undefined) return blocked;
+        const guard = yield* protectedGate(name, tool.risk, normalized, context);
+        if (guard.refusal !== undefined) return guard.refusal;
+        const runContext =
+          guard.paths.length === 0 ? context : { ...context, protectedPaths: guard.paths };
         const threadId = context.threadId;
-        if (threadId !== undefined && isPlaceWrite(name, tool.risk, normalized)) {
+        const capture: UndoCapture | undefined =
+          threadId !== undefined && isPlaceWrite(name, tool.risk, normalized)
+            ? { entries: [], instanceId: undefined }
+            : undefined;
+        if (threadId !== undefined && capture !== undefined) {
           const routed = yield* bridge
             .resolve({ instanceId: str(normalized.instance_id), defaultRole: "edit" })
             .pipe(Effect.result);
           if (routed._tag === "Success") {
+            capture.instanceId = routed.success.instanceId;
             const lease = yield* evidence.claimWrite({ place: placeKey(routed.success), threadId });
             if (!lease.ok) {
               const holder =
@@ -4707,9 +5097,12 @@ const make = Effect.gen(function* () {
             }
           }
         }
-        const result = yield* tool.run(normalized, context);
+        const result = yield* tool.run(
+          normalized,
+          capture === undefined ? runContext : { ...runContext, undo: capture },
+        );
         if (threadId !== undefined) {
-          yield* evidence.record({
+          const seq = yield* evidence.record({
             threadId,
             call: {
               tool: name,
@@ -4719,6 +5112,13 @@ const make = Effect.gen(function* () {
               structured: result.structuredContent,
             },
           });
+          if (capture !== undefined && capture.entries.length > 0) {
+            yield* evidence.attachSnapshot({
+              threadId,
+              seq,
+              snapshot: { instanceId: capture.instanceId, entries: capture.entries },
+            });
+          }
         }
         return withSecretWarning(name, normalized, result);
       }).pipe(

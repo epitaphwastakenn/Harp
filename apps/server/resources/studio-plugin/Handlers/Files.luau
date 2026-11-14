@@ -6,6 +6,7 @@ local SerializationService = game:GetService("SerializationService")
 local EncodingService = game:GetService("EncodingService")
 
 local Util = require(script.Parent.Parent.Util)
+local Undo = require(script.Parent.Parent.Undo)
 
 local Files = {}
 
@@ -107,8 +108,16 @@ function Files.import(args)
 			tally(descendant)
 		end
 	end
+	local undo = nil
+	if Undo.requested(args) then
+		undo = {}
+		for _, instance in attached do
+			table.insert(undo, { kind = "created", ref = Util.refOf(instance), path = Util.pathOf(instance) })
+		end
+	end
 	return {
 		success = true,
+		undo = undo,
 		parent = Util.pathOf(parent),
 		imported = roots,
 		scripts = scriptCount,

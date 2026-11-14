@@ -14,6 +14,7 @@ import { STUDIO_PROTOCOL_VERSION } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
 import { handleMcpMessage } from "./studioMcp.ts";
 import * as StudioTools from "./StudioTools.ts";
+import { StudioEvidence } from "./studioEvidence.ts";
 
 const layer = StudioTools.layer.pipe(
   Layer.provideMerge(StudioBridge.layer),
@@ -935,5 +936,66 @@ describe("Rojo sync guard and structural saves", () => {
       ]);
       yield* Fiber.interrupt(plugin.fiber);
     }).pipe(Effect.scoped, Effect.provide(rojoLayer)),
+  );
+});
+
+describe("image generation tools", () => {
+  const imageLayer = (robloxStudio: Record<string, unknown>) =>
+    StudioTools.layer.pipe(
+      Layer.provideMerge(StudioBridge.layer),
+      Layer.provide(ServerSettingsService.layerTest({ robloxStudio })),
+      Layer.provide(Layer.succeed(RobloxStudioConfig, RobloxStudioConfig.defaultValue())),
+      Layer.provide(RojoWorkspaces.layerNone),
+      Layer.provide(NodeServices.layer),
+    );
+
+  it.effect("are advertised only once image generation is on and configured", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const names = (yield* tools.advertised).map((tool) => tool.name);
+      expect(names).not.toContain("generate_image");
+      expect(names).toContain("stage_texture_preview");
+      expect(tools.list.map((tool) => tool.name)).toContain("generate_image");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("advertise generate_image as destructive while approval is required", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const advertised = yield* tools.advertised;
+      expect(advertised.find((tool) => tool.name === "generate_image")?.risk).toBe("irreversible");
+    }).pipe(
+      Effect.provide(
+        imageLayer({ imageGeneration: true, imageApiKey: "k", imageRequireApproval: true }),
+      ),
+    ),
+  );
+
+  it.effect("stop at the per-turn cap before calling the service", () =>
+    Effect.gen(function* () {
+      const tools = yield* StudioTools.StudioTools;
+      const evidence = yield* StudioEvidence;
+      yield* evidence.record({
+        threadId: "thread-1",
+        call: {
+          tool: "generate_image",
+          risk: "mutation",
+          args: {},
+          ok: true,
+          structured: { generated: 2 },
+        },
+      });
+      const result = yield* tools.call(
+        "generate_image",
+        { prompt: "a spark", purpose: "particle" },
+        { threadId: "thread-1" },
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({
+        text: expect.stringContaining("image_cap_reached"),
+      });
+    }).pipe(
+      Effect.provide(imageLayer({ imageGeneration: true, imageApiKey: "k", imageMaxPerTurn: 2 })),
+    ),
   );
 });

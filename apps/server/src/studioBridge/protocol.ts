@@ -88,6 +88,7 @@ export const StudioEndpoints = {
   setProperties: "set-properties",
   createInstances: "create-instances",
   deleteInstances: "delete-instances",
+  resolveRefs: "resolve-refs",
   getScriptSource: "get-script-source",
   setScriptSource: "set-script-source",
   editScript: "edit-script",
@@ -128,6 +129,7 @@ export const StudioEndpoints = {
   importRbxm: "import-rbxm",
   networkProfile: "network-profile",
   breakpoints: "breakpoints",
+  undoApply: "undo-apply",
 } as const;
 export type StudioEndpoint = (typeof StudioEndpoints)[keyof typeof StudioEndpoints];
 
@@ -158,4 +160,5 @@ export const MUTATING_ENDPOINTS: ReadonlySet<string> = new Set([
   StudioEndpoints.importRbxm,
   StudioEndpoints.networkProfile,
   StudioEndpoints.breakpoints,
+  StudioEndpoints.undoApply,
 ]);

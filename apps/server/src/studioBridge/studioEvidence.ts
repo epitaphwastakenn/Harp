@@ -11,6 +11,7 @@ export const leaseIdleMs = 10 * 60_000;
 const maxThreads = 200;
 const maxFinishedTurns = 20;
 const maxCallsPerTurn = 200;
+const maxSnapshotBytesPerTurn = 8_000_000;
 const maxTargetsPerTurn = 50;
 const maxTargetsPerCall = 8;
 const maxTargetChars = 200;
@@ -33,7 +34,10 @@ const notPlaceWrites = new Set([
   "set_network_profile",
   "breakpoints",
   "manage_studio",
+  "undo_turn_changes",
   "blender",
+  "generate_image",
+  "stage_texture_preview",
   "export_rbxm",
   "eval_server_runtime",
   "eval_client_runtime",
@@ -109,6 +113,7 @@ interface EvidenceCall {
   readonly ok: boolean;
   readonly targets: ReadonlyArray<string>;
   snapshot?: unknown;
+  snapshotDropped?: boolean;
 }
 
 interface TurnRecord {
@@ -127,6 +132,10 @@ interface TurnRecord {
   screenshots: number;
   failures: number;
   failedTools: Map<string, number>;
+  dropped: number;
+  snapshotBytes: number;
+  undone: boolean;
+  images: number;
 }
 
 export const emptyTurn = (runId: string | undefined): TurnRecord => ({
@@ -145,6 +154,10 @@ export const emptyTurn = (runId: string | undefined): TurnRecord => ({
   screenshots: 0,
   failures: 0,
   failedTools: new Map(),
+  dropped: 0,
+  snapshotBytes: 0,
+  undone: false,
+  images: 0,
 });
 
 interface FinishedCall {
@@ -162,7 +175,10 @@ export const applyCall = (turn: TurnRecord, call: FinishedCall): number => {
   const targets = write || call.risk !== "read" ? targetsOf(call.args) : [];
   const seq = turn.nextSeq;
   turn.nextSeq += 1;
-  if (turn.calls.length >= maxCallsPerTurn) turn.calls.shift();
+  if (turn.calls.length >= maxCallsPerTurn) {
+    turn.calls.shift();
+    turn.dropped += 1;
+  }
   turn.calls.push({ seq, tool: call.tool, at: call.at, write, ok: call.ok, targets });
   if (!call.ok) {
     turn.failures += 1;
@@ -185,6 +201,10 @@ export const applyCall = (turn: TurnRecord, call: FinishedCall): number => {
     }
   }
   if (call.ok) {
+    if (call.tool === "generate_image") {
+      const generated = call.structured?.generated;
+      if (typeof generated === "number") turn.images += generated;
+    }
     if (call.tool === "inspect_ui") turn.uiPending = false;
     if (screenshotTools.has(call.tool)) turn.screenshots += 1;
     const started =
@@ -239,6 +259,31 @@ export const deriveEvidence = (turn: TurnRecord): StudioTurnEvidence => {
   };
 };
 
+export interface UndoCallView {
+  readonly seq: number;
+  readonly tool: string;
+  readonly ok: boolean;
+  readonly write: boolean;
+  readonly targets: ReadonlyArray<string>;
+  readonly snapshot: unknown;
+  readonly snapshotDropped: boolean;
+}
+
+export interface UndoTurnView {
+  readonly runId: string;
+  readonly calls: ReadonlyArray<UndoCallView>;
+  readonly dropped: number;
+  readonly undone: boolean;
+}
+
+const snapshotSize = (snapshot: unknown): number => {
+  try {
+    return JSON.stringify(snapshot)?.length ?? 0;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+};
+
 interface ThreadLedger {
   open: TurnRecord;
   finished: Map<string, TurnRecord>;
@@ -271,6 +316,17 @@ export class StudioEvidence extends Context.Service<
       readonly seq: number;
       readonly snapshot: unknown;
     }) => Effect.Effect<void>;
+    /** Images generated so far in the thread's open turn. */
+    readonly imagesThisTurn: (threadId: string) => Effect.Effect<number>;
+    readonly undoSource: (input: {
+      readonly threadId: string;
+      readonly runId?: string | undefined;
+    }) => Effect.Effect<UndoTurnView | undefined>;
+    readonly finishUndo: (input: {
+      readonly threadId: string;
+      readonly runId: string;
+    }) => Effect.Effect<void>;
+    readonly isRunning: (threadId: string) => Effect.Effect<boolean>;
     readonly runStarted: (threadId: string, runId: string) => Effect.Effect<void>;
     /** Closes the thread's open turn under `runId` and releases the leases the thread holds. */
     readonly runEnded: (threadId: string, runId: string) => Effect.Effect<void>;
@@ -351,11 +407,55 @@ const make = Effect.sync(() => {
     record,
     attachSnapshot: Effect.fn("StudioEvidence.attachSnapshot")((input) =>
       Effect.sync(() => {
-        const call = threads
-          .get(input.threadId)
-          ?.open.calls.find((candidate) => candidate.seq === input.seq);
-        if (call !== undefined) call.snapshot = input.snapshot;
+        const open = threads.get(input.threadId)?.open;
+        const call = open?.calls.find((candidate) => candidate.seq === input.seq);
+        if (open === undefined || call === undefined) return;
+        const size = snapshotSize(input.snapshot);
+        if (open.snapshotBytes + size > maxSnapshotBytesPerTurn) {
+          call.snapshotDropped = true;
+          return;
+        }
+        open.snapshotBytes += size;
+        call.snapshot = input.snapshot;
       }),
+    ),
+    undoSource: Effect.fn("StudioEvidence.undoSource")((input) =>
+      Effect.sync(() => {
+        const finished = threads.get(input.threadId)?.finished;
+        if (finished === undefined) return undefined;
+        const runId = input.runId ?? [...finished.keys()].at(-1);
+        const turn = runId === undefined ? undefined : finished.get(runId);
+        if (runId === undefined || turn === undefined) return undefined;
+        return {
+          runId,
+          dropped: turn.dropped,
+          undone: turn.undone,
+          calls: turn.calls.map((call) => ({
+            seq: call.seq,
+            tool: call.tool,
+            ok: call.ok,
+            write: call.write,
+            targets: call.targets,
+            snapshot: call.snapshot,
+            snapshotDropped: call.snapshotDropped === true,
+          })),
+        };
+      }),
+    ),
+    finishUndo: Effect.fn("StudioEvidence.finishUndo")((input) =>
+      Effect.sync(() => {
+        const turn = threads.get(input.threadId)?.finished.get(input.runId);
+        if (turn === undefined) return;
+        turn.undone = true;
+        turn.snapshotBytes = 0;
+        for (const call of turn.calls) delete call.snapshot;
+      }),
+    ),
+    isRunning: Effect.fn("StudioEvidence.isRunning")((threadId) =>
+      Effect.sync(() => threads.get(threadId)?.open.runId !== undefined),
+    ),
+    imagesThisTurn: Effect.fn("StudioEvidence.imagesThisTurn")((threadId) =>
+      Effect.sync(() => threads.get(threadId)?.open.images ?? 0),
     ),
     runStarted: Effect.fn("StudioEvidence.runStarted")((threadId, runId) =>
       Effect.sync(() => {

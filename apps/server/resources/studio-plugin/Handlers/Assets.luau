@@ -6,6 +6,7 @@
 local Selection = game:GetService("Selection")
 
 local Util = require(script.Parent.Parent.Util)
+local Undo = require(script.Parent.Parent.Undo)
 
 local Assets = {}
 
@@ -138,6 +139,7 @@ function Assets.insert(args)
 		path = Util.pathOf(root),
 		className = root.ClassName,
 		boundsSize = size,
+		undo = if Undo.requested(args) then { { kind = "created", ref = Util.refOf(root), path = Util.pathOf(root) } } else nil,
 		counts = counts,
 		scripts = scriptPaths,
 		children = children,

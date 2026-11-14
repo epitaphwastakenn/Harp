@@ -40,6 +40,9 @@ export interface ModelPreviewReference {
   readonly dimensions: readonly [number, number, number];
   readonly animationClips: number;
   readonly sizeBytes: number;
+  /** The job folder name, and the one it continued from, so a viewer can chain versions of a model. */
+  readonly jobId?: string;
+  readonly continuedFrom?: string;
 }
 
 const MODEL_PREVIEW_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
@@ -61,12 +64,16 @@ export function readModelPreviewReference(value: unknown): ModelPreviewReference
   ) {
     return undefined;
   }
+  const jobId = boundedId(value.jobId);
+  const continuedFrom = boundedId(value.continuedFrom);
   return {
     previewId,
     triangles,
     dimensions: [dimensions[0], dimensions[1], dimensions[2]],
     animationClips,
     sizeBytes,
+    ...(jobId === undefined ? {} : { jobId }),
+    ...(continuedFrom === undefined ? {} : { continuedFrom }),
   };
 }
 
