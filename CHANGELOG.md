@@ -10,6 +10,37 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.20.0 · 2026-11-14
+
+> Harp catches up with two weeks of T3 Code: Harp in your language, Claude Fable 5.2, replies to a single response, and a faster, steadier app.
+
+### New
+
+- **Harp in your language** — Pick the app language in Settings → General, including Português (Brasil), Español, Deutsch, Français, 日本語, 한국어, Русский and 中文.
+- **Claude Fable 5.2** — The new model is in the picker, and the picker checks for new models each time it opens.
+- **Ultracode at any effort** — Turn on Ultracode at any reasoning effort, and on Claude Sonnet 5.5 and Haiku 5.5 too.
+- **Reply to a response** — Hover an assistant message and reply to it; the reply quotes it so the agent knows what you mean. Quotes in sent messages show as an inset card.
+- **Mention a model** — Type @ and a model name to tell the agent which model to use for a task.
+- **Fresh session in the same thread** — `/clear` starts a new provider session without leaving the thread, and scheduled tasks can run each time with a fresh session.
+- **Pull request comments in the chat** — Add a PR's review comments to your message, and PR composers complete @people and #123 references.
+- **Add projects by dropping folders** — Drop a folder on the sidebar to add it as a project.
+- **Delete archived threads** — Remove threads for good from the archive.
+- **Keep the computer awake** — Harp keeps your computer from sleeping while agents work.
+- **Chat without tool calls** — A setting hides tool calls so a thread reads like a conversation.
+- **Welcome page** — First run is now a single Welcome page instead of a three-step wizard.
+
+### Improved
+
+- **Send while attachments upload** — You no longer wait for images and files to finish uploading before sending.
+- **Faster and lighter** — Many upstream speedups in the server, database and thread loading, plus a button in Settings that reclaims freed database space.
+- **Screen readers** — Agent messages and steps are announced during a turn, and the window title leads with the thread's status.
+- **Windows background service** — The Harp service now runs on Windows, so a Windows host can update remotely.
+
+### Fixed
+
+- **Ctrl+W** — Ctrl+W closes the current tab and never closes the window, so pressing it once too often no longer quits Harp.
+- **Hundreds of upstream fixes** — Agent sessions, queued messages, scheduled tasks, pull requests, previews and providers.
+
 ## 2.19.0 · 2026-11-14
 
 > See Blender models in 3D right in the chat, undo a whole turn in Studio, and let agents check their own work before they say they're done.
