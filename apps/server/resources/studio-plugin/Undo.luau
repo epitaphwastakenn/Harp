@@ -65,12 +65,9 @@ function Undo.requested(args): string?
 	return if type(key) == "string" and key ~= "" then key else nil
 end
 
-function Undo.hold(key: string, instance: Instance): string
-	return keep(key, {
-		instance = instance,
-		parent = instance.Parent,
-		parentPath = Util.pathOf(instance.Parent),
-	})
+function Undo.hold(key: string, instance: Instance, parent: Instance?): string
+	local origin = parent or instance.Parent
+	return keep(key, { instance = instance, parent = origin, parentPath = Util.pathOf(origin) })
 end
 
 function Undo.journal(key: string, actions): string
@@ -248,7 +245,7 @@ local function restoreProperties(entry)
 			restored += 1
 		else
 			local raw = if SIMPLE[change.before.k] then change.before.v else { type = change.before.k, value = change.before.v }
-			local value, problem = Util.decodeAttribute(raw, current)
+			local value, problem = Util.decodeAttribute(raw, nil)
 			if problem then
 				table.insert(problems, "attribute " .. name .. ": " .. problem)
 			else
@@ -302,8 +299,30 @@ local function restoreHeld(key: string, entry)
 	return "restored", nil
 end
 
+local function resolveCreated(entry): Instance?
+	if type(entry.ref) == "string" then
+		return Util.resolve({ instanceRef = entry.ref })
+	end
+	if type(entry.path) ~= "string" or entry.path == "" then
+		return nil
+	end
+	local found = Util.resolvePath(entry.path)
+	if found == nil or type(entry.className) ~= "string" or found.ClassName ~= entry.className then
+		return nil
+	end
+	local parent = found.Parent
+	if parent ~= nil then
+		for _, sibling in parent:GetChildren() do
+			if sibling ~= found and sibling.Name == found.Name and sibling.ClassName == found.ClassName then
+				return nil
+			end
+		end
+	end
+	return found
+end
+
 local function restoreCreated(entry)
-	local instance = resolveInstance(entry)
+	local instance = resolveCreated(entry)
 	if instance == nil or instance.Parent == nil then
 		return "restored", nil
 	end

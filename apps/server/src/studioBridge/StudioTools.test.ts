@@ -693,7 +693,13 @@ describe("find_and_replace_in_scripts", () => {
         {},
       );
       const body = JSON.parse(textOf(result));
-      expect(body.written).toEqual([{ path: "game.Workspace.B", count: 1 }]);
+      expect(body.written).toEqual([
+        {
+          path: "game.Workspace.B",
+          count: 1,
+          verification: "Read the script back and verified revision wb.",
+        },
+      ]);
       expect(body.failed).toHaveLength(1);
       expect(body.failed[0].path).toBe("game.Workspace.A");
       const writes = plugin.calls.filter((call) => call.endpoint === "set-script-source");
@@ -975,16 +981,7 @@ describe("image generation tools", () => {
     Effect.gen(function* () {
       const tools = yield* StudioTools.StudioTools;
       const evidence = yield* StudioEvidence;
-      yield* evidence.record({
-        threadId: "thread-1",
-        call: {
-          tool: "generate_image",
-          risk: "mutation",
-          args: {},
-          ok: true,
-          structured: { generated: 2 },
-        },
-      });
+      yield* evidence.reserveImages({ threadId: "thread-1", wanted: 2, cap: 2 });
       const result = yield* tools.call(
         "generate_image",
         { prompt: "a spark", purpose: "particle" },
@@ -995,7 +992,16 @@ describe("image generation tools", () => {
         text: expect.stringContaining("image_cap_reached"),
       });
     }).pipe(
-      Effect.provide(imageLayer({ imageGeneration: true, imageApiKey: "k", imageMaxPerTurn: 2 })),
+      Effect.provide(
+        imageLayer({
+          imageGeneration: true,
+          imageApiKey: "k",
+          imageMaxPerTurn: 2,
+          imageProvider: "custom",
+          imageBaseUrl: "http://127.0.0.1:9/v1",
+          imageModel: "test-model",
+        }),
+      ),
     ),
   );
 });

@@ -232,4 +232,71 @@ describe("RojoWorkspaces structural saves", () => {
         ).toBeUndefined();
       }).pipe(Effect.scoped, Effect.provide(layer)),
   );
+
+  it.live(
+    "refuses children for a path-mapped script, duplicates and moving a script into itself",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* workspace();
+        yield* fs.writeFileString(`${root}/src/boot.server.luau`, "print(2)");
+        yield* fs.writeFileString(
+          `${root}/default.project.json`,
+          JSON.stringify({
+            name: "game",
+            servePort: 45872,
+            tree: {
+              $className: "DataModel",
+              ServerScriptService: { $path: "src/server", Boot: { $path: "src/boot.server.luau" } },
+            },
+          }),
+        );
+        const rojo = yield* RojoWorkspaces.RojoWorkspaces;
+        const mapped = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Boot",
+        });
+        expect(mapped).toMatchObject({ kind: "script", mappedByPath: true });
+        const refused = yield* rojo.createEntries({
+          root,
+          parent: mapped!,
+          nodes: [{ name: "Types", className: "ModuleScript", children: [] }],
+        });
+        expect(refused.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/boot.server.luau`)).toBe(true);
+
+        const folder = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Combat",
+        });
+        const twice = yield* rojo.createEntries({
+          root,
+          parent: folder!,
+          nodes: [
+            { name: "A", className: "Folder", children: [] },
+            { name: "a", className: "Script", children: [] },
+          ],
+        });
+        expect(twice.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/server/Combat/A`)).toBe(false);
+        const reserved = yield* rojo.createEntries({
+          root,
+          parent: folder!,
+          nodes: [{ name: "init", className: "ModuleScript", children: [] }],
+        });
+        expect(reserved.ok).toBe(false);
+
+        const util = yield* rojo.locateEntry({
+          root,
+          instancePath: "game.ServerScriptService.Util",
+        });
+        const self = yield* rojo.locateParent({
+          root,
+          instancePath: "game.ServerScriptService.Util",
+        });
+        const moved = yield* rojo.moveEntry({ root, location: util!, to: self! });
+        expect(moved.ok).toBe(false);
+        expect(yield* fs.exists(`${root}/src/server/Util.luau`)).toBe(true);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
 });

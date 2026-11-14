@@ -133,7 +133,11 @@ function Luau.execute(args)
 		undoable = recording ~= nil,
 	}
 	if protectedPaths then
-		local touched = Protected.changed(protectedBefore, protectedPaths)
+		local touched, partial = Protected.changed(protectedBefore, protectedPaths)
+		if #partial > 0 then
+			result.protectedPartial = partial
+			result.protectedPartialWarning = "PROTECTED PATH CHECK PARTIAL: " .. table.concat(partial, ", ") .. " is too large to fingerprint fully (instance or script size cap), so changes past the cap may go undetected."
+		end
 		if #touched > 0 then
 			result.protectedChanged = touched
 			result.protectedWarning = "PROTECTED PATH CHANGED: this run changed " .. table.concat(touched, ", ") .. ", which the user protected. Harp cannot stop raw Luau. Tell the user plainly, and undo it (Ctrl+Z in Studio) unless they accept it."

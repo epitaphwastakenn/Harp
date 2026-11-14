@@ -222,6 +222,11 @@ describe("structural saves in a Rojo project", () => {
     expect(rojoEntryNameProblem("Good Name")).toBeUndefined();
     expect(rojoEntryNameProblem("a/b")).toContain("characters");
     expect(rojoEntryNameProblem("..")).toBeDefined();
+    for (const bad of ["init", "INIT", "CON", "nul.txt", "Com1", "Foo.meta", "Foo.project"]) {
+      expect(rojoEntryNameProblem(bad)).toBeDefined();
+    }
+    expect(rojoEntryNameProblem("Console")).toBeUndefined();
+    expect(rojoEntryNameProblem("initial")).toBeUndefined();
   });
 
   it("builds trash paths under the workspace's .harp folder", () => {

@@ -27,6 +27,7 @@ import {
   resolveResultsRun,
   resultOriginLabels,
   resultOrigins,
+  indexResultRunFlags,
   resultRunIds,
   stepRun,
   subjectVersionLabel,
@@ -47,7 +48,7 @@ export function ResultsPanel({
   const items = useQuietThreadVisibleTurnItems(threadRef);
   const sources = indexResultSources(items);
   const runs = resultRunIds(sources);
-  const runId = resolveResultsRun(requestedRunId, runs);
+  const runId = resolveResultsRun(requestedRunId, runs, indexResultRunFlags(items));
   const results = buildTurnResults(sources, runId);
   const [origin, setOrigin] = useState<ResultOrigin | null>(null);
   const activeOrigin = origin !== null && results.counts[origin] > 0 ? origin : null;
@@ -65,7 +66,7 @@ export function ResultsPanel({
           size="icon-xs"
           variant="ghost-muted"
           aria-label="Earlier turn"
-          disabled={position <= 0 || previous === null}
+          disabled={previous === null}
           onClick={() => selectRun(previous)}
         >
           <ChevronLeftIcon />
@@ -79,7 +80,7 @@ export function ResultsPanel({
           size="icon-xs"
           variant="ghost-muted"
           aria-label="Later turn"
-          disabled={position === -1 || next === null}
+          disabled={next === null}
           onClick={() => selectRun(next)}
         >
           <ChevronRightIcon />

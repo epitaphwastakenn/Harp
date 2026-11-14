@@ -1,3 +1,5 @@
+import { indexResultRunFlags } from "./results/turnResults.logic";
+import { useQuietThreadVisibleTurnItems } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
@@ -489,6 +491,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }
   const citationThreadRef = parseScopedThreadKey(routeThreadKey);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
+  const resultRunFlags = indexResultRunFlags(useQuietThreadVisibleTurnItems(citationThreadRef));
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
@@ -1096,6 +1099,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onOpenToolDiff,
     onOpenTurnDiff,
     onOpenResults,
+    resultRunFlags,
     onReviewTurnDiff,
     diffPresentation,
     diffIgnoreWhitespace,

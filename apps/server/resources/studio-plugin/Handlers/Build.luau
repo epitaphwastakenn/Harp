@@ -62,6 +62,7 @@ local MAX_SCATTER = 5000
 local MAX_SCATTER_TEMPLATES = 20
 local MAX_AVOID_BOXES = 2000
 local SCATTER_ATTRIBUTE = "HarpScatterGroup"
+local scatterTimeBudget = 3
 
 local function rangeOf(value, default, lo: number, hi: number, label: string)
 	if value == nil then
@@ -90,16 +91,18 @@ local function boxOf(instance: Instance)
 end
 
 local function bottomOffset(template: Instance): number
-	if template:IsA("BasePart") then
-		return -template.Size.Y / 2
+	local cf, size = boxOf(template)
+	if cf == nil then
+		return 0
 	end
-	if template:IsA("Model") then
-		local ok, cf, size = pcall(template.GetBoundingBox, template)
-		if ok then
-			return template:GetPivot():ToObjectSpace(cf).Position.Y - size.Y / 2
-		end
-	end
-	return 0
+	local rotation = cf.Rotation
+	local reach = (math.abs(rotation.XVector.Y) * size.X + math.abs(rotation.YVector.Y) * size.Y + math.abs(rotation.ZVector.Y) * size.Z) / 2
+	return cf.Position.Y - template:GetPivot().Position.Y - reach
+end
+
+local function pivotRotation(template: Instance): CFrame
+	local pivot = template:GetPivot()
+	return pivot - pivot.Position
 end
 
 local function castDown(origin: Vector3, length: number, params: RaycastParams, skip: Instance?)
@@ -197,6 +200,31 @@ function Build.run(args)
 				root.Parent = nil
 			end,
 		})
+	end
+
+	local spatialKeys = { pivot = true, Position = true, CFrame = true, Orientation = true, Rotation = true, Size = true, PivotOffset = true }
+	local heldByTarget = {}
+	local function addChecked(target, key: string, action)
+		local space = spatialKeys[key] == true
+		local ownKey = if space then "space" else key
+		for other, entries in heldByTarget do
+			local sameTarget = other == target
+			local below = space and not sameTarget and target:IsA("Model") and other:IsDescendantOf(target)
+			if sameTarget or below then
+				for _, entry in entries do
+					if entry.action.holds ~= nil and (below and entry.key == "space" or sameTarget and entry.key == ownKey) then
+						entry.action.holds = nil
+					end
+				end
+			end
+		end
+		local entries = heldByTarget[target]
+		if entries == nil then
+			entries = {}
+			heldByTarget[target] = entries
+		end
+		table.insert(entries, { key = ownKey, action = action })
+		table.insert(actions, action)
 	end
 
 	local function fail(index, op, message)
@@ -384,7 +412,7 @@ function Build.run(args)
 				return "templates must be parts or models: " .. tostring(ref)
 			end
 			totalWeight += weight
-			table.insert(templates, { source = source, weight = weight, bottom = bottomOffset(source) })
+			table.insert(templates, { source = source, weight = weight, bottom = bottomOffset(source), rotation = pivotRotation(source) })
 		end
 
 		local zone = step.zone
@@ -523,7 +551,7 @@ function Build.run(args)
 			end
 			local cf, size = boxOf(instance)
 			if cf then
-				table.insert(avoidBoxes, { cf = cf, half = size / 2 })
+				table.insert(avoidBoxes, { cf = cf, half = size / 2, center = cf.Position, reach = size.Magnitude / 2 })
 			end
 		end
 		for _, tag in if type(step.avoidTags) == "table" then step.avoidTags else {} do
@@ -555,8 +583,8 @@ function Build.run(args)
 
 		local cell = math.max(minSpacing, 0.001)
 		local grid = {}
-		local function key(x: number, y: number, z: number): string
-			return x .. "," .. y .. "," .. z
+		local function key(x: number, y: number, z: number): number
+			return bit32.bxor(x * 73856093, y * 19349663, z * 83492791)
 		end
 		local function crowded(point: Vector3): boolean
 			if minSpacing <= 0 then
@@ -590,6 +618,11 @@ function Build.run(args)
 		end
 		local function avoided(point: Vector3): boolean
 			for _, box in avoidBoxes do
+				local reach = box.reach + padding
+				local offset = point - box.center
+				if math.abs(offset.X) > reach or math.abs(offset.Y) > reach or math.abs(offset.Z) > reach then
+					continue
+				end
 				local local_ = box.cf:PointToObjectSpace(point)
 				if math.abs(local_.X) <= box.half.X + padding and math.abs(local_.Y) <= box.half.Y + padding and math.abs(local_.Z) <= box.half.Z + padding then
 					return true
@@ -604,7 +637,13 @@ function Build.run(args)
 		local maxAttempts = math.min(count * 20, 100000)
 		local rayLength = zoneSize.Y + depth
 		local maxTan = math.rad(maxSlope)
+		local startedAt = os.clock()
+		local stoppedEarly = nil
 		while placed < count and attempts < maxAttempts do
+			if attempts % 32 == 31 and os.clock() - startedAt > scatterTimeBudget then
+				stoppedEarly = "timeBudget"
+				break
+			end
 			attempts += 1
 			local local_ = Vector3.new((random:NextNumber() - 0.5) * zoneSize.X, zoneSize.Y / 2, (random:NextNumber() - 0.5) * zoneSize.Z)
 			local origin = zoneCFrame:PointToWorldSpace(local_)
@@ -624,10 +663,10 @@ function Build.run(args)
 				rejected.ground += 1
 			elseif math.acos(math.clamp(hit.Normal.Y, -1, 1)) > maxTan then
 				rejected.slope += 1
-			elseif avoided(hit.Position) then
-				rejected.avoid += 1
 			elseif crowded(hit.Position) then
 				rejected.spacing += 1
+			elseif avoided(hit.Position) then
+				rejected.avoid += 1
 			else
 				local copyOk, copy = pcall(function()
 					return template.source:Clone()
@@ -649,7 +688,7 @@ function Build.run(args)
 				end
 				local turn = CFrame.fromMatrix(Vector3.zero, right.Unit, up) * CFrame.Angles(0, math.rad(yaw), 0)
 				local position = hit.Position + up * (-template.bottom * scale + yOffset)
-				copy:PivotTo(CFrame.new(position) * turn)
+				copy:PivotTo(CFrame.new(position) * turn * template.rotation)
 				copy.Parent = group
 				placed += 1
 				remember(hit.Position)
@@ -657,6 +696,9 @@ function Build.run(args)
 		end
 		if placed == 0 then
 			group:Destroy()
+			if stoppedEarly then
+				return string.format("scatter stopped after %d attempts because it ran out of time (no ground %d, too steep %d, avoided %d, too close %d). Use a smaller zone or fewer avoid boxes.", attempts, rejected.ground, rejected.slope, rejected.avoid, rejected.spacing)
+			end
 			return string.format("no point passed the rules in %d attempts (no ground %d, too steep %d, avoided %d, too close %d). Widen the zone, raise maxSlope or lower minSpacing.", attempts, rejected.ground, rejected.slope, rejected.avoid, rejected.spacing)
 		end
 
@@ -686,6 +728,7 @@ function Build.run(args)
 			requested = count,
 			attempts = attempts,
 			rejected = rejected,
+			stoppedEarly = stoppedEarly,
 			seed = seed,
 		})
 		return register(0, step, group)
@@ -837,7 +880,7 @@ function Build.run(args)
 						value = tostring(value)
 					end
 					local path = Util.pathOf(target) or target.Name
-					table.insert(actions, {
+					addChecked(target, name, {
 						label = path .. "." .. name,
 						apply = function()
 							target[name] = value
@@ -861,7 +904,7 @@ function Build.run(args)
 					if attributeProblem then
 						return fail(index, op, "attribute " .. key .. ": " .. attributeProblem)
 					end
-					table.insert(actions, {
+					addChecked(target, "attr:" .. key, {
 						label = "attribute " .. key,
 						apply = function()
 							target:SetAttribute(key, value)
@@ -898,7 +941,7 @@ function Build.run(args)
 					end
 					local before = target:GetPivot()
 					local after = posed(before, position, rotation)
-					table.insert(actions, {
+					addChecked(target, "pivot", {
 						label = "pivot",
 						apply = function()
 							target:PivotTo(after)

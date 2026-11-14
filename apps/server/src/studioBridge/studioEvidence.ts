@@ -55,6 +55,7 @@ const uiPattern =
 export const isPlaceWrite = (tool: string, risk: StudioRisk, args: Args): boolean => {
   if (risk === "read" || notPlaceWrites.has(tool)) return false;
   if (tool === "animation") return args.action === "create";
+  if (tool === "find_and_replace_in_scripts") return args.dryRun === false;
   if (tool === "execute_luau") {
     const target = typeof args.target === "string" ? args.target : "edit";
     return target === "edit";
@@ -136,6 +137,7 @@ interface TurnRecord {
   snapshotBytes: number;
   undone: boolean;
   images: number;
+  imageQuota: number;
 }
 
 export const emptyTurn = (runId: string | undefined): TurnRecord => ({
@@ -158,6 +160,7 @@ export const emptyTurn = (runId: string | undefined): TurnRecord => ({
   snapshotBytes: 0,
   undone: false,
   images: 0,
+  imageQuota: 0,
 });
 
 interface FinishedCall {
@@ -194,6 +197,12 @@ export const applyCall = (turn: TurnRecord, call: FinishedCall): number => {
       if (scriptWriteTools.has(call.tool)) {
         turn.scriptsWritten += 1;
         if (scriptWriteVerified(call.structured)) turn.scriptsVerified += 1;
+      } else if (call.tool === "find_and_replace_in_scripts") {
+        const written = call.structured?.written;
+        for (const entry of Array.isArray(written) ? written : []) {
+          turn.scriptsWritten += 1;
+          if (isRecord(entry) && scriptWriteVerified(entry)) turn.scriptsVerified += 1;
+        }
       } else if (touchesUi(call.tool, call.args)) {
         turn.uiChanges += 1;
         turn.uiPending = true;
@@ -316,8 +325,18 @@ export class StudioEvidence extends Context.Service<
       readonly seq: number;
       readonly snapshot: unknown;
     }) => Effect.Effect<void>;
-    /** Images generated so far in the thread's open turn. */
+    /** Images counted against the per-turn cap in the thread's open turn, including reserved ones. */
     readonly imagesThisTurn: (threadId: string) => Effect.Effect<number>;
+    /** Atomically reserves up to `wanted` images against the per-turn `cap`; returns how many were granted. */
+    readonly reserveImages: (input: {
+      readonly threadId: string;
+      readonly wanted: number;
+      readonly cap: number;
+    }) => Effect.Effect<number>;
+    /** Gives back reserved images that were not generated. */
+    readonly releaseImages: (threadId: string, count: number) => Effect.Effect<void>;
+    /** Drops the leases a thread holds without ending its turn. */
+    readonly releaseWrite: (threadId: string) => Effect.Effect<void>;
     readonly undoSource: (input: {
       readonly threadId: string;
       readonly runId?: string | undefined;
@@ -455,7 +474,24 @@ const make = Effect.sync(() => {
       Effect.sync(() => threads.get(threadId)?.open.runId !== undefined),
     ),
     imagesThisTurn: Effect.fn("StudioEvidence.imagesThisTurn")((threadId) =>
-      Effect.sync(() => threads.get(threadId)?.open.images ?? 0),
+      Effect.sync(() => threads.get(threadId)?.open.imageQuota ?? 0),
+    ),
+    reserveImages: Effect.fn("StudioEvidence.reserveImages")((input) =>
+      Effect.sync(() => {
+        const open = ledgerOf(input.threadId).open;
+        const granted = Math.max(0, Math.min(input.wanted, input.cap - open.imageQuota));
+        open.imageQuota += granted;
+        return granted;
+      }),
+    ),
+    releaseImages: Effect.fn("StudioEvidence.releaseImages")((threadId, count) =>
+      Effect.sync(() => {
+        const open = threads.get(threadId)?.open;
+        if (open !== undefined) open.imageQuota = Math.max(0, open.imageQuota - count);
+      }),
+    ),
+    releaseWrite: Effect.fn("StudioEvidence.releaseWrite")((threadId) =>
+      Effect.sync(() => releaseLeases(threadId)),
     ),
     runStarted: Effect.fn("StudioEvidence.runStarted")((threadId, runId) =>
       Effect.sync(() => {
@@ -469,8 +505,14 @@ const make = Effect.sync(() => {
     ),
     runEnded: Effect.fn("StudioEvidence.runEnded")((threadId, runId) =>
       Effect.sync(() => {
-        releaseLeases(threadId);
         const ledger = threads.get(threadId);
+        if (
+          ledger === undefined ||
+          ledger.open.runId === undefined ||
+          ledger.open.runId === runId
+        ) {
+          releaseLeases(threadId);
+        }
         if (ledger === undefined || ledger.finished.has(runId)) return;
         if (ledger.open.runId !== undefined && ledger.open.runId !== runId) return;
         if (ledger.open.calls.length === 0 && ledger.open.runId === undefined) return;

@@ -1,5 +1,6 @@
 import type { OrchestrationV2DomainEvent } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -40,6 +41,7 @@ export const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Effect.logWarning("studio evidence event stream failed", { cause }),
         ),
+        Effect.repeat(Schedule.spaced("2 seconds")),
       ),
     );
   });

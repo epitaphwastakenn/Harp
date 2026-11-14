@@ -279,20 +279,23 @@ def _sealcode_preview(path):
     scene.render.image_settings.file_format = "PNG"
     cam_data = bpy.data.cameras.new("SealCodePreviewCam")
     cam_data.type = "ORTHO"
+    extent = hi - lo
     cam_data.ortho_scale = radius * 2.3
     cam_data.clip_end = radius * 40
     cam = bpy.data.objects.new("SealCodePreviewCam", cam_data)
     scene.collection.objects.link(cam)
     scene.camera = cam
     views = [
-        ("front", Vector((0, -1, 0.0001)), "ORTHO"),
-        ("right", Vector((1, 0, 0.0001)), "ORTHO"),
-        ("top", Vector((0, -0.0001, 1)), "ORTHO"),
-        ("iso", Vector((1.0, -1.2, 0.8)), "PERSP"),
+        ("front", Vector((0, -1, 0.0001)), "ORTHO", extent.x, extent.z),
+        ("right", Vector((1, 0, 0.0001)), "ORTHO", extent.y, extent.z),
+        ("top", Vector((0, -0.0001, 1)), "ORTHO", extent.x, extent.y),
+        ("iso", Vector((1.0, -1.2, 0.8)), "PERSP", 0, 0),
     ]
     files = []
-    for name, direction, kind in views:
+    for name, direction, kind, view_w, view_h in views:
         cam_data.type = kind
+        if kind == "ORTHO":
+            cam_data.ortho_scale = max(max(view_w, view_h * cell_w / cell_h) * 1.1, 0.02)
         direction = direction.normalized()
         cam.location = center + direction * radius * (3.2 if kind == "PERSP" else 6)
         cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
@@ -324,9 +327,9 @@ def _sealcode_preview(path):
 _harp_carried = None
 
 def _harp_select_for_export():
-    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
-    extras = [o for o in bpy.context.scene.objects if o.type == "ARMATURE" or (o.type == "EMPTY" and o.animation_data is not None and o.animation_data.action is not None)]
-    for o in bpy.context.scene.objects:
+    meshes = [o for o in bpy.context.view_layer.objects if o.type == "MESH"]
+    extras = [o for o in bpy.context.view_layer.objects if o.type == "ARMATURE" or (o.type == "EMPTY" and o.animation_data is not None and o.animation_data.action is not None)]
+    for o in bpy.context.view_layer.objects:
         try:
             o.select_set(False)
         except Exception:
@@ -336,11 +339,18 @@ def _harp_select_for_export():
             o.select_set(True)
         except Exception:
             pass
-    return [o.name for o in meshes if o.select_get()]
+    selected = []
+    for o in meshes:
+        try:
+            if o.select_get():
+                selected.append(o.name)
+        except Exception:
+            pass
+    return selected
 
 def _sealcode_export(path):
     global _harp_carried
-    if not any(o.type == "MESH" for o in bpy.context.scene.objects):
+    if not any(o.type == "MESH" for o in bpy.context.view_layer.objects):
         return False
     _harp_carried = _harp_select_for_export()
     kwargs = dict(filepath=path, export_selected_objects=True, export_materials=True, forward_axis="NEGATIVE_Z", up_axis="Y", export_triangulated_mesh=True)

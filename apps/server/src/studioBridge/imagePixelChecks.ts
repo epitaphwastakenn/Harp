@@ -114,21 +114,31 @@ const sharpnessOf = (
   data: Uint8Array,
   width: number,
   height: number,
-): { readonly value: number; readonly label: Sharpness } => {
+): { readonly value: number; readonly label: Sharpness; readonly peak: number } => {
   const bins = new Uint32Array(256);
   let counted = 0;
+  let peak = 0;
   for (let y = 0; y < height - 1; y += 1) {
     for (let x = 0; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (
+        data[index * 4 + 3]! <= visibleAlpha &&
+        data[(index + 1) * 4 + 3]! <= visibleAlpha &&
+        data[(index + width) * 4 + 3]! <= visibleAlpha
+      ) {
+        continue;
+      }
       const here = premultipliedLuma(data, y * width + x);
       const gradient = Math.max(
         Math.abs(here - premultipliedLuma(data, y * width + x + 1)),
         Math.abs(here - premultipliedLuma(data, (y + 1) * width + x)),
       );
+      if (gradient > peak) peak = gradient;
       bins[Math.min(255, Math.floor(gradient * 255))]! += 1;
       counted += 1;
     }
   }
-  if (counted === 0) return { value: 0, label: "flat" };
+  if (counted === 0) return { value: 0, label: "flat", peak: 0 };
   const target = counted * 0.01;
   let seen = 0;
   let p99 = 0;
@@ -141,7 +151,7 @@ const sharpnessOf = (
   }
   const label: Sharpness =
     p99 < 0.04 ? "flat" : p99 < 0.1 ? "soft" : p99 < 0.25 ? "medium" : "crisp";
-  return { value: p99, label };
+  return { value: p99, label, peak };
 };
 
 export const analyzeImage = (
@@ -203,7 +213,7 @@ export const analyzeImage = (
       "The tile does not wrap cleanly: its opposite edges differ more than neighbouring pixels do. Look at the 2x2 sheet for visible seams.",
     );
   }
-  if (sharp.label === "flat" && alphaCoverage > 0) {
+  if (sharp.label === "flat" && alphaCoverage > 0 && !(alphaCoverage < 0.3 && sharp.peak >= 0.25)) {
     warnings.push("The image is almost featureless (no real edges or gradients).");
   }
   if (alphaCoverage < 0.01) warnings.push("Almost nothing is visible: alpha coverage is under 1%.");

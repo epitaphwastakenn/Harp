@@ -103,7 +103,7 @@ describe("model previews", () => {
 
   it("prunes folders only when beyond the newest and older than the age limit", () => {
     const root = tempRoot();
-    const now = Date.now();
+    const now = 1_800_000_000_000;
     const make = (name: string, ageMs: number) => {
       const dir = NodePath.join(root, name);
       NodeFS.mkdirSync(dir);

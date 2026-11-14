@@ -73,6 +73,7 @@ export type RojoParentLocation = {
   readonly absolute: string;
   readonly relative: string;
   readonly serving: boolean;
+  readonly mappedByPath?: boolean;
 };
 
 export interface RojoEntryLocation {
@@ -133,11 +134,14 @@ interface OwnedServer {
   exited: boolean;
 }
 
+const mappedScriptReason =
+  "the script is mapped directly by the project file, so giving it children would move it";
+
 const stripAnsi = (text: string) => text.replace(/\u001B\[[0-9;?]*[A-Za-z]/gu, "");
 
 const normalizeEol = (text: string) => text.replaceAll("\r\n", "\n");
 
-const probe = (port: number) =>
+const probe = (port: number, projectName?: string) =>
   Effect.promise(async () => {
     try {
       const response = await fetch(`http://127.0.0.1:${String(port)}/api/rojo`, {
@@ -145,11 +149,15 @@ const probe = (port: number) =>
       });
       if (!response.ok) return false;
       const body: unknown = await response.json();
-      return (
-        typeof body === "object" &&
-        body !== null &&
-        ("serverVersion" in body || "projectName" in body || "sessionId" in body)
-      );
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !("serverVersion" in body || "projectName" in body || "sessionId" in body)
+      ) {
+        return false;
+      }
+      if (projectName === undefined || !("projectName" in body)) return true;
+      return body.projectName === projectName;
     } catch {
       return false;
     }
@@ -255,7 +263,7 @@ const make = Effect.gen(function* () {
     project: RojoProject,
   ) {
     const server = owned.get(serverKey(root, project.file));
-    const alive = yield* probe(project.port);
+    const alive = yield* probe(project.port, project.name);
     const base = {
       file: project.file,
       label: project.label,
@@ -321,7 +329,8 @@ const make = Effect.gen(function* () {
   const start = Effect.fn("RojoWorkspaces.start")(function* (root: string, project: RojoProject) {
     const key = serverKey(root, project.file);
     const current = owned.get(key);
-    if ((current !== undefined && !current.exited) || (yield* probe(project.port))) return;
+    if ((current !== undefined && !current.exited) || (yield* probe(project.port, project.name)))
+      return;
     const rojo = yield* findRojo();
     if (rojo === undefined) {
       owned.set(key, { child: undefined, lines: [rojoMissing], exited: true });
@@ -356,7 +365,7 @@ const make = Effect.gen(function* () {
     });
     owned.set(key, server);
     yield* waitFor(
-      probe(project.port).pipe(Effect.map((alive) => alive || server.exited)),
+      probe(project.port, project.name).pipe(Effect.map((alive) => alive || server.exited)),
       startTimeoutMs,
     );
   });
@@ -427,7 +436,7 @@ const make = Effect.gen(function* () {
       project,
       absolute,
       relative: relativeOf(absolute),
-      serving: yield* probe(project.port),
+      serving: yield* probe(project.port, project.name),
     };
   });
 
@@ -461,17 +470,18 @@ const make = Effect.gen(function* () {
       const target = rojoParentTarget(project, segments);
       if (target === undefined) continue;
       const folder = projectFolder(input.root, project);
-      const found = (kind: "directory" | "script", absolute: string) =>
-        Effect.map(probe(project.port), (serving): RojoParentLocation => ({
+      const found = (kind: "directory" | "script", absolute: string, mappedByPath = false) =>
+        Effect.map(probe(project.port, project.name), (serving): RojoParentLocation => ({
           kind,
           project,
           absolute,
           relative: relativeTo(input.root, absolute),
           serving,
+          ...(mappedByPath ? { mappedByPath } : {}),
         }));
       if (target.kind === "file") {
         const absolute = path.resolve(folder, target.file);
-        if (yield* isFile(absolute)) return yield* found("script", absolute);
+        if (yield* isFile(absolute)) return yield* found("script", absolute, true);
         continue;
       }
       let directory = path.resolve(folder, target.base);
@@ -526,7 +536,7 @@ const make = Effect.gen(function* () {
           project,
           ...found,
           relative: relativeTo(input.root, found.absolute),
-          serving: yield* probe(project.port),
+          serving: yield* probe(project.port, project.name),
         };
       }
       return undefined;
@@ -575,10 +585,23 @@ const make = Effect.gen(function* () {
   const createEntries: RojoWorkspacesShape["createEntries"] = Effect.fn(
     "RojoWorkspaces.createEntries",
   )(function* (input) {
-    for (const node of input.nodes) {
-      const problem = rojoEntryNameProblem(node.name);
-      if (problem !== undefined) return { ok: false, reason: problem };
-    }
+    if (input.parent.mappedByPath === true) return { ok: false, reason: mappedScriptReason };
+    const planned = planRojoCreation("", input.nodes);
+    const nodeProblem = (siblings: ReadonlyArray<RojoNewNode>): string | undefined => {
+      const seen = new Set<string>();
+      for (const node of siblings) {
+        const problem = rojoEntryNameProblem(node.name);
+        if (problem !== undefined) return problem;
+        const key = node.name.toLowerCase();
+        if (seen.has(key)) return `"${node.name}" is created twice in the same place`;
+        seen.add(key);
+        const inner = nodeProblem(node.children);
+        if (inner !== undefined) return inner;
+      }
+      return undefined;
+    };
+    const problem = nodeProblem(input.nodes);
+    if (problem !== undefined) return { ok: false, reason: problem };
     const base =
       input.parent.kind === "script" ? scriptStem(input.parent.absolute) : input.parent.absolute;
     for (const node of input.nodes) {
@@ -594,7 +617,7 @@ const make = Effect.gen(function* () {
         const directory =
           input.parent.kind === "script" ? yield* promote(input.parent.absolute) : base;
         const files: string[] = [];
-        for (const entry of planRojoCreation("", input.nodes)) {
+        for (const entry of planned) {
           const target = path.join(directory, entry.path);
           if (entry.kind === "directory") {
             yield* fs.makeDirectory(target, { recursive: true });
@@ -654,6 +677,15 @@ const make = Effect.gen(function* () {
       ) {
         return { ok: false, reason: "an instance cannot move into itself" };
       }
+      if (
+        input.to !== undefined &&
+        (input.to.absolute === location.absolute ||
+          into === scriptStem(location.absolute) ||
+          (into + path.sep).startsWith(scriptStem(location.absolute) + path.sep))
+      ) {
+        return { ok: false, reason: "an instance cannot move into itself" };
+      }
+      if (input.to?.mappedByPath === true) return { ok: false, reason: mappedScriptReason };
       const clash = path.join(into, renamed);
       if (yield* exists(clash)) {
         return { ok: false, reason: `${relativeTo(input.root, clash)} already exists` };

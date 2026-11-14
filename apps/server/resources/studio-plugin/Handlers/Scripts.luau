@@ -496,6 +496,9 @@ function Scripts.findReplace(args)
 		return { error = "replace is required (an empty string deletes the match)" }
 	end
 	local usePattern = args.usePattern == true
+	if usePattern and args.caseSensitive == false then
+		return { error = "case-insensitive matching is not supported with Lua patterns; use character classes like [Aa] or set usePattern=false" }
+	end
 	local spec = {
 		find = find,
 		replace = args.replace,

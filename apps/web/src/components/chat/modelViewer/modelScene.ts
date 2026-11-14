@@ -108,10 +108,12 @@ export async function createModelScene(
   host: HTMLElement,
   buffer: ArrayBuffer,
   hooks: ModelSceneHooks,
+  signal?: AbortSignal,
 ): Promise<ModelScene> {
   const gltf = await parseGlb(buffer).catch(() => {
     throw new Error("The model file could not be read.");
   });
+  if (signal?.aborted === true) throw new DOMException("Aborted", "AbortError");
   activeScene?.dispose();
 
   let renderer: WebGLRenderer;
@@ -190,6 +192,7 @@ export async function createModelScene(
 
   const camera = new PerspectiveCamera(fovDegrees, 1, 0.01, 100);
   const controls = new OrbitControls(camera, canvas);
+  controls.listenToKeyEvents(host);
   controls.enableDamping = false;
   controls.screenSpacePanning = true;
 

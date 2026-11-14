@@ -139,7 +139,7 @@ function Assets.insert(args)
 		path = Util.pathOf(root),
 		className = root.ClassName,
 		boundsSize = size,
-		undo = if Undo.requested(args) then { { kind = "created", ref = Util.refOf(root), path = Util.pathOf(root) } } else nil,
+		undo = if Undo.requested(args) then { { kind = "created", ref = Util.refOf(root), path = Util.pathOf(root), className = root.ClassName } } else nil,
 		counts = counts,
 		scripts = scriptPaths,
 		children = children,

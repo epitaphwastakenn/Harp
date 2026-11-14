@@ -11,8 +11,8 @@ export function buildResultsPreview(
   const images: ExpandedImageItem[] = [];
   let index = 0;
   for (const [position, subject] of subjects.entries()) {
-    if (position === subjectIndex) index = images.length + subject.images.length - 1;
     if (subject.tile.versions !== undefined) {
+      if (position === subjectIndex) index = images.length;
       images.push({
         src: null,
         name: subject.label,
@@ -26,6 +26,7 @@ export function buildResultsPreview(
       });
       continue;
     }
+    if (position === subjectIndex) index = images.length + subject.images.length - 1;
     for (const [capture, resource] of subject.images.entries()) {
       const name =
         subject.images.length > 1

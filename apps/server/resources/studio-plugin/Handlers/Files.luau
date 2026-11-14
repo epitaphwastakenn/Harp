@@ -112,7 +112,7 @@ function Files.import(args)
 	if Undo.requested(args) then
 		undo = {}
 		for _, instance in attached do
-			table.insert(undo, { kind = "created", ref = Util.refOf(instance), path = Util.pathOf(instance) })
+			table.insert(undo, { kind = "created", ref = Util.refOf(instance), path = Util.pathOf(instance), className = instance.ClassName })
 		end
 	end
 	return {

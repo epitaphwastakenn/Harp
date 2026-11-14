@@ -1,13 +1,20 @@
 import type { EnvironmentId, RunId, ScopedThreadRef } from "@t3tools/contracts";
 import { ImagesIcon } from "lucide-react";
 
-import { useQuietThreadVisibleTurnItems } from "../../../state/entities";
 import { useEnvironmentQuery } from "../../../state/query";
 import { serverEnvironment } from "../../../state/server";
 import { Button } from "../../ui/button";
-import { indexResultSources } from "./turnResults.logic";
 
-export function ResultsButton({
+function OpenButton({ runId, onOpen }: { runId: RunId; onOpen: (runId: RunId) => void }) {
+  return (
+    <Button type="button" size="xs" variant="ghost-muted" onClick={() => onOpen(runId)}>
+      <ImagesIcon />
+      Results
+    </Button>
+  );
+}
+
+function StudioResultsButton({
   environmentId,
   threadRef,
   runId,
@@ -18,20 +25,39 @@ export function ResultsButton({
   runId: RunId;
   onOpen: (runId: RunId) => void;
 }) {
-  const hasImages = indexResultSources(useQuietThreadVisibleTurnItems(threadRef)).some(
-    (source) => source.runId === runId,
-  );
   const evidence = useEnvironmentQuery(
     serverEnvironment.studioTurnEvidence({
       environmentId,
       input: { threadId: threadRef.threadId, runId },
     }),
   ).data;
-  if (!hasImages && (evidence?.writes ?? 0) === 0) return null;
+  if ((evidence?.writes ?? 0) === 0) return null;
+  return <OpenButton runId={runId} onOpen={onOpen} />;
+}
+
+export function ResultsButton({
+  environmentId,
+  threadRef,
+  runId,
+  hasImages,
+  hasStudioTools,
+  onOpen,
+}: {
+  environmentId: EnvironmentId;
+  threadRef: ScopedThreadRef;
+  runId: RunId;
+  hasImages: boolean;
+  hasStudioTools: boolean;
+  onOpen: (runId: RunId) => void;
+}) {
+  if (hasImages) return <OpenButton runId={runId} onOpen={onOpen} />;
+  if (!hasStudioTools) return null;
   return (
-    <Button type="button" size="xs" variant="ghost-muted" onClick={() => onOpen(runId)}>
-      <ImagesIcon />
-      Results
-    </Button>
+    <StudioResultsButton
+      environmentId={environmentId}
+      threadRef={threadRef}
+      runId={runId}
+      onOpen={onOpen}
+    />
   );
 }

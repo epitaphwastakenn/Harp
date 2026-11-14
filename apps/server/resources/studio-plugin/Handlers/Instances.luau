@@ -362,7 +362,7 @@ function Instances.create(args)
 		local refs = {}
 		for _, entry in made do
 			if entry.instance.Parent ~= nil then
-				table.insert(refs, { kind = "created", ref = Util.refOf(entry.instance), path = Util.pathOf(entry.instance) })
+				table.insert(refs, { kind = "created", ref = Util.refOf(entry.instance), path = Util.pathOf(entry.instance), className = entry.instance.ClassName })
 			end
 		end
 		undo = refs
@@ -397,19 +397,34 @@ function Instances.delete(args)
 			return { error = Util.pathOf(instance) .. " cannot be removed.", nothingChanged = true }
 		end
 	end
+	local kept = {}
+	for _, instance in targets do
+		local nested = false
+		for _, other in targets do
+			if other ~= instance and instance:IsDescendantOf(other) then
+				nested = true
+				break
+			end
+		end
+		if not nested then
+			table.insert(kept, instance)
+		end
+	end
+	targets = kept
 	local recording = Util.beginRecording(string.format("Remove %d instance(s)", #targets))
 	local removed = {}
 	local undoKey = Undo.requested(args)
 	local held = {}
 	for _, instance in targets do
 		local path = Util.pathOf(instance)
-		local token = if undoKey then Undo.hold(undoKey, instance) else nil
+		local origin = instance.Parent
 		-- Unparented rather than destroyed, so undo brings it back like Studio's own Delete.
 		local ok = pcall(function()
 			instance.Parent = nil
 		end)
 		if ok then
 			table.insert(removed, path)
+			local token = if undoKey then Undo.hold(undoKey, instance, origin) else nil
 			if token then
 				table.insert(held, { kind = "deleted", token = token, path = path, className = instance.ClassName })
 			end

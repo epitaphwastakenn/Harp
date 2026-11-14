@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off globalDateInEffect:off globalRandomInEffect:off globalTimers:off preferSchemaOverJson:off globalFetchInEffect:off -Blender runs as a headless child process on job folders.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeOS from "node:os";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -71,7 +72,7 @@ export const blenderEnvironment = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
 const killProcessTree = (child: NodeChildProcess.ChildProcess) => {
   const pid = child.pid;
   if (pid === undefined) return;
-  if (process.platform === "win32") {
+  if (NodeOS.platform() === "win32") {
     NodeChildProcess.spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
       windowsHide: true,
       stdio: "ignore",
@@ -85,20 +86,61 @@ const killProcessTree = (child: NodeChildProcess.ChildProcess) => {
   }
 };
 
-const SUMMARY_BUDGET_CHARS = 13_000;
+const SUMMARY_BUDGET_BYTES = 12_000;
+
+const byteSize = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
+
+const trimOutput = (output: string, keep: number) => {
+  if (keep <= 0) return "";
+  let tail = output.slice(-keep);
+  while (Buffer.byteLength(tail, "utf8") > keep * 2) tail = tail.slice(Math.ceil(tail.length / 4));
+  return `…${tail}`;
+};
 
 /** Client output compaction reads only the first 16 KB of a result, so the summary stays under it. */
 export const fitJobSummary = <T extends { output: string; result: unknown }>(summary: T): T => {
-  let fitted = summary;
+  const fits = (value: unknown) => byteSize(value) <= SUMMARY_BUDGET_BYTES;
+  if (fits(summary)) return summary;
+  const fitted = { ...summary };
   for (const keep of [6000, 3000, 1000, 0]) {
-    if (JSON.stringify(fitted).length <= SUMMARY_BUDGET_CHARS) break;
-    fitted = { ...fitted, output: keep === 0 ? "" : `…${summary.output.slice(-keep)}` };
+    fitted.output = trimOutput(summary.output, keep);
+    if (fits(fitted)) return fitted;
   }
-  if (JSON.stringify(fitted).length > SUMMARY_BUDGET_CHARS) {
-    const result = (fitted.result ?? {}) as { lint?: Record<string, unknown> };
-    const { objects: _objects, ...lint } = result.lint ?? {};
-    fitted = { ...fitted, result: { ...result, lint: { ...lint, objectsOmitted: true } } };
+  const original = (fitted.result ?? {}) as Record<string, unknown>;
+  const withResult = (result: Record<string, unknown>) => {
+    Object.assign(fitted, { result });
+    return fits(fitted);
+  };
+  const lintOf = (result: Record<string, unknown>) =>
+    result.lint !== null && typeof result.lint === "object"
+      ? (result.lint as Record<string, unknown>)
+      : {};
+  const { objects: _objects, ...lintWithoutObjects } = lintOf(original);
+  let result: Record<string, unknown> = {
+    ...original,
+    ...(original.lint === undefined
+      ? {}
+      : { lint: { ...lintWithoutObjects, objectsOmitted: true } }),
+  };
+  if (withResult(result)) return fitted;
+  const meshes = Array.isArray(original.meshes) ? original.meshes : undefined;
+  if (meshes !== undefined) {
+    for (const limit of [40, 20, 10, 5, 0]) {
+      if (meshes.length <= limit) continue;
+      result = { ...result, meshes: meshes.slice(0, limit), meshesOmitted: meshes.length - limit };
+      if (withResult(result)) return fitted;
+    }
   }
+  for (const limit of [20, 8, 3, 0]) {
+    const lint: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(lintOf(result))) {
+      lint[key] = Array.isArray(value) && value.length > limit ? value.slice(0, limit) : value;
+    }
+    result = { ...result, lint };
+    if (withResult(result)) return fitted;
+  }
+  const { meshes: _meshes, lint: _lint, ...rest } = result;
+  withResult({ ...rest, reportTrimmed: true });
   return fitted;
 };
 
@@ -161,6 +203,27 @@ const readModelPreview = (
   };
 };
 
+export const resolveContinueBlend = (
+  jobsRoot: string,
+  continueFrom: string,
+): { readonly path: string } | { readonly error: string } => {
+  try {
+    const root = NodeFS.realpathSync(jobsRoot);
+    const folder = NodeFS.realpathSync(NodePath.resolve(jobsRoot, continueFrom));
+    const relative = NodePath.relative(root, folder);
+    if (relative === "" || relative.startsWith("..") || NodePath.isAbsolute(relative)) {
+      return { error: "continueFrom must be the jobDir of an earlier blender job." };
+    }
+    const blend = NodePath.join(folder, "scene.blend");
+    if (!NodeFS.existsSync(blend)) {
+      return { error: `${continueFrom} has no scene.blend; that job did not save its scene.` };
+    }
+    return { path: blend };
+  } catch {
+    return { error: `continueFrom ${continueFrom} was not found; it may have been pruned.` };
+  }
+};
+
 export const runBlenderJob = (input: {
   readonly executable: string;
   readonly jobsRoot: string;
@@ -176,6 +239,9 @@ export const runBlenderJob = (input: {
     try: async (signal): Promise<BlenderJobResult> => {
       const tooLarge = agentScriptSizeError(input.script);
       if (tooLarge !== undefined) throw new Error(tooLarge);
+      if (input.openBlend !== undefined && !NodeFS.existsSync(input.openBlend)) {
+        throw new Error(`continue_from_missing: ${input.openBlend} does not exist.`);
+      }
       pruneJobFolders(input.jobsRoot, Date.now(), {
         protect: input.openBlend ? [NodePath.dirname(input.openBlend)] : [],
       });
@@ -189,7 +255,7 @@ export const runBlenderJob = (input: {
       const args = [
         ...(input.openBlend ? [input.openBlend] : []),
         "-b",
-        ...(input.openBlend ? [] : ["--factory-startup"]),
+        "--factory-startup",
         "--python",
         scriptPath,
       ];
@@ -199,7 +265,7 @@ export const runBlenderJob = (input: {
         const child = NodeChildProcess.spawn(input.executable, args, {
           cwd: jobDir,
           windowsHide: true,
-          detached: process.platform !== "win32",
+          detached: NodeOS.platform() !== "win32",
           env: {
             ...blenderEnvironment(process.env),
             SEALCODE_JOB_DIR: jobDir,

@@ -294,7 +294,7 @@ export type RojoScriptClass = "Script" | "LocalScript" | "ModuleScript";
 export const isRojoScriptClass = (value: unknown): value is RojoScriptClass =>
   value === "Script" || value === "LocalScript" || value === "ModuleScript";
 
-export const rojoScriptFileSuffix = (className: RojoScriptClass, runContext?: unknown): string =>
+const rojoScriptFileSuffix = (className: RojoScriptClass, runContext?: unknown): string =>
   className === "ModuleScript"
     ? ".luau"
     : className === "LocalScript" || runContext === "Client"
@@ -319,6 +319,15 @@ export const rojoEntryNameProblem = (name: string): string | undefined => {
   if (name.trim() === "" || name === "." || name === "..") return "the name is empty";
   if (/[/:*?"<>|\u0000-\u001F]/u.test(name)) return `"${name}" has characters a file name cannot`;
   if (/[. ]$/u.test(name)) return `"${name}" ends with a dot or space`;
+  if (name.toLowerCase() === "init") {
+    return `"${name}" would be read by Rojo as its parent's own script`;
+  }
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(name)) {
+    return `"${name}" is a reserved device name on Windows`;
+  }
+  if (/\.(?:meta|project)$/iu.test(name)) {
+    return `"${name}" would be read by Rojo as a sidecar or project file`;
+  }
   return undefined;
 };
 
@@ -435,4 +444,3 @@ export const rojoEntryParent = (
 };
 
 export const rojoScriptSuffixes = scriptSuffixes;
-export const joinRojoPath = joinPath;

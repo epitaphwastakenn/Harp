@@ -100,7 +100,7 @@ export const protectedTargetsOf = (tool: string, args: Args): ReadonlyArray<Prot
     case "insert_asset":
     case "import_mesh":
     case "import_rbxm":
-      add(args.parentPath);
+      add(text(args.parentPath) ?? "game.Workspace");
       break;
     case "animation":
       if (args.action === "create") {

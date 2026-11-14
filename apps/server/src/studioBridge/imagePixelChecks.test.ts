@@ -22,6 +22,18 @@ const glow = (spread: number) =>
     return [255, 255, 255, Math.round(alpha * 255)];
   });
 
+describe("analyzeImage sharpness", () => {
+  it("does not call a small crisp subject featureless", () => {
+    const facts = analyzeImage(
+      build(512, 512, (x, y) =>
+        Math.hypot(x - 256, y - 256) < 60 ? [255, 255, 255, 255] : [0, 0, 0, 0],
+      ),
+      { purpose: "decal", transparentRequested: true },
+    );
+    expect(facts.warnings.join(" ")).not.toContain("featureless");
+  });
+});
+
 describe("analyzeImage", () => {
   it("accepts a soft glow on a transparent background", () => {
     const facts = analyzeImage(glow(12), { purpose: "particle", transparentRequested: true });

@@ -152,3 +152,12 @@ describe("run selection", () => {
     expect(resolveResultsRun(null, [])).toBeNull();
   });
 });
+
+describe("unknown requested run", () => {
+  it("falls back to the latest run unless the run is known", () => {
+    const runs = [run("r1"), run("r2")];
+    expect(resolveResultsRun(run("gone"), runs)).toBe("r2");
+    const known = new Map([[run("w"), { hasImages: false, hasStudioTools: true }]]);
+    expect(resolveResultsRun(run("w"), runs, known)).toBe("w");
+  });
+});

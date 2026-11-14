@@ -160,6 +160,54 @@ describe("StudioEvidence ledger", () => {
     }).pipe(Effect.provide(Evidence.layer)),
   );
 
+  it("treats only an applying find_and_replace_in_scripts as a place write", () => {
+    expect(Evidence.isPlaceWrite("find_and_replace_in_scripts", "mutation", {})).toBe(false);
+    expect(Evidence.isPlaceWrite("find_and_replace_in_scripts", "mutation", { dryRun: true })).toBe(
+      false,
+    );
+    expect(
+      Evidence.isPlaceWrite("find_and_replace_in_scripts", "mutation", { dryRun: false }),
+    ).toBe(true);
+  });
+
+  it("counts scripts written by an applying find_and_replace_in_scripts", () => {
+    const turn = Evidence.emptyTurn("run-1");
+    Evidence.applyCall(turn, {
+      ...call("find_and_replace_in_scripts", { dryRun: false }),
+      structured: {
+        written: [
+          { path: "game.A", verification: "Read the script back and verified it" },
+          { path: "game.B" },
+        ],
+      },
+    });
+    expect(turn.scriptsWritten).toBe(2);
+    expect(turn.scriptsVerified).toBe(1);
+  });
+
+  it.effect("reserves images atomically against the per-turn cap", () =>
+    Effect.gen(function* () {
+      const ledger = yield* Evidence.StudioEvidence;
+      const input = { threadId: "t1", wanted: 4, cap: 4 };
+      expect(yield* ledger.reserveImages(input)).toBe(4);
+      expect(yield* ledger.reserveImages(input)).toBe(0);
+      yield* ledger.releaseImages("t1", 3);
+      expect(yield* ledger.reserveImages(input)).toBe(3);
+    }).pipe(Effect.provide(Evidence.layer)),
+  );
+
+  it.effect("keeps a live run's lease when an older run ends and releases on demand", () =>
+    Effect.gen(function* () {
+      const ledger = yield* Evidence.StudioEvidence;
+      yield* ledger.runStarted("a", "run-2");
+      yield* ledger.claimWrite({ place: "place:1", threadId: "a" });
+      yield* ledger.runEnded("a", "run-1");
+      expect((yield* ledger.claimWrite({ place: "place:1", threadId: "b" })).ok).toBe(false);
+      yield* ledger.releaseWrite("a");
+      expect((yield* ledger.claimWrite({ place: "place:1", threadId: "b" })).ok).toBe(true);
+    }).pipe(Effect.provide(Evidence.layer)),
+  );
+
   it.effect("frees a place after ten idle minutes and when the holder is deleted", () =>
     Effect.gen(function* () {
       const ledger = yield* Evidence.StudioEvidence;

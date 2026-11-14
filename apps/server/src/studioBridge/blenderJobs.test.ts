@@ -1,4 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 
 import {
@@ -7,6 +11,7 @@ import {
   buildJobScript,
   fitJobSummary,
   MAX_AGENT_SCRIPT_BYTES,
+  resolveContinueBlend,
   runBlenderJob,
 } from "./blenderJobs.ts";
 
@@ -81,6 +86,39 @@ describe("fitJobSummary", () => {
     expect(fitJobSummary(big).result).toEqual({
       lint: { model: { parts: 2 }, objectsOmitted: true },
     });
+  });
+});
+
+describe("fitJobSummary with many parts", () => {
+  it("caps the mesh list so the UTF-8 size stays under budget", () => {
+    const meshes = Array.from({ length: 150 }, (_, i) => ({
+      name: `pé${String(i)}`.padEnd(300, "é"),
+    }));
+    const fitted = fitJobSummary({
+      success: true,
+      modelPreview: { jobId: "a" },
+      output: "ü".repeat(12_000),
+      result: { meshes, lint: { hiddenObjects: meshes.map((m) => m.name) } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(fitted), "utf8")).toBeLessThanOrEqual(12_000);
+    expect(fitted.modelPreview).toEqual({ jobId: "a" });
+    expect(fitted.success).toBe(true);
+  });
+});
+
+describe("resolveContinueBlend", () => {
+  it("refuses missing folders, folders outside the root and folders without a scene", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "harp-jobs-"));
+    const inside = NodePath.join(root, "job-1");
+    NodeFS.mkdirSync(inside);
+    expect("error" in resolveContinueBlend(root, inside)).toBe(true);
+    NodeFS.writeFileSync(NodePath.join(inside, "scene.blend"), "x");
+    expect(resolveContinueBlend(root, inside)).toEqual({
+      path: NodePath.join(NodeFS.realpathSync(inside), "scene.blend"),
+    });
+    expect("error" in resolveContinueBlend(root, NodePath.join(root, "nope"))).toBe(true);
+    expect("error" in resolveContinueBlend(root, NodeOS.tmpdir())).toBe(true);
+    NodeFS.rmSync(root, { recursive: true, force: true });
   });
 });
 

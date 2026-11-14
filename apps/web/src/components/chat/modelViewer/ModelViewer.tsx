@@ -113,11 +113,16 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
         preview.previewId,
         controller.signal,
       );
-      const next = await createModelScene(host, buffer, {
-        onTime: setTime,
-        onPlayingChange: setPlaying,
-        onContextLost: () => reportUnavailable("The graphics context was lost."),
-      });
+      const next = await createModelScene(
+        host,
+        buffer,
+        {
+          onTime: setTime,
+          onPlayingChange: setPlaying,
+          onContextLost: () => reportUnavailable("The graphics context was lost."),
+        },
+        controller.signal,
+      );
       if (controller.signal.aborted) {
         next.dispose();
         return;
@@ -143,7 +148,13 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
       data-model-viewer
       className="relative size-full overflow-hidden rounded-lg border border-border/70 bg-black shadow-2xl"
     >
-      <div ref={hostRef} className="absolute inset-0" />
+      <div
+        ref={hostRef}
+        role="img"
+        aria-label="3D model preview"
+        tabIndex={0}
+        className="absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white"
+      />
       {scene === null ? (
         <div className="absolute inset-0 flex items-center justify-center">
           <Spinner size="lg" />

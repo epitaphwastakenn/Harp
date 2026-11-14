@@ -10,6 +10,39 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.19.0 · 2026-11-14
+
+> See Blender models in 3D right in the chat, undo a whole turn in Studio, and let agents check their own work before they say they're done.
+
+### New
+
+- **3D model viewer** — Models an agent makes in Blender open in 3D from their preview: orbit, zoom and pan, a marker for the front Roblox will use, size in studs and triangle count. Animated models play with a clip picker and a timeline you can scrub, and each new version of a model steps through with Version 2 of 4.
+- **Turn results** — A Results tab in the right panel gathers what a turn produced: Studio captures, Blender models, animation sheets, changed files and the Studio check, with filters. Open it from the turn, the panel menu or the command palette.
+- **Undo a turn in Studio** — A finished turn that changed your place can be undone in one step. Harp shows what it will restore first: scripts, properties, created and deleted instances, build and scatter output. Anything you changed since is left alone, and raw Luau runs are listed as not undoable. Agents can do the same with `undo_turn_changes`.
+- **Did the agent check its work?** — Turns that changed your place show "Studio verified" or "Studio unverified", with what was missing, such as scripts changed without a playtest or UI changed without a UI check.
+- **Protected paths** — In Settings → Roblox Studio, list paths that agents must not touch in each place, such as your data folder. Tools refuse to change them, and a Luau run that touched one is flagged.
+- **Image generation** — Turn it on in Settings → Roblox Studio with any OpenAI-compatible image service, including OpenRouter or one running on your own computer. Agents make particle sprites, icons, decals, tiles and UI art, and Harp measures each one: transparency, bleeding edges, tiling seams and sharpness. Off by default, with a limit per turn.
+- **Texture preview in Studio** — Agents can show a generated or Blender-made image inside your place before you upload it.
+- **Find and replace in scripts** — Agents can change text across many scripts at once, with a preview first, and Rojo-synced scripts are saved to their files.
+- **Scatter** — Agents can scatter trees, rocks or props over terrain or a zone by rules: density, slope, spacing, scale and rotation ranges, and areas to avoid. Running it again replaces the last result.
+- **Animation checks and contact sheets** — New animations are checked for joints bent past their range, snapping, loops that don't close and drifting roots. Agents can also see a whole animation as one sheet of poses.
+- **Code review skill** — A Roblox code review playbook that sends the agent to the right security, networking, data and performance checks and reports findings by severity.
+
+### Improved
+
+- **Blender modeling** — Agents get ready-made helpers for parts between two points, colours that survive export, joining and applying scale. Each model is checked for broken vertices, floating or overlapping parts, hidden objects, sides that don't mirror and which colours will survive import.
+- **Rojo** — New, renamed, moved and deleted scripts and folders are saved to your project files, with deleted files kept in `.harp/rojo-trash`. Script edits report whether Rojo has synced them, and playtests wait for Rojo instead of testing old code.
+- **Selection in the composer** — When something is selected in Studio, a chip shows that it will be sent. Dismiss it to leave the selection out of that message.
+- **Clearer approvals** — Approving a Luau run, a script write or a Blender script shows the code highlighted, what it will change and where, and a warning when it looks like it holds a key or password.
+- **Usage warning** — While an agent works, Harp tells you once when a usage limit passes 80% and when it resets.
+- **One agent per place** — Only one thread at a time can change a place, so two agents can't overwrite each other's work. Others can still read it.
+- **Scene analysis** — Agents can find instances that leak and see memory used by scripts, animations and audio.
+- **Long tool results** — Results too long for the agent now drop whole items, keeping the newest log lines, instead of cutting off mid-way.
+
+### Fixed
+
+- **Safer Blender jobs** — Blender no longer inherits keys and tokens from Harp's environment, a stuck job is fully stopped, oversized scripts are refused and old job folders are cleaned up.
+
 ## 2.18.1 · 2026-11-09
 
 > Harp opens faster: its window is on screen in about half a second.

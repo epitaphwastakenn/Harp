@@ -10,6 +10,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as StudioBridge from "./StudioBridge.ts";
 import { StudioEndpoints } from "./protocol.ts";
 import { placeKey } from "./StudioRouter.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { firstProtectedHit, protectedPlacesFor } from "./protectedPaths.ts";
 import { StudioEvidence, type UndoTurnView } from "./studioEvidence.ts";
 
 type PluginData = Record<string, unknown>;
@@ -263,6 +265,7 @@ export const makeStudioUndo = Effect.gen(function* () {
   const bridge = yield* StudioBridge.StudioBridge;
   const evidence = yield* StudioEvidence;
   const fileSystem = yield* FileSystem.FileSystem;
+  const serverSettings = yield* ServerSettingsService;
 
   const restoreFile = Effect.fn("StudioUndo.restoreFile")(function* (entry: FileUndoEntry) {
     const current = yield* fileSystem
@@ -355,7 +358,7 @@ export const makeStudioUndo = Effect.gen(function* () {
     } satisfies StudioUndoPreview;
   });
 
-  const revert = Effect.fn("StudioUndo.revert")(function* (input: {
+  const performRevert = Effect.fn("StudioUndo.revert")(function* (input: {
     readonly threadId: string;
     readonly runId?: string | undefined;
     readonly fromAgent: boolean;
@@ -385,10 +388,32 @@ export const makeStudioUndo = Effect.gen(function* () {
       };
     }
     const places = new Set(plan.steps.map((step) => step.instanceId));
+    const settings = input.fromAgent
+      ? yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => undefined))
+      : undefined;
     for (const instanceId of places) {
       const peer = yield* bridge.resolve({ instanceId, defaultRole: "edit" }).pipe(Effect.result);
       if (peer._tag === "Failure") {
         return unavailable("Studio is not connected to the place those changes were made in.");
+      }
+      if (settings !== undefined) {
+        const rules = protectedPlacesFor(
+          settings.robloxStudio.protectedPlaces,
+          placeKey(peer.success),
+        );
+        const targets = plan.steps
+          .filter((step) => step.instanceId === instanceId)
+          .flatMap((step) => {
+            const data = step.entry.source === "file" ? step.entry.studio : step.entry.data;
+            const path = data?.path;
+            return typeof path === "string" ? [{ path, reach: "subtree" as const }] : [];
+          });
+        const hit = rules.length === 0 ? undefined : firstProtectedHit(rules, targets);
+        if (hit !== undefined) {
+          return unavailable(
+            `Undo was refused: ${hit.path} is at, under or above ${hit.rule}, a path the user protected in Harp's Roblox Studio settings. Ask the user to undo it from Harp's undo button instead.`,
+          );
+        }
       }
       const lease = yield* evidence.claimWrite({
         place: placeKey(peer.success),
@@ -404,8 +429,16 @@ export const makeStudioUndo = Effect.gen(function* () {
       restoreFile,
       restorePlugin: (step) => restorePlugin(input.threadId, step),
     });
-    if (run.pluginFailure !== undefined && !run.changed) {
-      return unavailable(`${run.pluginFailure}. Nothing was changed; try again.`);
+    if (run.pluginFailure !== undefined) {
+      return {
+        status: "unavailable",
+        message: run.changed
+          ? `${run.pluginFailure}. Part of the changes were restored but Studio was not reverted, so the turn is not marked undone; try again.`
+          : `${run.pluginFailure}. Nothing was changed; try again.`,
+        restored: run.restored,
+        skipped: run.skipped,
+        notUndoable: plan.notUndoable,
+      } satisfies StudioUndoResult;
     }
     yield* evidence.finishUndo({ threadId: input.threadId, runId: turn.runId });
     return {
@@ -415,6 +448,15 @@ export const makeStudioUndo = Effect.gen(function* () {
       notUndoable: plan.notUndoable,
     } satisfies StudioUndoResult;
   });
+
+  const revert = (input: {
+    readonly threadId: string;
+    readonly runId?: string | undefined;
+    readonly fromAgent: boolean;
+  }) =>
+    performRevert(input).pipe(
+      Effect.ensuring(input.fromAgent ? Effect.void : evidence.releaseWrite(input.threadId)),
+    );
 
   return { preview, revert };
 });

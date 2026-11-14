@@ -88,7 +88,7 @@ export const downscaleRgba = (
 };
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const MAX_DECODED_PIXELS = 64_000_000;
+const MAX_DECODED_PIXELS = 16_000_000;
 
 const channelsOf = (colorType: number): number | undefined =>
   colorType === 0 || colorType === 3
@@ -165,7 +165,9 @@ export const decodePng = (
 
   let raw: Buffer;
   try {
-    raw = NodeZlib.inflateSync(Buffer.concat(parts));
+    raw = NodeZlib.inflateSync(Buffer.concat(parts), {
+      maxOutputLength: (width * (channelsOf(colorType) ?? 4) + 1) * height,
+    });
   } catch (cause) {
     throw new Error(
       `PNG image data is corrupt: ${cause instanceof Error ? cause.message : String(cause)}`,

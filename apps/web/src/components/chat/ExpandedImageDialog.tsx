@@ -227,6 +227,8 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
       event.target instanceof HTMLSelectElement
     )
       return;
+    if (event.target instanceof Element && event.target.closest("[data-model-viewer]") !== null)
+      return;
     if (zoomableImageRef.current?.pan(event.key)) {
       event.preventDefault();
       event.stopPropagation();

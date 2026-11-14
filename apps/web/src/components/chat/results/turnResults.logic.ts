@@ -135,6 +135,35 @@ export function resultSourcesFromRows(
   return sources;
 }
 
+export interface ResultRunFlags {
+  readonly hasImages: boolean;
+  readonly hasStudioTools: boolean;
+}
+
+const runFlagIndex = new WeakMap<object, ReadonlyMap<RunId, ResultRunFlags>>();
+
+export function indexResultRunFlags(
+  rows: ReadonlyArray<ThreadStructureVisibleTurnItem>,
+): ReadonlyMap<RunId, ResultRunFlags> {
+  const cached = runFlagIndex.get(rows);
+  if (cached !== undefined) return cached;
+  const flags = new Map<RunId, ResultRunFlags>();
+  for (const source of indexResultSources(rows)) {
+    if (source.runId === null) continue;
+    const hasStudioTools = flags.get(source.runId)?.hasStudioTools ?? false;
+    flags.set(source.runId, { hasImages: true, hasStudioTools });
+  }
+  for (const { item } of rows) {
+    if (item.type !== "dynamic_tool" || item.runId === null) continue;
+    const tool = resultToolName(item.toolName);
+    if (tool === null || !isStudioTool(tool)) continue;
+    const hasImages = flags.get(item.runId)?.hasImages ?? false;
+    flags.set(item.runId, { hasImages, hasStudioTools: true });
+  }
+  runFlagIndex.set(rows, flags);
+  return flags;
+}
+
 export function resultRunIds(sources: ReadonlyArray<ResultSource>): ReadonlyArray<RunId> {
   const runs = new Set<RunId>();
   for (const source of sources) {
@@ -240,8 +269,12 @@ export function filterSubjects(
 export function resolveResultsRun(
   requested: RunId | null,
   runs: ReadonlyArray<RunId>,
+  knownRuns?: ReadonlyMap<RunId, unknown>,
 ): RunId | null {
-  if (requested !== null) return requested;
+  if (requested !== null) {
+    if (runs.includes(requested) || knownRuns?.has(requested) === true) return requested;
+    return runs.at(-1) ?? null;
+  }
   return runs.at(-1) ?? null;
 }
 

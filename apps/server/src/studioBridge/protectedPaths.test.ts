@@ -125,6 +125,8 @@ describe("protected path matching", () => {
       "subtree:game.A",
       "subtree:game.B",
     ]);
+    expect(paths("insert_asset", { assetId: 1 })).toEqual(["within:game.Workspace"]);
+    expect(paths("import_mesh", { parentPath: "game.A" })).toEqual(["within:game.A"]);
     expect(paths("find_and_replace_in_scripts", { path: "game.A" })).toEqual([]);
     expect(paths("find_and_replace_in_scripts", { path: "game.A", dryRun: false })).toEqual([
       "within:game.A",

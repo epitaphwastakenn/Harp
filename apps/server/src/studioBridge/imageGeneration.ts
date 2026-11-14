@@ -184,15 +184,33 @@ const errorText = (status: number, body: string) => {
   return `The image service answered ${String(status)}: ${detail.slice(0, maxErrorChars)}`;
 };
 
-const readCapped = async (response: Response): Promise<Buffer> => {
+const maxJsonBytes = 40 * 1024 * 1024;
+
+const readStreamCapped = async (response: Response, cap: number, message: string) => {
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxImageBytes) {
-    throw new Error("The generated image is larger than 24 MB.");
+  if (Number.isFinite(declared) && declared > cap) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(message);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > maxImageBytes) throw new Error("The generated image is larger than 24 MB.");
-  return bytes;
+  if (response.body === null) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(message);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
 };
+
+const readCapped = (response: Response): Promise<Buffer> =>
+  readStreamCapped(response, maxImageBytes, "The generated image is larger than 24 MB.");
 
 /** One image from the provider, as PNG bytes. Errors never include the API key. */
 export const requestImage = (
@@ -208,7 +226,13 @@ export const requestImage = (
         body: JSON.stringify(request.body),
         signal: AbortSignal.timeout(requestTimeoutMs),
       });
-      const text = await response.text();
+      const text = (
+        await readStreamCapped(
+          response,
+          maxJsonBytes,
+          "The image service answer is larger than 40 MB.",
+        )
+      ).toString("utf8");
       if (!response.ok) throw new Error(errorText(response.status, text));
       let parsed: unknown;
       try {

@@ -190,7 +190,11 @@ function AssistantMessageMeta({
 }) {
   const ctx = use(TimelineRowCtx);
 
-  const evidenceRunId = projectedItem?.item.runId ?? null;
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+
+  const itemRunId = projectedItem?.item.runId ?? null;
+  const evidenceRunId = isWorking && itemRunId === latestRunId ? null : itemRunId;
+  const runFlags = evidenceRunId === null ? undefined : ctx.resultRunFlags?.get(evidenceRunId);
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
@@ -227,7 +231,10 @@ function AssistantMessageMeta({
           />
         )}
       </div>
-      {projectedItem !== undefined && evidenceRunId !== null && !message.streaming ? (
+      {projectedItem !== undefined &&
+      evidenceRunId !== null &&
+      !message.streaming &&
+      runFlags?.hasStudioTools === true ? (
         <StudioEvidenceBadge
           environmentId={ctx.activeThreadEnvironmentId}
           threadId={projectedItem.sourceThreadId}
@@ -238,11 +245,14 @@ function AssistantMessageMeta({
       evidenceRunId !== null &&
       !message.streaming &&
       ctx.onOpenResults !== undefined &&
-      ctx.threadRef !== null ? (
+      ctx.threadRef !== null &&
+      runFlags !== undefined ? (
         <ResultsButton
           environmentId={ctx.activeThreadEnvironmentId}
           threadRef={ctx.threadRef}
           runId={evidenceRunId}
+          hasImages={runFlags.hasImages}
+          hasStudioTools={runFlags.hasStudioTools}
           onOpen={ctx.onOpenResults}
         />
       ) : null}
