@@ -8,12 +8,20 @@ import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 
 import { blenderExecutableFor, RobloxStudioConfig } from "../roblox/RobloxStudioConfig.ts";
-import { applyScriptEdits, type ScriptEdit } from "../roblox/rojoProjects.ts";
+import {
+  applyScriptEdits,
+  isRojoScriptClass,
+  parseInstancePath,
+  rojoTextConflict,
+  type RojoNewNode,
+  type ScriptEdit,
+} from "../roblox/rojoProjects.ts";
 import * as RojoWorkspaces from "../roblox/RojoWorkspaces.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { parseObj, runBlenderJob } from "./blenderJobs.ts";
+import { agentScriptSizeError, fitJobSummary, parseObj, runBlenderJob } from "./blenderJobs.ts";
 import { assetDetails, assetThumbnail, searchStore } from "./creatorStore.ts";
-import { downscaleRgba, encodePng } from "./png.ts";
+import { checkAnimation } from "./animationChecks.ts";
+import { downscaleRgba, encodePng, tileRgba } from "./png.ts";
 import { lookupRobloxDocs, makeDocsFetcher } from "./robloxDocs.ts";
 import {
   closeStudio,
@@ -25,8 +33,10 @@ import {
 import { loadedSkillResources, loadStudioSkills, renderSkillResources } from "./studioSkills.ts";
 import { StudioEndpoints, type StudioRole } from "./protocol.ts";
 import * as StudioBridge from "./StudioBridge.ts";
+import { isPlaceWrite, leaseIdleMs, StudioEvidence } from "./studioEvidence.ts";
 import { playtestGate, type StudioControlsPolicy } from "./studioControls.ts";
 import { placeKey, preferRuntimeClient } from "./StudioRouter.ts";
+import { withSecretWarning } from "./secretWarning.ts";
 import {
   auditUi,
   normalizeUi,
@@ -169,6 +179,30 @@ const scriptEditsOf = (value: unknown): ReadonlyArray<ScriptEdit> | undefined =>
   return edits;
 };
 
+const replaceLiteral = (
+  text: string,
+  find: string,
+  replacement: string,
+  caseSensitive: boolean,
+  limit: number,
+) => {
+  const haystack = caseSensitive ? text : text.toLowerCase();
+  const needle = caseSensitive ? find : find.toLowerCase();
+  let out = "";
+  let cursor = 0;
+  let count = 0;
+  let from = haystack.indexOf(needle);
+  while (from !== -1 && count < limit) {
+    out += text.slice(cursor, from) + replacement;
+    cursor = from + needle.length;
+    count += 1;
+    from = haystack.indexOf(needle, cursor);
+  }
+  return { text: out + text.slice(cursor), count };
+};
+
+const FIND_REPLACE_CLASSES = ["Script", "LocalScript", "ModuleScript"];
+
 const LINE_RANGE = /^(?:\d+|\d+-\d+|\d+-|-\d+)$/;
 
 /** Maps a bridge failure to a structured result the model can act on. */
@@ -204,6 +238,28 @@ const outdatedPlugin = (payload: unknown): StudioToolResult | undefined =>
       )
     : undefined;
 
+interface RojoExpectation {
+  readonly path: string;
+  readonly expect: "source" | "absent";
+  readonly text?: string | undefined;
+  readonly absolute?: string | undefined;
+  readonly serving: boolean;
+}
+
+const mentionsId = (value: unknown, id: string): boolean =>
+  typeof value === "string"
+    ? value === `$${id}` || value.startsWith(`$${id}.`)
+    : Array.isArray(value)
+      ? value.some((item) => mentionsId(item, id))
+      : isRecord(value) && Object.values(value).some((item) => mentionsId(item, id));
+
+const forceProperty = {
+  force: {
+    type: "boolean",
+    description: "Override the Rojo sync check or an unsaved-Studio-edit refusal.",
+  },
+};
+
 export class StudioTools extends Context.Service<
   StudioTools,
   {
@@ -221,6 +277,7 @@ const make = Effect.gen(function* () {
   const robloxConfig = yield* RobloxStudioConfig;
   const rojo = yield* RojoWorkspaces.RojoWorkspaces;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const evidence = yield* StudioEvidence;
   const fileSystem = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   const hostEnv = yield* HostProcess.Environment;
@@ -412,6 +469,14 @@ const make = Effect.gen(function* () {
         text: typeof payload.rawSource === "string" ? payload.rawSource : "",
       });
       if (located === undefined) return payload;
+      if (located.kind === "found" && typeof payload.rawSource === "string") {
+        const onDisk = yield* fileSystem
+          .readFileString(located.absolute)
+          .pipe(Effect.orElseSucceed(() => undefined));
+        if (onDisk !== undefined && lf(onDisk) === lf(payload.rawSource)) {
+          rojoBaselines.set(located.absolute, onDisk);
+        }
+      }
       return located.kind === "ambiguous"
         ? { ...payload, rojoFiles: located.files }
         : {
@@ -461,6 +526,20 @@ const make = Effect.gen(function* () {
       if (original === undefined) return undefined;
       const fileText = original.replaceAll("\r\n", "\n");
       const studioText = script.text.replaceAll("\r\n", "\n");
+      if (
+        bool(args.force) !== true &&
+        rojoTextConflict({
+          baseline: rojoBaselines.get(located.absolute),
+          fileText,
+          studioText,
+        })
+      ) {
+        return errorResult(
+          "studio_unsaved_changes",
+          `Studio holds text for ${script.path ?? "this script"} that is neither what Rojo last synced nor what ${located.relative} holds, so writing the file would silently discard those Studio edits. Read the script, merge the Studio changes into the file yourself, or pass force: true to overwrite them.`,
+          { file: located.relative },
+        );
+      }
       const next = compute(fileText);
       if (!next.ok) {
         return errorResult(
@@ -492,6 +571,7 @@ const make = Effect.gen(function* () {
         (located.serving && (yield* waitUntil(studioHolds(next.text), 4000)));
       let studio: string;
       let syntaxError: unknown;
+      let syncStatus: "synced" | "pending" | "diverged" = "synced";
       if (synced) {
         studio = `Rojo updated Studio from the file (${located.project.label}, port ${String(located.project.port)}).`;
         syntaxError = (yield* readWholeScript(tool, args, context))?.syntaxError;
@@ -515,12 +595,27 @@ const make = Effect.gen(function* () {
             ? `${reason}, so Studio was written directly too.`
             : `${reason}, and writing Studio directly failed: Studio still holds the old text until Rojo syncs.`;
         syntaxError = isRecord(direct) ? direct.syntaxError : undefined;
+        syncStatus = (yield* studioHolds(next.text))
+          ? "synced"
+          : located.serving
+            ? "pending"
+            : "diverged";
+      }
+      rojoBaselines.set(located.absolute, next.text);
+      if (script.path !== undefined) {
+        rememberRojo(context, {
+          path: script.path,
+          expect: "source",
+          absolute: located.absolute,
+          serving: located.serving,
+        });
       }
       return jsonResult({
         success: true,
         path: script.path,
         file: located.relative,
         savedTo: "file",
+        syncStatus,
         studio,
         verification: `Wrote ${located.relative}; this file is the script's source of truth.`,
         ...(isRecord(syntaxError)
@@ -532,6 +627,542 @@ const make = Effect.gen(function* () {
       });
     }
   });
+
+  const rojoBaselines = new Map<string, string>();
+  const rojoWritten = new Map<string, Map<string, RojoExpectation>>();
+  const rojoSyncWaitMs = 4000;
+  const rojoGuardWaitMs = 6000;
+
+  const lf = (text: string) => text.replaceAll("\r\n", "\n");
+
+  const rememberRojo = (context: StudioToolContext, entry: RojoExpectation) => {
+    const key = context.threadId ?? "";
+    const entries = rojoWritten.get(key) ?? new Map<string, RojoExpectation>();
+    entries.set(entry.path, entry);
+    if (entries.size > 200) entries.delete(entries.keys().next().value ?? entry.path);
+    rojoWritten.set(key, entries);
+    if (rojoWritten.size > 64) rojoWritten.delete(rojoWritten.keys().next().value ?? key);
+  };
+
+  const forgetRojo = (path: string) => {
+    for (const entries of rojoWritten.values()) {
+      for (const known of entries.keys()) {
+        if (known === path || known.startsWith(`${path}.`) || known.startsWith(`${path}[`)) {
+          entries.delete(known);
+        }
+      }
+    }
+  };
+
+  const studioPathOf = (segments: ReadonlyArray<string>) =>
+    segments.reduce(
+      (text, segment) =>
+        /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment)
+          ? `${text}.${segment}`
+          : `${text}["${segment.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"]`,
+      "game",
+    );
+
+  const childPathOf = (parent: string, name: string) =>
+    /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)
+      ? `${parent}.${name}`
+      : `${parent}["${name.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"]`;
+
+  const rojoPlace = Effect.fn("StudioTools.rojoPlace")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const root = context.workspaceRoot;
+    if (root === undefined || (yield* rojo.projects(root)).length === 0) return undefined;
+    const place = yield* placeOf(args).pipe(Effect.orElseSucceed(() => undefined));
+    return {
+      root,
+      placeId: place !== undefined && place.placeId > 0 ? place.placeId : undefined,
+      placeName: place?.placeName,
+      readOnly: place?.toggles.readOnly === true,
+    };
+  });
+
+  const existsInStudio = (args: Args, context: StudioToolContext, path: string) =>
+    call({
+      tool: "get_instance_properties",
+      args,
+      context,
+      endpoint: StudioEndpoints.getProperties,
+      data: { path, properties: ["Name"] },
+      timeoutMs: 10_000,
+    }).pipe(
+      Effect.map(({ payload }) => !isFailurePayload(payload)),
+      Effect.orElseSucceed(() => false),
+    );
+
+  const studioHasText = (args: Args, context: StudioToolContext, path: string, text: string) =>
+    readWholeScript("rojo_sync", { instance_id: args.instance_id, path }, context).pipe(
+      Effect.map((read) => read !== undefined && lf(read.text) === lf(text)),
+    );
+
+  const readOnlyResult = () =>
+    errorResult(
+      "read_only",
+      "The user set Studio's Harp panel to read-only, so changes are refused.",
+    );
+
+  const rojoGuard = Effect.fn("StudioTools.rojoGuard")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    if (bool(args.force) === true) return undefined;
+    const key = context.threadId ?? "";
+    const entries = [...(rojoWritten.get(key)?.values() ?? [])];
+    if (entries.length === 0) return undefined;
+    const matches = Effect.fn("StudioTools.rojoGuardMatches")(function* (entry: RojoExpectation) {
+      const studio = yield* readWholeScript(
+        "rojo_guard",
+        { instance_id: args.instance_id, path: entry.path },
+        context,
+      );
+      if (entry.expect === "absent") return studio === undefined;
+      const wanted =
+        entry.absolute === undefined
+          ? entry.text
+          : yield* fileSystem
+              .readFileString(entry.absolute)
+              .pipe(Effect.orElseSucceed(() => undefined));
+      if (wanted === undefined) return true;
+      return studio !== undefined && lf(studio.text) === lf(wanted);
+    });
+    const unsynced = Effect.gen(function* () {
+      const bad: RojoExpectation[] = [];
+      for (const entry of entries) if (!(yield* matches(entry))) bad.push(entry);
+      return bad;
+    });
+    let bad = yield* unsynced;
+    if (bad.some((entry) => entry.serving)) {
+      yield* waitUntil(unsynced.pipe(Effect.map((left) => left.length === 0)), rojoGuardWaitMs);
+      bad = yield* unsynced;
+    }
+    const held = rojoWritten.get(key);
+    for (const entry of entries) if (!bad.includes(entry)) held?.delete(entry.path);
+    if (bad.length === 0) return undefined;
+    return errorResult(
+      "rojo_sync_diverged",
+      `Studio does not match the Rojo files this thread wrote, so a playtest would run stale code: ${bad.map((entry) => entry.path).join(", ")}. Check that Rojo is serving and its Studio plugin is connected, then retry. Pass force: true to playtest anyway.`,
+      {
+        scripts: bad.map((entry) => ({
+          path: entry.path,
+          expected: entry.expect === "absent" ? "removed" : "same text as the file",
+          syncStatus: "diverged",
+        })),
+      },
+    );
+  });
+
+  const rojoBuild = Effect.fn("StudioTools.rojoBuild")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const place = yield* rojoPlace(args, context);
+    if (place === undefined || !Array.isArray(args.operations)) return undefined;
+    const operations: ReadonlyArray<unknown> = args.operations;
+    const rootPath = str(args.path);
+    interface Draft {
+      name: string;
+      className: RojoNewNode["className"];
+      source: string | undefined;
+      runContext: unknown;
+      children: Draft[];
+      path: string;
+      group: string;
+      serving: boolean;
+    }
+    const parents = new Map<string, RojoWorkspaces.RojoParentLocation | undefined>();
+    const parentAt = Effect.fn("StudioTools.rojoParentAt")(function* (path: string) {
+      if (!parents.has(path)) {
+        parents.set(path, yield* rojo.locateParent({ ...place, instancePath: path }));
+      }
+      return parents.get(path);
+    });
+    const ids = new Map<string, Draft>();
+    const drafts = new Map<number, Draft>();
+    const groups = new Map<string, { parent: RojoWorkspaces.RojoParentLocation; nodes: Draft[] }>();
+    const studioOnly = new Set<string>();
+    const removals = new Map<
+      number,
+      { path: string; location: RojoWorkspaces.RojoEntryLocation }
+    >();
+    for (const [index, op] of operations.entries()) {
+      if (!isRecord(op)) continue;
+      if (op.op === "create" && typeof op.className === "string") {
+        const parentRef = str(op.parent) ?? rootPath;
+        if (parentRef === undefined) continue;
+        const idMatch = /^\$([^.]+)$/u.exec(parentRef);
+        const synced = isRojoScriptClass(op.className) || op.className === "Folder";
+        const hostDraft = idMatch === null ? undefined : ids.get(idMatch[1]!);
+        const hostLocation = idMatch === null && synced ? yield* parentAt(parentRef) : undefined;
+        if (synced && (hostDraft !== undefined || hostLocation !== undefined)) {
+          const properties = isRecord(op.properties) ? op.properties : {};
+          const name = str(op.name) ?? str(properties.Name) ?? op.className;
+          const draft: Draft = {
+            name,
+            className: op.className as Draft["className"],
+            source: typeof properties.Source === "string" ? properties.Source : undefined,
+            runContext: properties.RunContext,
+            children: [],
+            path: childPathOf(hostDraft?.path ?? parentRef, name),
+            group: hostDraft?.group ?? hostLocation!.absolute,
+            serving: hostDraft?.serving ?? hostLocation!.serving,
+          };
+          drafts.set(index, draft);
+          const id = str(op.id);
+          if (id !== undefined) ids.set(id, draft);
+          if (hostDraft !== undefined) {
+            hostDraft.children.push(draft);
+          } else {
+            const group = groups.get(draft.group) ?? { parent: hostLocation!, nodes: [] };
+            group.nodes.push(draft);
+            groups.set(draft.group, group);
+          }
+          continue;
+        }
+        if (idMatch === null && (yield* parentAt(parentRef)) !== undefined) {
+          studioOnly.add(op.className);
+        }
+      } else if (
+        op.op === "remove" &&
+        typeof op.target === "string" &&
+        !op.target.startsWith("$")
+      ) {
+        const location = yield* rojo.locateEntry({ ...place, instancePath: op.target });
+        if (location !== undefined) removals.set(index, { path: op.target, location });
+      }
+    }
+    if (drafts.size === 0 && removals.size === 0 && studioOnly.size === 0) return undefined;
+    if (place.readOnly && (drafts.size > 0 || removals.size > 0)) return readOnlyResult();
+
+    const throughRojo = new Set<number>();
+    for (const [index, draft] of drafts) if (draft.serving) throughRojo.add(index);
+    for (const [index, removal] of removals) if (removal.location.serving) throughRojo.add(index);
+    const servedIds = [...ids].filter(([, draft]) => draft.serving).map(([id]) => id);
+    for (const [index, op] of operations.entries()) {
+      if (throughRojo.has(index)) continue;
+      const hit = servedIds.find((id) => mentionsId(op, id));
+      if (hit !== undefined) {
+        return errorResult(
+          "rojo_batch_needs_split",
+          `Rojo creates the script or folder "$${hit}" from files, so it does not exist in Studio yet and later steps cannot use it. Create it in this call and use it in the next one.`,
+        );
+      }
+    }
+
+    const files: string[] = [];
+    for (const group of groups.values()) {
+      if (group.nodes.length === 0) continue;
+      const created = yield* rojo.createEntries({
+        root: place.root,
+        parent: group.parent,
+        nodes: group.nodes,
+      });
+      if (!created.ok) {
+        return errorResult(
+          "rojo_create_failed",
+          `Nothing was sent to Studio. Rojo files: ${created.reason}.`,
+          { files },
+        );
+      }
+      files.push(...created.files);
+    }
+    const trashed: string[] = [];
+    for (const removal of removals.values()) {
+      const moved = yield* rojo.trashEntry({ root: place.root, location: removal.location });
+      if (!moved.ok) {
+        return errorResult("rojo_trash_failed", `${removal.path}: ${moved.reason}.`, { files });
+      }
+      trashed.push(...moved.files);
+      forgetRojo(removal.path);
+    }
+
+    const keep = operations.filter((_, index) => !throughRojo.has(index));
+    let studio: unknown;
+    if (keep.length > 0) {
+      studio = yield* call({
+        tool: "build_instances",
+        args,
+        context,
+        endpoint: StudioEndpoints.buildInstances,
+        data: { path: args.path, operations: keep },
+        timeoutMs: 120_000,
+        summary: `${String(args.path)} (${String(keep.length)} steps)`,
+      }).pipe(Effect.map(({ payload }) => payload));
+    }
+
+    const expectations: RojoExpectation[] = [];
+    const checks: Array<{ path: string; ok: Effect.Effect<boolean> }> = [];
+    for (const draft of drafts.values()) {
+      if (!draft.serving) continue;
+      if (draft.className === "Folder") {
+        checks.push({ path: draft.path, ok: existsInStudio(args, context, draft.path) });
+        continue;
+      }
+      const text = draft.source ?? "";
+      checks.push({ path: draft.path, ok: studioHasText(args, context, draft.path, text) });
+      expectations.push({ path: draft.path, expect: "source", text, serving: true });
+    }
+    for (const removal of removals.values()) {
+      if (!removal.location.serving) continue;
+      checks.push({
+        path: removal.path,
+        ok: existsInStudio(args, context, removal.path).pipe(Effect.map((there) => !there)),
+      });
+      if (removal.location.script) {
+        expectations.push({ path: removal.path, expect: "absent", serving: true });
+      }
+    }
+    const allThere = Effect.forEach(checks, (check) => check.ok).pipe(
+      Effect.map((results) => results.every((result) => result)),
+    );
+    if (checks.length > 0) yield* waitUntil(allThere, rojoSyncWaitMs);
+    const pending: string[] = [];
+    for (const check of checks) if (!(yield* check.ok)) pending.push(check.path);
+    for (const expectation of expectations) rememberRojo(context, expectation);
+
+    const failed = studio !== undefined && isFailurePayload(studio);
+    const outdated = studio === undefined ? undefined : outdatedPlugin(studio);
+    if (outdated !== undefined) return outdated;
+    const summary = {
+      files,
+      ...(trashed.length === 0 ? {} : { trashedTo: trashed }),
+      syncStatus: pending.length === 0 ? "synced" : "pending",
+      ...(pending.length === 0
+        ? {}
+        : {
+            pending,
+            note: "Rojo has not applied these to Studio yet; it will when its Studio plugin is connected and serving.",
+          }),
+      ...(studioOnly.size === 0
+        ? {}
+        : {
+            studioOnly: [...studioOnly],
+            studioOnlyNote:
+              "These instance types cannot live in Rojo files, so they exist in Studio only and are not saved to the project.",
+          }),
+      ...(drafts.size === 0
+        ? {}
+        : {
+            created: [...drafts.values()].map((draft) => ({
+              path: draft.path,
+              className: draft.className,
+              viaRojo: draft.serving,
+            })),
+          }),
+    };
+    if (studio === undefined) return jsonResult({ success: true, rojo: summary });
+    return isRecord(studio)
+      ? jsonResult({ ...studio, rojo: summary }, failed ? { isError: true } : undefined)
+      : jsonResult(studio);
+  });
+
+  const rojoDelete = Effect.fn("StudioTools.rojoDelete")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const paths = Array.isArray(args.paths)
+      ? args.paths.filter((path): path is string => typeof path === "string").slice(0, 500)
+      : [];
+    if (paths.length === 0) return undefined;
+    const place = yield* rojoPlace(args, context);
+    if (place === undefined) return undefined;
+    const located = new Map<string, RojoWorkspaces.RojoEntryLocation>();
+    for (const path of paths) {
+      const location = yield* rojo.locateEntry({ ...place, instancePath: path });
+      if (location !== undefined) located.set(path, location);
+    }
+    if (located.size === 0) return undefined;
+    if (place.readOnly) return readOnlyResult();
+    const trashed: string[] = [];
+    const waiting: string[] = [];
+    for (const [path, location] of located) {
+      const moved = yield* rojo.trashEntry({ root: place.root, location });
+      if (!moved.ok) {
+        return errorResult(
+          "rojo_trash_failed",
+          `${path}: ${moved.reason}. Nothing else was deleted.`,
+          {
+            trashedTo: trashed,
+          },
+        );
+      }
+      trashed.push(...moved.files);
+      forgetRojo(path);
+      if (location.serving) {
+        waiting.push(path);
+        if (location.script) {
+          rememberRojo(context, { path, expect: "absent", serving: true });
+        }
+      }
+    }
+    const direct = paths.filter((path) => !waiting.includes(path));
+    const refs = Array.isArray(args.instanceRefs) ? args.instanceRefs.slice(0, 500) : [];
+    let studio: unknown;
+    if (direct.length > 0 || refs.length > 0) {
+      studio = yield* call({
+        tool: "delete_instances",
+        args,
+        context,
+        endpoint: StudioEndpoints.deleteInstances,
+        data: { paths: direct, instanceRefs: refs },
+        summary: direct.join(", ").slice(0, 120),
+      }).pipe(Effect.map(({ payload }) => payload));
+    }
+    const gone = Effect.forEach(waiting, (path) => existsInStudio(args, context, path)).pipe(
+      Effect.map((there) => there.every((present) => !present)),
+    );
+    if (waiting.length > 0) yield* waitUntil(gone, rojoSyncWaitMs);
+    const pending: string[] = [];
+    for (const path of waiting) if (yield* existsInStudio(args, context, path)) pending.push(path);
+    const summary = {
+      trashedTo: trashed,
+      syncStatus: pending.length === 0 ? "synced" : "pending",
+      ...(pending.length === 0
+        ? {}
+        : {
+            pending,
+            note: "Rojo has not removed these from Studio yet; it will when its Studio plugin is connected and serving.",
+          }),
+      restore: "The files were moved to the trash folder, not deleted: restore them from there.",
+    };
+    if (studio !== undefined && isRecord(studio)) {
+      return jsonResult(
+        { ...studio, rojo: summary },
+        isFailurePayload(studio) ? { isError: true } : undefined,
+      );
+    }
+    return jsonResult({ success: true, rojo: summary });
+  });
+
+  const rojoMove = Effect.fn("StudioTools.rojoMove")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const properties = isRecord(args.properties) ? args.properties : undefined;
+    const path = str(args.path);
+    const name = str(properties?.Name);
+    const parentRef = str(properties?.Parent);
+    if (path === undefined || (name === undefined && parentRef === undefined)) return undefined;
+    const segments = parseInstancePath(path);
+    if (segments === undefined) return undefined;
+    const place = yield* rojoPlace(args, context);
+    if (place === undefined) return undefined;
+    const location = yield* rojo.locateEntry({ ...place, instancePath: path });
+    if (location === undefined) return undefined;
+    if (place.readOnly) return readOnlyResult();
+    const to =
+      parentRef === undefined
+        ? undefined
+        : yield* rojo.locateParent({ ...place, instancePath: parentRef });
+    if (parentRef !== undefined && to === undefined) {
+      return errorResult(
+        "rojo_move_unsupported",
+        `${path} is saved in Rojo files, but ${parentRef} is not backed by a synced folder, so it cannot move there. Nothing changed.`,
+      );
+    }
+    const moved = yield* rojo.moveEntry({ root: place.root, location, name, to });
+    if (!moved.ok) {
+      return errorResult("rojo_move_failed", `${moved.reason}. Nothing changed.`);
+    }
+    forgetRojo(path);
+    const newParent = parentRef ?? studioPathOf(segments.slice(0, -1));
+    const newPath = childPathOf(newParent, name ?? segments.at(-1)!);
+    const rest = Object.fromEntries(
+      Object.entries(properties ?? {}).filter(([key]) => key !== "Name" && key !== "Parent"),
+    );
+    const more =
+      Object.keys(rest).length > 0 || args.attributes !== undefined || args.tags !== undefined;
+    let studio: unknown;
+    const direct = !location.serving;
+    if (direct) {
+      studio = yield* call({
+        tool: "set_properties",
+        args,
+        context,
+        endpoint: StudioEndpoints.setProperties,
+        data: {
+          ...addressOf(args),
+          properties,
+          attributes: isRecord(args.attributes) ? args.attributes : undefined,
+          tags: isRecord(args.tags) ? args.tags : undefined,
+        },
+        summary: path,
+      }).pipe(Effect.map(({ payload }) => payload));
+    }
+    const arrived = existsInStudio(args, context, newPath);
+    if (!direct) yield* waitUntil(arrived, rojoSyncWaitMs);
+    const synced = direct || (yield* arrived);
+    if (!direct && synced && more) {
+      studio = yield* call({
+        tool: "set_properties",
+        args,
+        context,
+        endpoint: StudioEndpoints.setProperties,
+        data: {
+          path: newPath,
+          properties: rest,
+          attributes: isRecord(args.attributes) ? args.attributes : undefined,
+          tags: isRecord(args.tags) ? args.tags : undefined,
+        },
+        summary: newPath,
+      }).pipe(Effect.map(({ payload }) => payload));
+    }
+    if (synced && location.script && location.entry === "file") {
+      rememberRojo(context, {
+        path: newPath,
+        expect: "source",
+        absolute: `${place.root.replace(/[\\/]+$/u, "")}/${moved.files[0]!}`,
+        serving: location.serving,
+      });
+    }
+    const summary = {
+      files: moved.files,
+      newPath,
+      syncStatus: synced ? "synced" : "pending",
+      ...(synced
+        ? {}
+        : {
+            note: "Rojo has not applied the move to Studio yet; it will when its Studio plugin is connected and serving.",
+          }),
+      ...(!direct && !more
+        ? {}
+        : more && !synced
+          ? {
+              skipped:
+                "The other properties were not applied: set them once the instance appears at the new path.",
+            }
+          : {}),
+    };
+    if (isRecord(studio)) {
+      return jsonResult(
+        { ...studio, rojo: summary },
+        isFailurePayload(studio) ? { isError: true } : undefined,
+      );
+    }
+    return jsonResult({ success: true, path: newPath, rojo: summary });
+  });
+
+  const preferRojo =
+    (
+      structural: (
+        args: Args,
+        context: StudioToolContext,
+      ) => Effect.Effect<StudioToolResult | undefined, StudioBridge.StudioRequestError, never>,
+      fallback: (args: Args, context: StudioToolContext) => Effect.Effect<StudioToolResult>,
+    ) =>
+    (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
+      structural(args, context).pipe(
+        Effect.filterOrElse(
+          (result): result is StudioToolResult => result !== undefined,
+          () => fallback(args, context),
+        ),
+        Effect.catch((error) => Effect.succeed(requestFailure(error))),
+      );
 
   const playtest = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
@@ -557,6 +1188,8 @@ const make = Effect.gen(function* () {
             "A playtest is already running. Stop it before starting another.",
           );
         }
+        const unsynced = yield* rojoGuard(args, context);
+        if (unsynced !== undefined) return unsynced;
         const timeoutMs = Math.min(Math.max((num(args.timeout) ?? 60) * 1000, 5000), 180_000);
         const requestedAt = yield* Clock.currentTimeMillis;
         const { payload } = yield* call({
@@ -677,6 +1310,7 @@ const make = Effect.gen(function* () {
     | {
         readonly ok: true;
         readonly png: Buffer;
+        readonly rgba: Uint8Array;
         readonly width: number;
         readonly height: number;
         readonly message: string;
@@ -822,6 +1456,7 @@ const make = Effect.gen(function* () {
       return {
         ok: true,
         png,
+        rgba: pixels.data,
         width: pixels.width,
         height: pixels.height,
         message,
@@ -940,6 +1575,8 @@ const make = Effect.gen(function* () {
             "A playtest is already running. Stop it before starting another.",
           );
         }
+        const unsynced = yield* rojoGuard(args, context);
+        if (unsynced !== undefined) return unsynced;
         const requestedAt = yield* Clock.currentTimeMillis;
         const { payload } = yield* editCall(StudioEndpoints.multiplayerStart, {
           numPlayers: count,
@@ -1676,6 +2313,147 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const findAndReplace = Effect.fn("StudioTools.findAndReplace")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const find = typeof args.find === "string" ? args.find : "";
+    if (find === "" || typeof args.replace !== "string") {
+      return errorResult(
+        "invalid_arguments",
+        "find (not empty) and replace (a string; empty deletes the match) are required.",
+      );
+    }
+    const replace = args.replace;
+    const classes = Array.isArray(args.classes) ? args.classes : undefined;
+    if (
+      classes !== undefined &&
+      !classes.every((name) => FIND_REPLACE_CLASSES.includes(String(name)))
+    ) {
+      return errorResult("invalid_arguments", "classes holds Script, LocalScript or ModuleScript.");
+    }
+    const dryRun = bool(args.dryRun) ?? true;
+    const usePattern = bool(args.usePattern) ?? false;
+    const caseSensitive = bool(args.caseSensitive) ?? true;
+    const planned = yield* call({
+      tool: "find_and_replace_in_scripts",
+      args,
+      context,
+      endpoint: StudioEndpoints.findReplaceScripts,
+      data: {
+        find,
+        replace,
+        usePattern,
+        caseSensitive,
+        path: str(args.path),
+        classes,
+        nameGlob: str(args.nameGlob),
+        maxReplacements: num(args.maxReplacements),
+        includeText: !dryRun,
+      },
+      timeoutMs: 120_000,
+      summary: find.slice(0, 60),
+    }).pipe(Effect.result);
+    if (planned._tag === "Failure") return requestFailure(planned.failure);
+    const plan = planned.success.payload;
+    if (outdatedPlugin(plan) !== undefined) return outdatedPlugin(plan)!;
+    if (isFailurePayload(plan) || !isRecord(plan) || !Array.isArray(plan.results)) {
+      return jsonResult(plan);
+    }
+    const entries = plan.results.filter(isRecord);
+    const summary = {
+      totalReplacements: plan.totalReplacements,
+      scriptsSearched: plan.scriptsSearched,
+      scriptsMatched: plan.scriptsMatched,
+      truncated: plan.truncated,
+    };
+    const brief = (entry: Record<string, unknown>) => ({
+      path: entry.path,
+      className: entry.className,
+      count: entry.count,
+      snippets: entry.snippets,
+    });
+    if (dryRun) {
+      return jsonResult({
+        success: true,
+        dryRun: true,
+        ...summary,
+        results: entries.map(brief),
+        note: "Nothing was changed. Run again with dryRun false to apply.",
+      });
+    }
+    const written: unknown[] = [];
+    const failed: unknown[] = [];
+    for (const entry of entries) {
+      const path = str(entry.path);
+      const newText = typeof entry.newText === "string" ? entry.newText : undefined;
+      if (path === undefined || newText === undefined) continue;
+      const count = num(entry.count) ?? 0;
+      const scriptArgs: Args = {
+        path,
+        instanceRef: str(entry.instanceRef),
+        expectedRevision: str(entry.revision),
+        instance_id: args.instance_id,
+      };
+      const oldText = typeof entry.oldText === "string" ? entry.oldText : undefined;
+      const throughRojo = yield* writeThroughRojo(
+        "find_and_replace_in_scripts",
+        scriptArgs,
+        context,
+        (fileText) => {
+          if (!usePattern) {
+            const next = replaceLiteral(fileText, find, replace, caseSensitive, count);
+            return next.count === 0
+              ? { ok: false, reason: "the text to replace was not found in the file" }
+              : { ok: true, text: next.text };
+          }
+          return oldText !== undefined &&
+            fileText.replaceAll("\r\n", "\n") === oldText.replaceAll("\r\n", "\n")
+            ? { ok: true, text: newText.replaceAll("\r\n", "\n") }
+            : {
+                ok: false,
+                reason: "pattern replacement needs the file to match what Studio holds",
+              };
+        },
+      );
+      const result =
+        throughRojo ??
+        (yield* scriptWrite("find_and_replace_in_scripts", StudioEndpoints.setScriptSource, () => ({
+          path,
+          instanceRef: str(entry.instanceRef),
+          source: newText,
+          expectedRevision: str(entry.revision),
+        }))(scriptArgs, context));
+      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+      const detail = result.structuredContent ?? {};
+      if (result.isError === true) {
+        failed.push({
+          path,
+          error: detail.error ?? "write_failed",
+          message: detail.message ?? detail.error ?? text.slice(0, 200),
+        });
+      } else {
+        written.push({
+          path,
+          count,
+          ...(throughRojo === undefined ? {} : { file: detail.file }),
+          ...(detail.syntaxError === undefined ? {} : { syntaxError: detail.syntaxError }),
+        });
+      }
+    }
+    return jsonResult(
+      {
+        success: failed.length === 0,
+        dryRun: false,
+        ...summary,
+        written,
+        failed,
+        results: entries.map(brief),
+      },
+      { isError: failed.length > 0 && written.length === 0 },
+    );
+  });
+
   const connected = (_args: Args): Effect.Effect<StudioToolResult> =>
     Effect.gen(function* () {
       const peers = yield* bridge.peers;
@@ -2068,6 +2846,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const script = typeof args.script === "string" ? args.script : "";
       if (script.trim() === "") return errorResult("invalid_arguments", "script is required.");
+      const tooLarge = agentScriptSizeError(script);
+      if (tooLarge !== undefined) return errorResult("script_too_large", tooLarge);
       const executable = yield* blenderExecutable.pipe(Effect.orElseSucceed(() => undefined));
       if (executable === undefined) {
         return errorResult(
@@ -2086,12 +2866,16 @@ const make = Effect.gen(function* () {
         timeoutMs: Math.min(Math.max(num(args.timeoutSeconds) ?? 180, 10), 900) * 1000,
         openBlend: continueFrom === undefined ? undefined : `${continueFrom}/scene.blend`,
       });
-      const summary = {
+      const summary = fitJobSummary({
         success: job.ok,
         jobDir: job.jobDir,
         exitCode: job.exitCode,
         ...(job.timedOut ? { timedOut: true } : {}),
         files: job.files,
+        ...(job.modelPreview === undefined ? {} : { modelPreview: job.modelPreview }),
+        ...(job.modelPreviewError === undefined
+          ? {}
+          : { modelPreviewError: job.modelPreviewError }),
         result: job.report,
         output: job.output,
         next: job.ok
@@ -2099,7 +2883,7 @@ const make = Effect.gen(function* () {
             ? "Check the topology report and the preview. When both are right, import_mesh with this jobDir."
             : "No mesh was exported."
           : "The script failed: read scriptError in result, fix it and run again (continueFrom keeps the scene).",
-      };
+      });
       return {
         content: [
           jsonText(summary),
@@ -2222,6 +3006,141 @@ const make = Effect.gen(function* () {
       Effect.catch((error) => Effect.succeed(requestFailure(error))),
     );
 
+  const contactSheetColumns = (count: number): number => {
+    let best = 1;
+    let bestBlank = count - 1;
+    for (const columns of [4, 3, 2]) {
+      const blank = Math.ceil(count / columns) * columns - count;
+      if (blank < bestBlank || (blank === bestBlank && columns > best)) {
+        best = columns;
+        bestBlank = blank;
+      }
+    }
+    return Math.min(best, count);
+  };
+
+  /**
+   * Poses the rig at evenly spaced times in the edit viewport, captures each pose and tiles them
+   * into one image, so a whole motion can be judged in a single look.
+   */
+  const animationContactSheet = (
+    args: Args,
+    context: StudioToolContext,
+  ): Effect.Effect<StudioToolResult> => {
+    const rig = str(args.rig);
+    const count = Math.min(Math.max(Math.floor(num(args.frames) ?? 8), 2), 16);
+    const cellSize = Math.min(Math.max(Math.floor(num(args.maxSize) ?? 480), 160), 1024);
+    const settle = Math.max(0, Math.floor((num(args.settleSeconds) ?? 0.25) * 1000));
+    const poseAt = (time: number) =>
+      onPeer({
+        tool: "animation",
+        args,
+        context,
+        role: "edit",
+        endpoint: StudioEndpoints.animationPlay,
+        data: {
+          action: "play",
+          rig,
+          sequence: str(args.sequence),
+          animationId:
+            typeof args.animationId === "number" ? String(args.animationId) : str(args.animationId),
+          looped: bool(args.looped),
+          time,
+        },
+        timeoutMs: 30_000,
+        summary: `contact sheet pose at ${time.toFixed(2)}s`,
+      });
+    const restore = onPeer({
+      tool: "animation",
+      args,
+      context,
+      role: "edit",
+      endpoint: StudioEndpoints.animationPlay,
+      data: { action: "stop", rig, all: false },
+      timeoutMs: 30_000,
+      summary: "contact sheet restore",
+    });
+    return Effect.gen(function* () {
+      const first = yield* poseAt(0);
+      if (!first.ok) return first.result;
+      if (isFailurePayload(first.payload) || !isRecord(first.payload)) {
+        return outdatedPlugin(first.payload) ?? jsonResult(first.payload);
+      }
+      const length = num(first.payload.length);
+      if (length === undefined || length <= 0) {
+        return errorResult("capture_failed", "The animation reported no length to sample.");
+      }
+      const looped = first.payload.looped === true;
+      const times = Array.from(
+        { length: count },
+        (_, index) =>
+          Math.round((looped ? (length * index) / count : (length * index) / (count - 1)) * 1000) /
+          1000,
+      );
+      const shots: Array<{
+        readonly rgba: Uint8Array;
+        readonly width: number;
+        readonly height: number;
+      }> = [];
+      for (const [index, time] of times.entries()) {
+        if (index > 0) {
+          const posed = yield* poseAt(time);
+          if (!posed.ok) return posed.result;
+          if (isFailurePayload(posed.payload)) {
+            return outdatedPlugin(posed.payload) ?? jsonResult(posed.payload);
+          }
+        }
+        yield* Effect.sleep(Duration.millis(settle));
+        const captured = yield* captureImage({
+          args,
+          context,
+          tool: "animation",
+          maxSize: cellSize,
+          budgetBytes: Number.MAX_SAFE_INTEGER,
+          target: "edit",
+        });
+        if (!captured.ok) return captured.result;
+        shots.push(captured);
+      }
+      const columns = contactSheetColumns(count);
+      const rows = Math.ceil(count / columns);
+      const tiled = tileRgba(
+        shots.map((shot) => ({ data: shot.rgba, width: shot.width, height: shot.height })),
+        columns,
+      );
+      let pixels: { data: Uint8Array; width: number; height: number } = tiled;
+      let png = encodePng(pixels.data, pixels.width, pixels.height);
+      while (png.byteLength > MAX_INLINE_IMAGE_BYTES && pixels.width > 64) {
+        pixels = downscaleRgba(pixels.data, pixels.width, pixels.height, 2);
+        png = encodePng(pixels.data, pixels.width, pixels.height);
+      }
+      const order = times
+        .map((time, index) => `${String(index + 1)}: ${time.toFixed(2)}s`)
+        .join(", ");
+      return {
+        content: [
+          jsonText({
+            rig,
+            length,
+            looped,
+            grid: { columns, rows, width: pixels.width, height: pixels.height, format: "png" },
+            frames: times.map((time, index) => ({
+              frame: index + 1,
+              time,
+              column: (index % columns) + 1,
+              row: Math.floor(index / columns) + 1,
+            })),
+            message: `${String(count)} poses, left to right then top to bottom: ${order}. The rig is back at rest. If the rig is out of frame, aim the viewport with camera and run it again.`,
+          }),
+          { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+        ],
+      } satisfies StudioToolResult;
+    }).pipe(
+      Effect.ensuring(restore.pipe(Effect.ignore)),
+      Effect.catch((error) => Effect.succeed(requestFailure(error))),
+    );
+  };
+
   const animation = (args: Args, context: StudioToolContext): Effect.Effect<StudioToolResult> => {
     const action = str(args.action);
     if (
@@ -2229,10 +3148,14 @@ const make = Effect.gen(function* () {
       action !== "list" &&
       action !== "play" &&
       action !== "stop" &&
-      action !== "create"
+      action !== "create" &&
+      action !== "contactSheet"
     ) {
       return Effect.succeed(
-        errorResult("invalid_arguments", "action must be inspect, list, play, stop or create."),
+        errorResult(
+          "invalid_arguments",
+          "action must be inspect, list, play, stop, create or contactSheet.",
+        ),
       );
     }
     const sequence = str(args.sequence);
@@ -2240,7 +3163,7 @@ const make = Effect.gen(function* () {
       typeof args.animationId === "number" ? String(args.animationId) : str(args.animationId);
     const rig = str(args.rig);
     if (
-      (action === "inspect" || action === "play") &&
+      (action === "inspect" || action === "play" || action === "contactSheet") &&
       sequence === undefined &&
       animationId === undefined
     ) {
@@ -2259,6 +3182,33 @@ const make = Effect.gen(function* () {
     if (action === "create" && (!Array.isArray(args.keyframes) || args.keyframes.length === 0)) {
       return Effect.succeed(
         errorResult("invalid_arguments", "animation create needs keyframes: [{ time, poses }]."),
+      );
+    }
+    if (action === "contactSheet") return animationContactSheet(args, context);
+    const checks =
+      action === "create"
+        ? checkAnimation({
+            keyframes: args.keyframes,
+            looped: bool(args.looped),
+            easingStyle: str(args.easingStyle),
+          })
+        : undefined;
+    const report =
+      checks === undefined || checks.findings.length === 0
+        ? undefined
+        : { errors: checks.errors, warnings: checks.warnings, findings: checks.findings };
+    if (
+      checks !== undefined &&
+      report !== undefined &&
+      checks.errors > 0 &&
+      bool(args.strict) === true
+    ) {
+      return Effect.succeed(
+        errorResult(
+          "animation_checks_failed",
+          `strict refused the animation: ${String(checks.errors)} motion error(s). Fix the keyframes below, or create without strict to accept them.`,
+          { checks: report },
+        ),
       );
     }
     const endpoint =
@@ -2295,6 +3245,7 @@ const make = Effect.gen(function* () {
         timeoutMs: 30_000,
         summary: [action, rig ?? sequence ?? animationId].filter(Boolean).join(" "),
       }),
+      report === undefined ? undefined : (payload) => ({ ...payload, checks: report }),
     );
   };
 
@@ -2770,16 +3721,19 @@ const make = Effect.gen(function* () {
         [],
       ),
       risk: "mutation",
-      run: forward(
-        "set_properties",
-        StudioEndpoints.setProperties,
-        (args) => ({
-          ...addressOf(args),
-          properties: isRecord(args.properties) ? args.properties : {},
-          attributes: isRecord(args.attributes) ? args.attributes : undefined,
-          tags: isRecord(args.tags) ? args.tags : undefined,
-        }),
-        { summary: (args) => str(args.path) ?? str(args.instanceRef) },
+      run: preferRojo(
+        rojoMove,
+        forward(
+          "set_properties",
+          StudioEndpoints.setProperties,
+          (args) => ({
+            ...addressOf(args),
+            properties: isRecord(args.properties) ? args.properties : {},
+            attributes: isRecord(args.attributes) ? args.attributes : undefined,
+            tags: isRecord(args.tags) ? args.tags : undefined,
+          }),
+          { summary: (args) => str(args.path) ?? str(args.instanceRef) },
+        ),
       ),
     },
     {
@@ -2793,17 +3747,20 @@ const make = Effect.gen(function* () {
         ...instanceIdProperty,
       }),
       risk: "mutation",
-      run: forward(
-        "delete_instances",
-        StudioEndpoints.deleteInstances,
-        (args) => ({
-          paths: Array.isArray(args.paths) ? args.paths.slice(0, 500) : [],
-          instanceRefs: Array.isArray(args.instanceRefs) ? args.instanceRefs.slice(0, 500) : [],
-        }),
-        {
-          summary: (args) =>
-            Array.isArray(args.paths) ? args.paths.join(", ").slice(0, 120) : undefined,
-        },
+      run: preferRojo(
+        rojoDelete,
+        forward(
+          "delete_instances",
+          StudioEndpoints.deleteInstances,
+          (args) => ({
+            paths: Array.isArray(args.paths) ? args.paths.slice(0, 500) : [],
+            instanceRefs: Array.isArray(args.instanceRefs) ? args.instanceRefs.slice(0, 500) : [],
+          }),
+          {
+            summary: (args) =>
+              Array.isArray(args.paths) ? args.paths.join(", ").slice(0, 120) : undefined,
+          },
+        ),
       ),
     },
     {
@@ -2853,6 +3810,7 @@ const make = Effect.gen(function* () {
           ...instanceAddress,
           source: { type: "string" },
           expectedRevision: { type: "string" },
+          ...forceProperty,
           ...instanceIdProperty,
         },
         ["source"],
@@ -2881,6 +3839,7 @@ const make = Effect.gen(function* () {
             },
           },
           expectedRevision: { type: "string" },
+          ...forceProperty,
           ...instanceIdProperty,
         },
         ["edits"],
@@ -2914,6 +3873,29 @@ const make = Effect.gen(function* () {
         contextLines: Math.min(Math.max(Math.floor(num(args.contextLines) ?? 0), 0), 5),
         maxResults: Math.min(Math.max(Math.floor(num(args.maxResults) ?? 100), 1), 1000),
       })),
+    },
+    {
+      name: "find_and_replace_in_scripts",
+      title: "Find and replace in scripts",
+      description:
+        "Replaces text across many scripts. find is literal (case-sensitive) unless usePattern makes it a Lua pattern, where replace may use %0-%9. Filters: path (subtree), classes (Script, LocalScript, ModuleScript), nameGlob (* and ?), maxReplacements (default 500). dryRun defaults to true and only lists per-script counts with short old/new snippets; pass dryRun false to write. Writes go through the same checked path as edit_script (revision check, compile check, undo, Rojo files); one failing script does not stop the others.",
+      inputSchema: object(
+        {
+          find: { type: "string" },
+          replace: { type: "string", description: "Empty deletes the match." },
+          usePattern: { type: "boolean" },
+          caseSensitive: { type: "boolean", description: "Default true." },
+          path: { type: "string", description: "Subtree to change (default game)." },
+          classes: { type: "array", items: { type: "string" } },
+          nameGlob: { type: "string", description: "Script name filter, e.g. *Controller." },
+          maxReplacements: { type: "number", description: "Default 500, at most 5000." },
+          dryRun: { type: "boolean", description: "Default true." },
+          ...instanceIdProperty,
+        },
+        ["find", "replace"],
+      ),
+      risk: "mutation",
+      run: findAndReplace,
     },
     {
       name: "selection",
@@ -2973,6 +3955,7 @@ const make = Effect.gen(function* () {
           action: { type: "string", enum: ["start", "stop", "status"] },
           mode: { type: "string", enum: ["play", "run"] },
           timeout: { type: "number", description: "Seconds to wait (start 60, stop 30)." },
+          ...forceProperty,
           ...instanceIdProperty,
         },
         ["action"],
@@ -2984,7 +3967,7 @@ const make = Effect.gen(function* () {
       name: "build_instances",
       title: "Build",
       description:
-        'Creates, clones, edits and removes instances under one root in a single all-or-nothing step (one Ctrl+Z). path is the root: an existing instance, a service (add only), or a new Model under an existing parent. operations: {op:"create", className, parent?, name?, properties?, attributes?, tags?, position?, rotation?, id?} | {op:"clone", source, parent?, transforms?:[{position?, rotation?, scale?}], id?} | {op:"set", target, properties?, attributes?, tags?, position?, rotation?} | {op:"remove", target}. Paths see the tree as it was before the batch; refer to things made earlier in the batch with "$<id>", and to their children with "$<id>.Child.Grandchild" (a clone keeps its children), so a whole screen fits in one call. position is world [x,y,z], rotation absolute degrees. Up to 500 operations.',
+        'Creates, clones, edits and removes instances under one root in a single all-or-nothing step (one Ctrl+Z). path is the root: an existing instance, a service (add only), or a new Model under an existing parent. operations: {op:"create", className, parent?, name?, properties?, attributes?, tags?, position?, rotation?, id?} | {op:"clone", source, parent?, transforms?:[{position?, rotation?, scale?}], id?} | {op:"set", target, properties?, attributes?, tags?, position?, rotation?} | {op:"remove", target} | {op:"scatter", name?, groupClass?:"Folder"|"Model", templates:[path | {path, weight?}], zone:{path} (a part) | {min:[x,y,z], max:[x,y,z]}, count | density (per 100 studs^2), seed?, ground?:{include?, exclude?, depth?}, maxSlope? (degrees, default 45), scale?:[min,max], yaw?:[min,max] (default 0-360), minSpacing?, avoidTags?, avoidPaths?, avoidPadding?, alignToSurface?, yOffset?, parent?, id?} clones templates onto the ground below the zone with a seeded random, into one group (named name, default Scatter; running the same name again replaces its previous output) and returns placed counts and rejected reasons. Paths see the tree as it was before the batch; refer to things made earlier in the batch with "$<id>", and to their children with "$<id>.Child.Grandchild" (a clone keeps its children), so a whole screen fits in one call. position is world [x,y,z], rotation absolute degrees. Up to 500 operations.',
       inputSchema: object(
         {
           path: { type: "string" },
@@ -3009,15 +3992,18 @@ const make = Effect.gen(function* () {
             errorResult("invalid_arguments", "operations must be an array of 1 to 500 steps."),
           );
         }
-        return forward(
-          "build_instances",
-          StudioEndpoints.buildInstances,
-          () => ({ path: args.path, operations: args.operations }),
-          {
-            timeoutMs: 120_000,
-            summary: () =>
-              `${String(args.path)} (${String((args.operations as unknown[]).length)} steps)`,
-          },
+        return preferRojo(
+          rojoBuild,
+          forward(
+            "build_instances",
+            StudioEndpoints.buildInstances,
+            () => ({ path: args.path, operations: args.operations }),
+            {
+              timeoutMs: 120_000,
+              summary: () =>
+                `${String(args.path)} (${String((args.operations as unknown[]).length)} steps)`,
+            },
+          ),
         )(args, context);
       },
     },
@@ -3058,6 +4044,7 @@ const make = Effect.gen(function* () {
           testArgs: { description: "Any JSON, given to StudioTestService:GetTestArgs." },
           value: { description: "Any JSON returned to the edit window by end." },
           timeout: { type: "number" },
+          ...forceProperty,
           ...instanceIdProperty,
         },
         ["action"],
@@ -3368,12 +4355,13 @@ const make = Effect.gen(function* () {
       name: "blender",
       title: "Blender job",
       description:
-        "Runs a Python (bpy) script in headless Blender on this computer, in a fresh scene unless continueFrom names an earlier job's jobDir. JOB_DIR and job_path(name) point at the job folder. Afterwards Harp measures every mesh (triangles, quads, ngons, non-manifold and open edges, loose geometry, dimensions, materials), renders a preview sheet (front, right, top and three-quarter views in the model's colours) and exports model.obj for import_mesh. Model in metres (1 unit = 1 m), keep clean quads, no ngons, apply scale, and fix every topology problem the report lists before importing.",
+        "Runs a Python (bpy) script in headless Blender on this computer, in a fresh scene unless continueFrom names an earlier job's jobDir. JOB_DIR and job_path(name) point at the job folder. Afterwards Harp measures every mesh (triangles, quads, ngons, non-manifold and open edges, loose geometry, dimensions, materials), checks the export (result.lint: non-finite vertices, floating or interpenetrating parts, hidden objects, left/right pairs that do not mirror, colour carrier, named object list), renders a preview sheet (front, right, top and three-quarter views in the model's colours), exports model.obj for import_mesh and a model.glb the user can orbit in the chat. Model in metres (1 unit = 1 m), keep clean quads, no ngons, apply scale, and fix every problem the report lists before importing. Helpers already defined (colour is (r, g, b) 0-1 or '#rrggbb'): harp_part(kind 'box'|'cylinder'|'cone', a, b, radius, name, color) places a part between two points; harp_box(name, center, size, color), harp_cylinder(name, center, radius, depth, color), harp_sphere(name, center, radius, color) make flat-shaded coloured primitives; harp_vertex_colors(obj, color or fn(co)) sets a colour attribute that reaches the GLB and preview; harp_join(objs, name), harp_apply_scale(objs=None), harp_shade_flat(obj), harp_material(name, color). Script limit 256 KB. Details: roblox-building skill, modeling-harp.",
       inputSchema: object(
         {
           script: {
             type: "string",
-            description: "Python run with bpy, bmesh, math and Vector already imported.",
+            description:
+              "Python run with bpy, bmesh, math, Vector and the harp_* helpers already available.",
           },
           preview: { type: "boolean", description: "Render a preview image (default true)." },
           export: {
@@ -3412,10 +4400,13 @@ const make = Effect.gen(function* () {
       name: "animation",
       title: "Animation",
       description:
-        'Works with animations on a rig (a Humanoid or AnimationController model). inspect: a KeyframeSequence (sequence path) or published animationId, reporting duration, looped, priority, keyframe count and the joints it moves. list: the tracks playing on rig. play / stop: starts or ends sequence or animationId on rig\'s Animator, in the playtest server by default while one runs (target client-N for a client), else as an edit-mode preview that poses the rig at time and holds it (frame it with camera, then capture_screenshot); stop restores the rest pose. create: builds a KeyframeSequence under rig (or parent "ServerStorage") from keyframes [{time, name?, markers?, poses: {[joint]: {position?: [x,y,z] studs, rotation?: [x,y,z] degrees}}}], where joint is a Motor6D name or the part it moves (Neck or Head, RightShoulder or RightUpperArm), rotation and position are offsets from the rest pose, and times rise from 0; also name, looped, priority, easingStyle, easingDirection. create returns a temporaryId that plays in this Studio session only; publishing it as a real animation asset needs the user. Then play it, look at it with a screenshot, and adjust.',
+        'Works with animations on a rig (a Humanoid or AnimationController model). inspect: a KeyframeSequence (sequence path) or published animationId, reporting duration, looped, priority, keyframe count and the joints it moves. list: the tracks playing on rig. play / stop: starts or ends sequence or animationId on rig\'s Animator, in the playtest server by default while one runs (target client-N for a client), else as an edit-mode preview that poses the rig at time and holds it (frame it with camera, then capture_screenshot); stop restores the rest pose. create: builds a KeyframeSequence under rig (or parent "ServerStorage") from keyframes [{time, name?, markers?, poses: {[joint]: {position?: [x,y,z] studs, rotation?: [x,y,z] degrees}}}], where joint is a Motor6D name or the part it moves (Neck or Head, RightShoulder or RightUpperArm), rotation and position are offsets from the rest pose, and times rise from 0; also name, looped, priority, easingStyle, easingDirection. create checks the motion first and returns checks (joint, time, message; severity error or warning) for rotation beyond a natural R15 range, snaps between keys, loop seams, root drift and lopsided cycles; strict true refuses to create while any error remains. create returns a temporaryId that plays in this Studio session only; publishing it as a real animation asset needs the user. contactSheet: poses rig (edit mode) at frames (2-16, default 8) evenly spaced times of sequence or animationId and returns ONE tiled image with the frame times in grid order, then restores the rest pose; frame the rig with camera first. Then play it, look at it, and adjust.',
       inputSchema: object(
         {
-          action: { type: "string", enum: ["inspect", "list", "play", "stop", "create"] },
+          action: {
+            type: "string",
+            enum: ["inspect", "list", "play", "stop", "create", "contactSheet"],
+          },
           rig: { type: "string", description: "Path of the rig model (or its Humanoid)." },
           sequence: {
             type: "string",
@@ -3449,6 +4440,23 @@ const make = Effect.gen(function* () {
           weight: { type: "number" },
           fadeTime: { type: "number" },
           all: { type: "boolean", description: "stop: end every track on the rig." },
+          strict: {
+            type: "boolean",
+            description: "create: refuse when the motion checks find errors.",
+          },
+          frames: {
+            type: "number",
+            description: "contactSheet: poses to capture, 2-16, default 8.",
+          },
+          maxSize: {
+            type: "number",
+            description:
+              "contactSheet: pixels of the longest side of each pose, 160-1024, default 480.",
+          },
+          settleSeconds: {
+            type: "number",
+            description: "contactSheet: wait after each pose before capturing, default 0.25.",
+          },
           target: {
             type: "string",
             description: "Peer: edit, server or client-N. Default: server during a playtest.",
@@ -3503,9 +4511,24 @@ const make = Effect.gen(function* () {
       name: "get_scene_analysis",
       title: "Scene analysis",
       description:
-        "What makes the place heavy: instance counts by class and service, parts (anchored, unanchored, mesh parts, unions), scripts and their size, lights and shadows, particle emitters with their total rate, the models holding the most instances, the models with the most unanchored parts, and the triangles and draw calls Studio is rendering now (frame the area first with camera). Plain hints name what looks costly. path limits it to one subtree; target edit (default), server, client-N or all; topN sizes the lists (default 8). Follow with get_memory_breakdown or capture_script_profiler to confirm.",
+        "What makes the place heavy: instance counts by class and service, parts (anchored, unanchored, mesh parts, unions), scripts and their size, lights and shadows, particle emitters with their total rate, the models holding the most instances, the models with the most unanchored parts, and the triangles and draw calls Studio is rendering now (frame the area first with camera). Plain hints name what looks costly. path limits it to one subtree; target edit (default), server, client-N or all; topN sizes the lists (default 8). Other modes return the top topN rows from Studio's scene analysis: unparented (instances Luau holds outside the data model, i.e. leaks, by holding script), scriptMemory, animationMemory, audioMemory (bytes) and triangles (per render pass and asset). A mode this Studio lacks reports an error. Follow with get_memory_breakdown or capture_script_profiler to confirm.",
       inputSchema: object({
-        path: { type: "string", description: "Subtree to analyse; default the whole place." },
+        mode: {
+          type: "string",
+          enum: [
+            "summary",
+            "unparented",
+            "scriptMemory",
+            "animationMemory",
+            "audioMemory",
+            "triangles",
+          ],
+          description: "Default summary.",
+        },
+        path: {
+          type: "string",
+          description: "Subtree to analyse (summary only); default the whole place.",
+        },
         topN: { type: "number" },
         target: { type: "string", description: "edit (default), server, client-N or all." },
         ...instanceIdProperty,
@@ -3515,7 +4538,7 @@ const make = Effect.gen(function* () {
         acrossPeers(
           "get_scene_analysis",
           StudioEndpoints.sceneAnalysis,
-          { path: str(args.path), topN: num(args.topN) },
+          { mode: str(args.mode), path: str(args.path), topN: num(args.topN) },
           args,
           context,
           120_000,
@@ -3666,7 +4689,38 @@ const make = Effect.gen(function* () {
         const normalized = normalizeArgs(name, args);
         const blocked = playtestGate(name, normalized, context.controls);
         if (blocked !== undefined) return blocked;
-        return yield* tool.run(normalized, context);
+        const threadId = context.threadId;
+        if (threadId !== undefined && isPlaceWrite(name, tool.risk, normalized)) {
+          const routed = yield* bridge
+            .resolve({ instanceId: str(normalized.instance_id), defaultRole: "edit" })
+            .pipe(Effect.result);
+          if (routed._tag === "Success") {
+            const lease = yield* evidence.claimWrite({ place: placeKey(routed.success), threadId });
+            if (!lease.ok) {
+              const holder =
+                lease.holderTitle === undefined ? lease.holder : `"${lease.holderTitle}"`;
+              return errorResult(
+                "place_busy",
+                `Another Harp thread (${holder}) is changing this place. Reads still work; wait for that thread's turn to end (its hold also lapses after ${String(leaseIdleMs / 60_000)} idle minutes), or ask the user to stop it.`,
+                { holderThreadId: lease.holder },
+              );
+            }
+          }
+        }
+        const result = yield* tool.run(normalized, context);
+        if (threadId !== undefined) {
+          yield* evidence.record({
+            threadId,
+            call: {
+              tool: name,
+              risk: tool.risk,
+              args: normalized,
+              ok: result.isError !== true,
+              structured: result.structuredContent,
+            },
+          });
+        }
+        return withSecretWarning(name, normalized, result);
       }).pipe(
         Effect.provideService(StudioBridge.StudioCallScope, {
           excludedPlaces: context.controls?.excludedPlaces ?? [],

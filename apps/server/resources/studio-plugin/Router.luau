@@ -40,6 +40,7 @@ local ROUTES = {
 	["set-script-source"] = Scripts.set,
 	["edit-script"] = Scripts.edit,
 	["grep-scripts"] = Scripts.grep,
+	["find-replace-scripts"] = Scripts.findReplace,
 	["execute-luau"] = Luau.execute,
 	["eval-runtime"] = Eval.run,
 	["start-playtest"] = Runtime.start,

@@ -272,6 +272,12 @@ for publishing; a sequence that is only registered at runtime is lost when the p
 - `stop`: `{ action: "stop", rig, all: true }`.
 - `inspect`: duration, looped, priority, keyframes and joints of a KeyframeSequence path or a
   published id; it errors clearly for ids the place cannot read.
+- `create` also returns `checks`: rotation beyond the joint table above, snaps between keys, a loop that
+  does not close, root drift and lopsided cycles, each with the joint and time. Fix errors before
+  playing; `strict: true` refuses to create while any error remains.
+- `contactSheet`: `{ action: "contactSheet", rig, sequence | animationId, frames?: 8 }` poses the rig in
+  edit mode at evenly spaced times and returns one tiled image, frame times listed in grid order.
+  Frame the rig with `camera` first. Use it to review a whole motion in one look.
 
 Verified sample (a 0.9 s swing, 4 keyframes): `Windup` at 0.25 s with RightShoulder `[-40, 0, 60]`,
 RightElbow `[90, 0, 0]`, Waist `[0, -25, 0]`; `Hit` at 0.45 s (marker `Hit`) with RightShoulder

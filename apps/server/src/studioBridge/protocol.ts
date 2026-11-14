@@ -92,6 +92,7 @@ export const StudioEndpoints = {
   setScriptSource: "set-script-source",
   editScript: "edit-script",
   grepScripts: "grep-scripts",
+  findReplaceScripts: "find-replace-scripts",
   selection: "selection",
   executeLuau: "execute-luau",
   startPlaytest: "start-playtest",

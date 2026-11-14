@@ -40,6 +40,7 @@ return {
 			{ "set_script_source", "Write scripts" },
 			{ "edit_script", "Edit scripts" },
 			{ "grep_scripts", "Search scripts" },
+			{ "find_and_replace_in_scripts", "Replace across scripts" },
 		},
 	},
 	{
@@ -102,7 +103,7 @@ return {
 		id = "animation",
 		title = "Animation",
 		tools = {
-			{ "animation", "Inspect, play and create animations" },
+			{ "animation", "Inspect, play, create and review animations" },
 		},
 	},
 	{

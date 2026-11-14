@@ -57,6 +57,71 @@ local function isUnder(instance: Instance, root: Instance): boolean
 	return instance == root or instance:IsDescendantOf(root)
 end
 
+local MAX_SCATTER = 5000
+local MAX_SCATTER_TEMPLATES = 20
+local MAX_AVOID_BOXES = 2000
+local SCATTER_ATTRIBUTE = "HarpScatterGroup"
+
+local function rangeOf(value, default, lo: number, hi: number, label: string)
+	if value == nil then
+		return default[1], default[2], nil
+	end
+	if type(value) ~= "table" or type(value[1]) ~= "number" or type(value[2]) ~= "number" or value[1] ~= value[1] or value[2] ~= value[2] or value[1] > value[2] then
+		return nil, nil, label .. " is [min, max] numbers with min <= max"
+	end
+	if value[1] < lo or value[2] > hi then
+		return nil, nil, string.format("%s must stay between %s and %s", label, tostring(lo), tostring(hi))
+	end
+	return value[1], value[2], nil
+end
+
+local function boxOf(instance: Instance)
+	if instance:IsA("BasePart") then
+		return instance.CFrame, instance.Size
+	end
+	if instance:IsA("Model") then
+		local ok, cf, size = pcall(instance.GetBoundingBox, instance)
+		if ok then
+			return cf, size
+		end
+	end
+	return nil, nil
+end
+
+local function bottomOffset(template: Instance): number
+	if template:IsA("BasePart") then
+		return -template.Size.Y / 2
+	end
+	if template:IsA("Model") then
+		local ok, cf, size = pcall(template.GetBoundingBox, template)
+		if ok then
+			return template:GetPivot():ToObjectSpace(cf).Position.Y - size.Y / 2
+		end
+	end
+	return 0
+end
+
+local function castDown(origin: Vector3, length: number, params: RaycastParams, skip: Instance?)
+	local direction = Vector3.new(0, -1, 0)
+	local remaining = length
+	for _ = 1, 6 do
+		local result = workspace:Raycast(origin, direction * remaining, params)
+		if result == nil then
+			return nil
+		end
+		if skip == nil or not result.Instance:IsDescendantOf(skip) then
+			return result
+		end
+		local travelled = (result.Position - origin).Magnitude + 0.01
+		origin += direction * travelled
+		remaining -= travelled
+		if remaining <= 0 then
+			return nil
+		end
+	end
+	return nil
+end
+
 function Build.run(args)
 	local operations = args.operations
 	if type(args.path) ~= "string" or args.path == "" then
@@ -279,10 +344,350 @@ function Build.run(args)
 		return nil
 	end
 
+	local scatterReports = {}
+
+	-- Rules-based placement. Returns a problem string, or nil once the group and its clones are queued.
+	local function scatterOp(step)
+		local name = if type(step.name) == "string" and step.name ~= "" then step.name else "Scatter"
+		local groupClass = if step.groupClass == nil then "Folder" else step.groupClass
+		if groupClass ~= "Folder" and groupClass ~= "Model" then
+			return "groupClass is Folder or Model."
+		end
+		local parent, parentProblem = parentFor(step)
+		if parent == nil then
+			return parentProblem
+		end
+
+		local templates = {}
+		local totalWeight = 0
+		if type(step.templates) ~= "table" or #step.templates == 0 or #step.templates > MAX_SCATTER_TEMPLATES then
+			return string.format("templates must hold 1 to %d paths (or {path, weight}).", MAX_SCATTER_TEMPLATES)
+		end
+		for _, entry in step.templates do
+			local ref = if type(entry) == "table" then entry.path else entry
+			local weight = if type(entry) == "table" and entry.weight ~= nil then entry.weight else 1
+			if type(weight) ~= "number" or weight ~= weight or weight <= 0 then
+				return "template weights are numbers above 0."
+			end
+			local source, problem = lookup(ref)
+			if source == nil then
+				return "template: " .. tostring(problem)
+			end
+			if not pivotable(source) then
+				return "templates must be parts or models: " .. tostring(ref)
+			end
+			totalWeight += weight
+			table.insert(templates, { source = source, weight = weight, bottom = bottomOffset(source) })
+		end
+
+		local zone = step.zone
+		if type(zone) ~= "table" then
+			return "zone is required: {path} of a part, or {min, max} world corners."
+		end
+		local zonePart, zoneCFrame, zoneSize
+		local boxMin, boxMax = vector(zone.min), vector(zone.max)
+		if zone.path ~= nil then
+			local found, problem = lookup(zone.path)
+			if found == nil then
+				return "zone: " .. tostring(problem)
+			end
+			if not found:IsA("BasePart") then
+				return "zone path must be a part (a volume to scatter inside)."
+			end
+			zonePart, zoneCFrame, zoneSize = found, found.CFrame, found.Size
+		elseif boxMin and boxMax then
+			boxMin, boxMax = boxMin:Min(boxMax), boxMin:Max(boxMax)
+			zoneCFrame, zoneSize = CFrame.new((boxMin + boxMax) / 2), boxMax - boxMin
+		else
+			return "zone needs a part path, or both min and max as [x, y, z]."
+		end
+		local area = zoneSize.X * zoneSize.Z
+		if area <= 0 then
+			return "the zone has no area."
+		end
+
+		local count = step.count
+		if count ~= nil and step.density ~= nil then
+			return "pass count or density, not both."
+		end
+		if count == nil then
+			if type(step.density) ~= "number" or step.density <= 0 then
+				return "pass count, or density as points per 100 studs^2."
+			end
+			count = math.floor(step.density * area / 100 + 0.5)
+		end
+		if type(count) ~= "number" or count ~= count or count < 1 then
+			return "count must be at least 1 (the density is too low for this zone)."
+		end
+		count = math.floor(count)
+		if count > MAX_SCATTER then
+			return string.format("at most %d instances per scatter.", MAX_SCATTER)
+		end
+
+		local scaleMin, scaleMax, scaleProblem = rangeOf(step.scale, { 1, 1 }, 0.05, 20, "scale")
+		if scaleProblem then
+			return scaleProblem
+		end
+		local yawMin, yawMax, yawProblem = rangeOf(step.yaw, { 0, 360 }, -720, 720, "yaw")
+		if yawProblem then
+			return yawProblem
+		end
+		local maxSlope = if step.maxSlope == nil then 45 else step.maxSlope
+		if type(maxSlope) ~= "number" or maxSlope ~= maxSlope or maxSlope < 0 or maxSlope > 90 then
+			return "maxSlope is degrees from 0 to 90."
+		end
+		local minSpacing = if step.minSpacing == nil then 0 else step.minSpacing
+		if type(minSpacing) ~= "number" or minSpacing ~= minSpacing or minSpacing < 0 then
+			return "minSpacing is a number of studs, 0 or more."
+		end
+		local seed = if step.seed == nil then 0 else step.seed
+		if type(seed) ~= "number" or seed ~= seed then
+			return "seed is a number."
+		end
+		local yOffset = if type(step.yOffset) == "number" then step.yOffset else 0
+		local alignToSurface = step.alignToSurface == true
+		local ground = if type(step.ground) == "table" then step.ground else {}
+		local depth = if type(ground.depth) == "number" and ground.depth >= 0 then ground.depth else 100
+
+		local oldGroups = {}
+		if not madeSet[parent] then
+			for _, child in parent:GetChildren() do
+				if child.Name == name then
+					if child:GetAttribute(SCATTER_ATTRIBUTE) == nil then
+						return string.format("%s already holds something named %s that scatter did not make; pick another name.", parent.Name, name)
+					end
+					table.insert(oldGroups, child)
+				end
+			end
+		end
+		local function inOld(instance: Instance): boolean
+			for _, old in oldGroups do
+				if instance == old or instance:IsDescendantOf(old) then
+					return true
+				end
+			end
+			return false
+		end
+
+		local params = RaycastParams.new()
+		params.IgnoreWater = true
+		local filterList = {}
+		for _, ref in if type(ground.include) == "table" then ground.include else {} do
+			local found, problem = lookup(ref)
+			if found == nil then
+				return "ground.include: " .. tostring(problem)
+			end
+			table.insert(filterList, found)
+		end
+		if #filterList > 0 then
+			params.FilterType = Enum.RaycastFilterType.Include
+		else
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			if zonePart then
+				table.insert(filterList, zonePart)
+			end
+			for _, ref in if type(ground.exclude) == "table" then ground.exclude else {} do
+				local found, problem = lookup(ref)
+				if found == nil then
+					return "ground.exclude: " .. tostring(problem)
+				end
+				table.insert(filterList, found)
+			end
+		end
+		params.FilterDescendantsInstances = filterList
+		local skipOld = if #oldGroups == 1 then oldGroups[1] else nil
+		if #oldGroups > 1 then
+			local skipped = {}
+			for _, old in oldGroups do
+				table.insert(skipped, old)
+			end
+			if params.FilterType == Enum.RaycastFilterType.Exclude then
+				for _, item in skipped do
+					table.insert(filterList, item)
+				end
+				params.FilterDescendantsInstances = filterList
+			end
+		end
+
+		local avoidBoxes = {}
+		local function addAvoid(instance: Instance)
+			if #avoidBoxes >= MAX_AVOID_BOXES or inOld(instance) or instance == zonePart then
+				return
+			end
+			local cf, size = boxOf(instance)
+			if cf then
+				table.insert(avoidBoxes, { cf = cf, half = size / 2 })
+			end
+		end
+		for _, tag in if type(step.avoidTags) == "table" then step.avoidTags else {} do
+			for _, tagged in CollectionService:GetTagged(tostring(tag)) do
+				addAvoid(tagged)
+			end
+		end
+		for _, ref in if type(step.avoidPaths) == "table" then step.avoidPaths else {} do
+			local found, problem = lookup(ref)
+			if found == nil then
+				return "avoidPaths: " .. tostring(problem)
+			end
+			if pivotable(found) then
+				addAvoid(found)
+			else
+				for _, child in found:GetChildren() do
+					addAvoid(child)
+				end
+			end
+		end
+		local padding = if type(step.avoidPadding) == "number" and step.avoidPadding >= 0 then step.avoidPadding else 1
+
+		local random = Random.new(seed)
+		local group = Instance.new(groupClass)
+		group.Name = name
+		group:SetAttribute(SCATTER_ATTRIBUTE, name)
+		group:SetAttribute("HarpScatterSeed", seed)
+		track(group)
+
+		local cell = math.max(minSpacing, 0.001)
+		local grid = {}
+		local function key(x: number, y: number, z: number): string
+			return x .. "," .. y .. "," .. z
+		end
+		local function crowded(point: Vector3): boolean
+			if minSpacing <= 0 then
+				return false
+			end
+			local cx, cy, cz = math.floor(point.X / cell), math.floor(point.Y / cell), math.floor(point.Z / cell)
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					for dz = -1, 1 do
+						local bucket = grid[key(cx + dx, cy + dy, cz + dz)]
+						if bucket then
+							for _, other in bucket do
+								if (other - point).Magnitude < minSpacing then
+									return true
+								end
+							end
+						end
+					end
+				end
+			end
+			return false
+		end
+		local function remember(point: Vector3)
+			local id = key(math.floor(point.X / cell), math.floor(point.Y / cell), math.floor(point.Z / cell))
+			local bucket = grid[id]
+			if bucket == nil then
+				bucket = {}
+				grid[id] = bucket
+			end
+			table.insert(bucket, point)
+		end
+		local function avoided(point: Vector3): boolean
+			for _, box in avoidBoxes do
+				local local_ = box.cf:PointToObjectSpace(point)
+				if math.abs(local_.X) <= box.half.X + padding and math.abs(local_.Y) <= box.half.Y + padding and math.abs(local_.Z) <= box.half.Z + padding then
+					return true
+				end
+			end
+			return false
+		end
+
+		local rejected = { ground = 0, slope = 0, spacing = 0, avoid = 0 }
+		local placed = 0
+		local attempts = 0
+		local maxAttempts = math.min(count * 20, 100000)
+		local rayLength = zoneSize.Y + depth
+		local maxTan = math.rad(maxSlope)
+		while placed < count and attempts < maxAttempts do
+			attempts += 1
+			local local_ = Vector3.new((random:NextNumber() - 0.5) * zoneSize.X, zoneSize.Y / 2, (random:NextNumber() - 0.5) * zoneSize.Z)
+			local origin = zoneCFrame:PointToWorldSpace(local_)
+			local pick = random:NextNumber() * totalWeight
+			local template = templates[#templates]
+			for _, candidate in templates do
+				pick -= candidate.weight
+				if pick <= 0 then
+					template = candidate
+					break
+				end
+			end
+			local scale = if scaleMax > scaleMin then random:NextNumber(scaleMin, scaleMax) else scaleMin
+			local yaw = if yawMax > yawMin then random:NextNumber(yawMin, yawMax) else yawMin
+			local hit = castDown(origin + Vector3.new(0, 0.5, 0), rayLength + 0.5, params, skipOld)
+			if hit == nil then
+				rejected.ground += 1
+			elseif math.acos(math.clamp(hit.Normal.Y, -1, 1)) > maxTan then
+				rejected.slope += 1
+			elseif avoided(hit.Position) then
+				rejected.avoid += 1
+			elseif crowded(hit.Position) then
+				rejected.spacing += 1
+			else
+				local copyOk, copy = pcall(function()
+					return template.source:Clone()
+				end)
+				if not copyOk or copy == nil then
+					group:Destroy()
+					return "a template cannot be cloned (is it Archivable?)."
+				end
+				track(copy)
+				if copy:IsA("Model") then
+					copy:ScaleTo(copy:GetScale() * scale)
+				else
+					copy.Size *= scale
+				end
+				local up = if alignToSurface then hit.Normal else Vector3.new(0, 1, 0)
+				local right = up:Cross(Vector3.new(0, 0, 1))
+				if right.Magnitude < 1e-3 then
+					right = Vector3.new(1, 0, 0)
+				end
+				local turn = CFrame.fromMatrix(Vector3.zero, right.Unit, up) * CFrame.Angles(0, math.rad(yaw), 0)
+				local position = hit.Position + up * (-template.bottom * scale + yOffset)
+				copy:PivotTo(CFrame.new(position) * turn)
+				copy.Parent = group
+				placed += 1
+				remember(hit.Position)
+			end
+		end
+		if placed == 0 then
+			group:Destroy()
+			return string.format("no point passed the rules in %d attempts (no ground %d, too steep %d, avoided %d, too close %d). Widen the zone, raise maxSlope or lower minSpacing.", attempts, rejected.ground, rejected.slope, rejected.avoid, rejected.spacing)
+		end
+
+		for _, old in oldGroups do
+			table.insert(actions, {
+				label = "remove previous " .. name,
+				apply = function()
+					old.Parent = nil
+				end,
+				undo = function()
+					old.Parent = parent
+				end,
+			})
+		end
+		attach(group, parent)
+		counts.created += 1
+		counts.cloned += placed
+		counts.removed += #oldGroups
+		table.insert(scatterReports, {
+			name = name,
+			group = group,
+			replaced = #oldGroups > 0,
+			placed = placed,
+			requested = count,
+			attempts = attempts,
+			rejected = rejected,
+			seed = seed,
+		})
+		return register(0, step, group)
+	end
+
 	for index, step in operations do
 		local op = type(step) == "table" and step.op or nil
 		if op == "scatter" then
-			return fail(index, op, "scatter is not supported by this version of the Harp bridge.")
+			local problem = scatterOp(step)
+			if problem then
+				return fail(index, op, problem)
+			end
 		elseif op == "create" then
 			if type(step.className) ~= "string" then
 				return fail(index, op, "className is required.")
@@ -516,7 +921,7 @@ function Build.run(args)
 			})
 			counts.removed += 1
 		else
-			return fail(index, op, "op must be create, clone, set or remove.")
+			return fail(index, op, "op must be create, clone, set, remove or scatter.")
 		end
 		if #made > MAX_INSTANCES then
 			return fail(index, op, string.format("the batch would make more than %d instances.", MAX_INSTANCES))
@@ -578,6 +983,12 @@ function Build.run(args)
 	else
 		scope = root:GetDescendants()
 	end
+	local reports = {}
+	for _, report in scatterReports do
+		report.path = Util.pathOf(report.group)
+		report.group = nil
+		table.insert(reports, report)
+	end
 	local classCounts = {}
 	local tagCounts = {}
 	local minCorner, maxCorner
@@ -629,6 +1040,7 @@ function Build.run(args)
 		updated = counts.updated,
 		removed = counts.removed,
 		undoable = recording ~= nil,
+		scatter = if #scatterReports > 0 then reports else nil,
 		descendants = #scope,
 		classes = classes,
 		tags = if next(tagCounts) then tagCounts else nil,

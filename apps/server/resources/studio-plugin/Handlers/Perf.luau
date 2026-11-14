@@ -247,8 +247,123 @@ local function renderedCost()
 	return { triangles = tree.Sizes.Triangles, drawCalls = tree.Sizes.Drawcalls, byCategory = categories }
 end
 
+local SERVICE_MODES = {
+	unparented = { method = "GetUnparentedInstancesAsync", key = "Size", unit = "bytes", note = "Instances Luau code still holds that are not in the data model, grouped by the script holding them. Large counts usually mean a leak: Destroy them or drop the reference." },
+	scriptMemory = { method = "GetScriptMemoryAsync", key = "Size", unit = "bytes", note = "Luau heap bytes per script." },
+	animationMemory = { method = "GetAnimationMemoryAsync", key = "Size", unit = "bytes", note = "Loaded animation clips, deduplicated by clip." },
+	audioMemory = { method = "GetAudioMemoryAsync", key = "Size", unit = "bytes", note = "Loaded audio assets, deduplicated by asset id." },
+	triangles = { method = "GetTriangleCompositionAsync", key = "Triangles", unit = "triangles", note = "Triangles and draw calls per render pass and asset as this peer's camera draws them right now; frame the area first with camera." },
+}
+
+local function sizeOf(node, key: string): number
+	if type(node.Sizes) == "table" then
+		return tonumber(node.Sizes[key]) or 0
+	end
+	return tonumber(node.Size) or 0
+end
+
+local function flattenTree(node, trail: { string }, key: string, rows: { any }, depth: number)
+	local children = node.Children
+	if type(children) ~= "table" or #children == 0 then
+		if depth > 0 then
+			local owners = nil
+			if type(node.Owners) == "table" then
+				owners = {}
+				for index, owner in node.Owners do
+					if index > 5 then
+						break
+					end
+					table.insert(owners, tostring(owner.Name) .. " (" .. tostring(owner.ClassName) .. ")")
+				end
+			end
+			table.insert(rows, {
+				name = tostring(node.Name),
+				group = table.concat(trail, " / "),
+				size = sizeOf(node, key),
+				drawCalls = if type(node.Sizes) == "table" then tonumber(node.Sizes.Drawcalls) else nil,
+				assetId = node.AssetId,
+				owners = owners,
+			})
+		end
+		return
+	end
+	if depth > 0 then
+		table.insert(trail, tostring(node.Name))
+	end
+	for _, child in children do
+		flattenTree(child, trail, key, rows, depth + 1)
+	end
+	if depth > 0 then
+		table.remove(trail)
+	end
+end
+
+local function sceneMode(mode: string, topN: number)
+	local spec = SERVICE_MODES[mode]
+	if spec == nil then
+		return { error = "mode must be summary, unparented, scriptMemory, animationMemory, audioMemory or triangles" }
+	end
+	local ok, service = pcall(function()
+		return game:GetService("SceneAnalysisService")
+	end)
+	if not ok or service == nil then
+		return { error = "SceneAnalysisService is not available in this Studio version, so mode " .. mode .. " is unsupported." }
+	end
+	local called, tree = pcall(function()
+		return service[spec.method](service)
+	end)
+	if not called then
+		return { error = string.format("mode %s is unsupported here: SceneAnalysisService.%s failed (%s).", mode, spec.method, tostring(tree)) }
+	end
+	if type(tree) ~= "table" then
+		return { error = string.format("SceneAnalysisService.%s returned no data.", spec.method) }
+	end
+	local rows = {}
+	flattenTree(tree, {}, spec.key, rows, 0)
+	table.sort(rows, function(a, b)
+		if a.size ~= b.size then
+			return a.size > b.size
+		end
+		return a.name < b.name
+	end)
+	local top = {}
+	for index = 1, math.min(topN, #rows) do
+		local row = rows[index]
+		if spec.unit == "bytes" then
+			row.kilobytes = round(row.size / 1024, 1)
+		end
+		table.insert(top, row)
+	end
+	local groups = {}
+	for _, child in tree.Children or {} do
+		table.insert(groups, { name = tostring(child.Name), size = sizeOf(child, spec.key) })
+	end
+	table.sort(groups, function(a, b)
+		return a.size > b.size
+	end)
+	while #groups > topN do
+		table.remove(groups)
+	end
+	return {
+		success = true,
+		mode = mode,
+		role = if not RunService:IsRunning() then "edit" elseif RunService:IsServer() then "server" else "client",
+		unit = spec.unit,
+		total = sizeOf(tree, spec.key),
+		totalDrawCalls = if type(tree.Sizes) == "table" then tonumber(tree.Sizes.Drawcalls) else nil,
+		rowCount = #rows,
+		top = top,
+		groups = groups,
+		note = spec.note,
+	}
+end
+
 function Perf.scene(args)
 	local topN = math.clamp(math.floor(tonumber(args.topN) or 8), 1, 25)
+	local mode = if type(args.mode) == "string" and args.mode ~= "" then args.mode else "summary"
+	if mode ~= "summary" then
+		return sceneMode(mode, topN)
+	end
 	local root = nil
 	if type(args.path) == "string" and args.path ~= "" then
 		local found, problem = Util.resolve({ path = args.path })
