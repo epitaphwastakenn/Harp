@@ -10,6 +10,7 @@ import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Spinner } from "../ui/spinner";
 import { useAssetUrlState } from "../../assets/assetUrls";
+import { buildTurnImageTiles } from "./modelViewer/modelPreviewVersions";
 import {
   buildTurnImagesPreview,
   turnImageTileCounts,
@@ -34,6 +35,7 @@ import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { StudioEvidenceBadge } from "./StudioEvidenceBadge";
+import { ResultsButton } from "./results/ResultsButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -232,6 +234,18 @@ function AssistantMessageMeta({
           runId={evidenceRunId}
         />
       ) : null}
+      {projectedItem !== undefined &&
+      evidenceRunId !== null &&
+      !message.streaming &&
+      ctx.onOpenResults !== undefined &&
+      ctx.threadRef !== null ? (
+        <ResultsButton
+          environmentId={ctx.activeThreadEnvironmentId}
+          threadRef={ctx.threadRef}
+          runId={evidenceRunId}
+          onOpen={ctx.onOpenResults}
+        />
+      ) : null}
     </div>
   );
 }
@@ -317,9 +331,10 @@ export function TurnImagesTimelineRow({
       false,
   );
   const setCollapsed = useUiStateStore((store) => store.setTimelineGalleryCollapsed);
-  const { shown, hidden } = turnImageTileCounts(row.images.length);
+  const tiles = buildTurnImageTiles(row.images, row.models);
+  const { shown, hidden } = turnImageTileCounts(tiles.length);
   const openViewer = (index: number) =>
-    ctx.onImageExpand(buildTurnImagesPreview(ctx.activeThreadEnvironmentId, row.images, index));
+    ctx.onImageExpand(buildTurnImagesPreview(ctx.activeThreadEnvironmentId, tiles, index));
 
   return (
     <div className="min-w-0 px-1">
@@ -333,17 +348,18 @@ export function TurnImagesTimelineRow({
       >
         <DisclosureChevron open={!collapsed} />
         Screenshots
-        <span className="text-2xs tabular-nums">{row.images.length}</span>
+        <span className="text-2xs tabular-nums">{tiles.length}</span>
       </Button>
       {collapsed ? null : (
         <div className="mt-1.5 flex flex-wrap gap-2">
-          {row.images.slice(0, shown).map((resource, index) => (
+          {tiles.slice(0, shown).map(({ resource, versions }, index) => (
             <TurnImageTile
               key={`${resource.itemId}:${String(resource.index)}`}
               environmentId={ctx.activeThreadEnvironmentId}
               resource={resource}
-              label={`Open screenshot ${index + 1} of ${row.images.length}`}
-              single={row.images.length === 1}
+              model={versions !== undefined}
+              label={`Open ${versions === undefined ? "screenshot" : "3D model"} ${index + 1} of ${tiles.length}`}
+              single={tiles.length === 1}
               overflow={index === shown - 1 ? hidden : 0}
               onOpen={() => openViewer(index)}
             />
@@ -357,6 +373,7 @@ export function TurnImagesTimelineRow({
 function TurnImageTile({
   environmentId,
   resource,
+  model,
   label,
   single,
   overflow,
@@ -364,6 +381,7 @@ function TurnImageTile({
 }: {
   environmentId: EnvironmentId;
   resource: TurnImageResource;
+  model: boolean;
   label: string;
   single: boolean;
   overflow: number;
@@ -397,6 +415,11 @@ function TurnImageTile({
           className="size-full object-cover"
           onError={() => setFailed(true)}
         />
+      ) : null}
+      {model ? (
+        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-2xs font-semibold leading-4 text-white">
+          3D
+        </span>
       ) : null}
       {overflow > 0 ? (
         <span className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm font-medium tabular-nums text-foreground">

@@ -20,7 +20,11 @@ const resource = (itemId: string, index: number): TurnImageResource => ({
 describe("buildTurnImagesPreview", () => {
   it("lists every shot as an asset-only item and opens at the clicked one", () => {
     const images = [resource("a", 0), resource("a", 1), resource("b", 0)];
-    const preview = buildTurnImagesPreview(environmentId, images, 2);
+    const preview = buildTurnImagesPreview(
+      environmentId,
+      images.map((image) => ({ resource: image })),
+      2,
+    );
 
     expect(preview.index).toBe(2);
     expect(preview.filmstrip).toBe(true);
@@ -39,8 +43,10 @@ describe("buildTurnImagesPreview", () => {
   it("keys the dialog by the shot that was opened", () => {
     const images = [resource("a", 0), resource("a", 1)];
 
-    expect(expandedImageKey(buildTurnImagesPreview(environmentId, images, 0))).not.toBe(
-      expandedImageKey(buildTurnImagesPreview(environmentId, images, 1)),
+    const tiles = images.map((image) => ({ resource: image }));
+
+    expect(expandedImageKey(buildTurnImagesPreview(environmentId, tiles, 0))).not.toBe(
+      expandedImageKey(buildTurnImagesPreview(environmentId, tiles, 1)),
     );
   });
 });

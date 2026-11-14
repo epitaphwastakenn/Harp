@@ -2543,6 +2543,8 @@ export default function ChatView(props: ChatViewProps) {
     activateRightPanelSurfaceStable,
     addDiffSurfaceStable,
     addFilesSurfaceStable,
+    addResultsSurfaceStable,
+    openResultsSurfaceStable,
     addProjectDiffSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
@@ -3383,6 +3385,7 @@ export default function ChatView(props: ChatViewProps) {
         environmentId={activeThread.environmentId}
         projectId={activeProject?.id ?? null}
         sideChatParentPanel={sideChatParentPanel}
+        onOpenTurnDiff={onOpenTurnDiffStable}
         visible={rightPanelOpen}
         composerDraftTarget={composerDraftTarget}
         keybindings={keybindings}
@@ -3638,6 +3641,7 @@ export default function ChatView(props: ChatViewProps) {
                   ? {}
                   : {
                       onOpenTurnDiff: onOpenTurnDiffStable,
+                      onOpenResults: openResultsSurfaceStable,
                       onReviewTurnDiff: onReviewTurnDiffStable,
                       onForkFromRun: onForkFromRunStable,
                     })}
@@ -4195,6 +4199,8 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurfaceStable}
             onAddPullRequests={addPullRequestsSurfaceStable}
             onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
+            onAddResults={addResultsSurfaceStable}
+            resultsAvailable={isServerThread}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
             diffAvailable={isServerThread && isGitRepo}

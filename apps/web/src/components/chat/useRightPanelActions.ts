@@ -139,6 +139,12 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     useRightPanelStore.getState().open(activeThreadRef, "files");
   };
   const addFilesSurfaceStable = useStableCallback(addFilesSurface);
+  const openResultsSurface = (runId: RunId | null) => {
+    if (!activeThreadRef || !isServerThread) return;
+    useRightPanelStore.getState().openResults(activeThreadRef, runId);
+  };
+  const openResultsSurfaceStable = useStableCallback(openResultsSurface);
+  const addResultsSurfaceStable = useStableCallback(() => openResultsSurface(null));
   const addProjectDiffSurface = () => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "diff-center");
@@ -337,6 +343,8 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,
     onOpenTurnDiffStable,
+    openResultsSurfaceStable,
+    addResultsSurfaceStable,
     onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,

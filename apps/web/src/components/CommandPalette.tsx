@@ -68,6 +68,7 @@ import {
   MicIcon,
   PaletteIcon,
   SwatchBookIcon,
+  ImagesIcon,
   RotateCcwIcon,
   SettingsIcon,
   SparklesIcon,
@@ -1374,6 +1375,18 @@ function OpenCommandPaletteDialog(props: {
 
   if (activeThread !== null) {
     const thread = activeThread;
+    actionItems.push({
+      kind: "action",
+      value: "action:open-turn-results",
+      searchTerms: ["results", "screenshots", "images", "renders", "evidence", "turn"],
+      title: "Show turn results",
+      icon: <ImagesIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore
+          .getState()
+          .openResults(scopeThreadRef(thread.environmentId, thread.id), null);
+      },
+    });
     actionItems.push({
       kind: "action",
       value: "action:restart-agent-session",

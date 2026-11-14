@@ -270,6 +270,7 @@ interface MessagesTimelineProps {
   announceTurnStatus?: boolean;
   onOpenToolDiff?: (target: ToolCallDiffTarget) => void;
   onOpenTurnDiff?: (runId: RunId, filePath?: string) => void;
+  onOpenResults?: (runId: RunId) => void;
   onReviewTurnDiff?: (runId: RunId) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   renderHtmlRender?: TimelineRowSharedState["renderHtmlRender"];
@@ -389,6 +390,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   announceTurnStatus = true,
   onOpenToolDiff,
   onOpenTurnDiff,
+  onOpenResults,
   onReviewTurnDiff = NOOP_REVIEW_TURN_DIFF,
   onOpenThread,
   renderHtmlRender,
@@ -1093,6 +1095,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     openPullRequest,
     onOpenToolDiff,
     onOpenTurnDiff,
+    onOpenResults,
     onReviewTurnDiff,
     diffPresentation,
     diffIgnoreWhitespace,

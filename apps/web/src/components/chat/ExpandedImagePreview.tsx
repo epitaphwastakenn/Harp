@@ -17,6 +17,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
 import type { MediaActionSource } from "../media/MediaActions";
+import type { ModelVersion } from "./modelViewer/modelPreviewVersions";
 import { resolveProtocolRelativeMediaUrl } from "../media/mediaContent";
 
 export interface ExpandedImageItem {
@@ -31,6 +32,8 @@ export interface ExpandedImageItem {
   originalUrl?: string;
   srcFragment?: string;
   actionsSource?: MediaActionSource;
+  /** A Blender model behind this image; versions are oldest first and the last is the latest. */
+  model?: { environmentId: EnvironmentId; versions: ReadonlyArray<ModelVersion> };
 }
 
 export interface ExpandedImagePreview {

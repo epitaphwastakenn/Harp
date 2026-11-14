@@ -71,6 +71,7 @@ export interface TimelineRowSharedState {
   onOpenToolDiff: ((target: ToolCallDiffTarget) => void) | undefined;
   /** Unset where there is no diff to open, so the timeline shows no "Open diff" button. */
   onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
+  onOpenResults?: ((runId: RunId) => void) | undefined;
   /**
    * Draws a published HTML visual. Unset, the row loads it from the environment.
    */

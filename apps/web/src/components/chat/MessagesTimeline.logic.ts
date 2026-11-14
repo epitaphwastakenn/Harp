@@ -75,6 +75,20 @@ import {
 } from "@t3tools/shared/toolActivity";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 
+function modelEntriesEqual(
+  a: ReadonlyArray<{ itemId: string; preview: { previewId: string } }>,
+  b: ReadonlyArray<{ itemId: string; preview: { previewId: string } }>,
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, index) =>
+        entry.itemId === b[index]?.itemId &&
+        entry.preview.previewId === b[index]?.preview.previewId,
+    )
+  );
+}
+
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "message") {
     return entry.message.role === "assistant" ? (entry.message.runId ?? null) : null;
@@ -685,6 +699,7 @@ type MessagesTimelineRowContent =
       id: string;
       createdAt: string;
       images: Extract<TimelineEntry, { kind: "tool-images" }>["images"];
+      models: Extract<TimelineEntry, { kind: "tool-images" }>["models"];
     }
   | {
       kind: "turn-images";
@@ -692,6 +707,7 @@ type MessagesTimelineRowContent =
       createdAt: string;
       runId: RunId;
       images: Extract<TimelineEntry, { kind: "tool-images" }>["images"];
+      models: Extract<TimelineEntry, { kind: "tool-images" }>["models"];
     }
   | {
       kind: "mcp-app";
@@ -2065,6 +2081,7 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         images: timelineEntry.images,
+        models: timelineEntry.models,
       });
       continue;
     }
@@ -2327,6 +2344,7 @@ function collectSettledRunImages(input: {
     {
       createdAt: string;
       images: Array<Extract<MessagesTimelineRow, { kind: "turn-images" }>["images"][number]>;
+      models: Array<Extract<MessagesTimelineRow, { kind: "turn-images" }>["models"][number]>;
       fallbackIndex: number;
     }
   >();
@@ -2339,11 +2357,13 @@ function collectSettledRunImages(input: {
       galleries.set(runId, {
         createdAt: row.createdAt,
         images: [...row.images],
+        models: [...row.models],
         fallbackIndex: index,
       });
     } else {
       gallery.createdAt = row.createdAt;
       gallery.images.push(...row.images);
+      gallery.models.push(...row.models);
       gallery.fallbackIndex = index;
     }
   }
@@ -2375,6 +2395,7 @@ function collectSettledRunImages(input: {
       createdAt: gallery.createdAt,
       runId,
       images: gallery.images,
+      models: gallery.models,
     });
     galleryRowsAfterIndex.set(anchorIndex, galleryRows);
   }
@@ -2668,7 +2689,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.createdAt === bi.createdAt &&
         a.images.length === bi.images.length &&
-        a.images.every((image, index) => image.itemId === bi.images[index]?.itemId)
+        a.images.every((image, index) => image.itemId === bi.images[index]?.itemId) &&
+        modelEntriesEqual(a.models, bi.models)
       );
     }
 
@@ -2681,7 +2703,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.images.every(
           (image, index) =>
             image.itemId === bi.images[index]?.itemId && image.index === bi.images[index]?.index,
-        )
+        ) &&
+        modelEntriesEqual(a.models, bi.models)
       );
     }
 
