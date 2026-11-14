@@ -1572,6 +1572,12 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       refreshIntervalMs: 5_000,
     }),
+    studioTurnEvidence: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:studio-turn-evidence",
+      tag: WS_METHODS.getStudioTurnEvidence,
+      staleTimeMs: 600_000,
+      idleTtlMs: 60_000,
+    }),
     controlRojo: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:control-rojo",
       tag: WS_METHODS.serverControlRojo,

@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { ProjectId } from "./baseSchemas.ts";
+import { ProjectId, RunId, ThreadId } from "./baseSchemas.ts";
 import { GlobalMcpStatus } from "./mcp.ts";
 import { RobloxStudioMode } from "./settings.ts";
 
@@ -20,6 +20,15 @@ export const RobloxStudioPlace = Schema.Struct({
 });
 export type RobloxStudioPlace = typeof RobloxStudioPlace.Type;
 
+/** What the user has selected in one Studio place, trimmed to what a chip needs. */
+export const RobloxStudioSelectionSummary = Schema.Struct({
+  instanceId: Schema.String,
+  count: Schema.Number,
+  names: Schema.Array(Schema.String),
+  activeScript: Schema.optionalKey(Schema.String),
+});
+export type RobloxStudioSelectionSummary = typeof RobloxStudioSelectionSummary.Type;
+
 export const RobloxStudioBridgeStatus = Schema.Struct({
   state: Schema.String,
   version: Schema.optionalKey(Schema.String),
@@ -32,6 +41,7 @@ export const RobloxStudioBridgeStatus = Schema.Struct({
   pluginRejected: Schema.optionalKey(Schema.String),
   pluginConnected: Schema.Boolean,
   places: Schema.Array(RobloxStudioPlace),
+  selections: Schema.optionalKey(Schema.Array(RobloxStudioSelectionSummary)),
   warning: Schema.optionalKey(Schema.String),
 });
 export type RobloxStudioBridgeStatus = typeof RobloxStudioBridgeStatus.Type;
@@ -113,3 +123,26 @@ export const RojoControlInput = Schema.Struct({
   file: Schema.optionalKey(Schema.String),
 });
 export type RojoControlInput = typeof RojoControlInput.Type;
+
+export const StudioTurnVerdict = Schema.Literals(["verified", "unverified", "notApplicable"]);
+export type StudioTurnVerdict = typeof StudioTurnVerdict.Type;
+
+export const StudioTurnEvidenceInput = Schema.Struct({ threadId: ThreadId, runId: RunId });
+export type StudioTurnEvidenceInput = typeof StudioTurnEvidenceInput.Type;
+
+/** What the agent's Studio tool calls did in one turn, and whether the result was checked. */
+export const StudioTurnEvidence = Schema.Struct({
+  verdict: StudioTurnVerdict,
+  issues: Schema.Array(Schema.String),
+  writes: Schema.Number,
+  targets: Schema.Array(Schema.String),
+  scriptsWritten: Schema.Number,
+  scriptsVerified: Schema.Number,
+  playtests: Schema.Number,
+  playtestErrors: Schema.Number,
+  uiChanges: Schema.Number,
+  uiAudited: Schema.Boolean,
+  screenshots: Schema.Number,
+  failures: Schema.Number,
+});
+export type StudioTurnEvidence = typeof StudioTurnEvidence.Type;

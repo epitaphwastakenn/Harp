@@ -61,6 +61,13 @@ tools to every thread, except projects set to **Not a Roblox game**.
 - Read the place: the tree, properties, scripts and the user's selection.
 - Build and edit: atomic builds that are one undo step, properties, instances, and scripts with
   revision checks and automatic read-back.
+- Rename and refactor across scripts: find and replace previews its changes first (nothing is
+  written until the agent turns the dry run off) and writes through the same checks as a single
+  edit, including Rojo files.
+- Scatter props: a build step places trees, rocks or other templates onto the ground inside a zone
+  from a seed. Running it again with the same group name replaces the previous result in one undo.
+- Hunt memory: scene analysis can list leaked instances, and the scripts, animations, audio and
+  triangles using the most memory.
 - Playtest: solo and multiplayer tests, code inside the running game, output logs.
 - See: move the camera, frame what they built, and take screenshots. **Screenshots appear in the
   chat** under the action that took them while the agent works. When the turn finishes they are
@@ -92,6 +99,16 @@ that way too:
 - **Edits go to files.** When an agent edits a script that Rojo syncs, Harp writes the file and
   lets Rojo update Studio (or updates Studio too when Rojo is not serving), so the change appears
   in the thread's diff and checkpoints. Scripts that are not in files are still edited in Studio.
+- **Sync status.** Every script write says whether Studio is synced with the file, pending or
+  diverged. Before a playtest, Harp checks the scripts the agent wrote: it waits briefly for
+  pending ones and refuses to start when Studio still differs (the agent can pass `force` to run
+  anyway). If you typed unsaved changes into a synced script in Studio, Harp refuses to overwrite
+  the file until they are merged or forced.
+- **New, renamed and deleted scripts.** In a synced folder, new scripts and folders become files
+  (`.server.luau`, `.client.luau`, `.luau`, or an `init` file when a script has children) and
+  Rojo creates them in Studio. Renaming or moving a script renames or moves its file. Deleting one
+  moves its files to `.harp/rojo-trash/<time>/` in the workspace, so nothing is lost. Other
+  instances (parts, UI) stay in Studio only, and the result says so.
 
 Harp looks for `rojo` on your PATH and in the Rokit, Aftman, Foreman and Cargo tool folders.
 
@@ -114,12 +131,36 @@ the Studio panel's own switches, which stay the outer limit, and they are separa
 **Automatic playtests** setting, which only tells the agent when it may test on its own. A thread
 with any limit does not get Roblox's own Studio MCP, which would bypass them.
 
+## Checking the agent's work
+
+When a turn changed something in Studio, a badge under its last message says whether the work was
+checked: **Studio verified**, or **Studio unverified** with the reasons on hover (scripts changed
+but no playtest ran, a script write was not read back, UI changed without a UI audit, tool calls
+failed). Turns that only read from Studio show no badge.
+
+Only one thread at a time changes a given place. The first thread to change it holds it until its
+turn ends (or ten idle minutes pass); another thread's changes are refused with a message naming
+the holder, while reads keep working.
+
+## Selection and code approvals
+
+When you select parts or open a script in Studio, a chip above the prompt (for example
+"Selected: Door, +2 more") shows what Harp adds to your next message so "this part" means
+something. Click its X to leave the selection out of that message. The sent message keeps the
+chip.
+
+When approval is needed for code the agent runs or writes in Studio (Luau runs, script edits, the
+Blender script), the approval shows the code highlighted, what it will affect, and a warning
+when it looks like it contains a key or token. Harp also appends that warning to the tool result
+so the agent can take the secret out.
+
 ## Blender
 
 Harp finds Blender in its usual install folders and Steam libraries; otherwise set **Blender
 executable**. Each Blender job runs a Python script with your permissions, so approve it as you
 would any script. Models brought in from Blender live in the current Studio session: publish them as
-assets before a saved or published place relies on them.
+assets before a saved or published place relies on them. Jobs run without credential-looking
+environment variables, and job folders older than a week (beyond the newest 40) are deleted.
 
 **Blender MCP** connects a separate MCP server that drives your open Blender, such as MCP for
 Blender.

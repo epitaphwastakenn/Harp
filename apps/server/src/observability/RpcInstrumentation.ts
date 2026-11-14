@@ -72,6 +72,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetRobloxStudioStatus]: "server",
   [WS_METHODS.serverDetectRobloxProject]: "server",
   [WS_METHODS.serverGetRojoStatus]: "server",
+  [WS_METHODS.getStudioTurnEvidence]: "server",
   [WS_METHODS.serverControlRojo]: "server",
   [WS_METHODS.serverSearchAcpRegistry]: "server",
   [WS_METHODS.serverPrepareAcpRegistryAgent]: "server",

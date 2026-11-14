@@ -56,6 +56,8 @@ export interface SealTurnInputShape {
     readonly freshConversation?: boolean | undefined;
     readonly modelSelection: ModelSelection;
     readonly studioControls?: OrchestrationV2StudioControls | undefined;
+    /** False when the user dismissed the selection chip, so this turn leaves the selection out. */
+    readonly includeStudioSelection?: boolean | undefined;
     readonly text: string;
     readonly attachments: ReadonlyArray<ChatAttachment>;
   }) => Effect.Effect<SealTurnInput, SealTurnInputError>;
@@ -227,7 +229,10 @@ export const layer = Layer.effect(
             workspaceRoot: target.workspaceRoot ?? input.cwd,
           }));
         const studioContext =
-          studioBridge._tag === "Some" && studioApplies && current.robloxStudio.studioContext
+          studioBridge._tag === "Some" &&
+          studioApplies &&
+          input.includeStudioSelection !== false &&
+          current.robloxStudio.studioContext
             ? studioSelectionContext(
                 (yield* studioBridge.value.selections).filter(
                   (selection) => !isStudioPlaceExcluded(input.studioControls, selection.instanceId),

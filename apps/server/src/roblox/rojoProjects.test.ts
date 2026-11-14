@@ -5,10 +5,19 @@ import {
   arrangeRojoProjects,
   parseInstancePath,
   parseRojoProject,
+  planRojoCreation,
+  renameRojoEntry,
+  rojoEntryNameProblem,
+  rojoEntryParent,
   rojoLayout,
+  rojoParentTarget,
   rojoPortHints,
   rojoProjectsForPlace,
   rojoScriptCandidates,
+  rojoSidecarName,
+  rojoTextConflict,
+  rojoTrashStamp,
+  rojoTrashTarget,
   type ParsedRojoProject,
 } from "./rojoProjects.ts";
 
@@ -143,5 +152,90 @@ describe("edits applied to a synced file", () => {
         { oldString: "bcd", newString: "y" },
       ]).ok,
     ).toBe(false);
+  });
+});
+
+describe("structural saves in a Rojo project", () => {
+  const project = { tree: placeTree };
+
+  it("names the file for each script class and for scripts with children", () => {
+    expect(
+      planRojoCreation("src/server", [
+        { name: "Main", className: "Script", source: "print(1)", children: [] },
+        { name: "Hud", className: "LocalScript", children: [] },
+        { name: "Util", className: "ModuleScript", source: "return {}", children: [] },
+        { name: "Agent", className: "Script", runContext: "Client", children: [] },
+        { name: "Models", className: "Folder", children: [] },
+      ]).map((entry) => [entry.path, entry.kind]),
+    ).toEqual([
+      ["src/server/Main.server.luau", "file"],
+      ["src/server/Hud.client.luau", "file"],
+      ["src/server/Util.luau", "file"],
+      ["src/server/Agent.client.luau", "file"],
+      ["src/server/Models", "directory"],
+    ]);
+    expect(
+      planRojoCreation("src", [
+        {
+          name: "Service",
+          className: "ModuleScript",
+          source: "return {}",
+          children: [
+            { name: "Types", className: "ModuleScript", children: [] },
+            { name: "Sub", className: "Folder", children: [] },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { path: "src/Service", kind: "directory" },
+      { path: "src/Service/init.luau", kind: "file", content: "return {}" },
+      { path: "src/Service/Types.luau", kind: "file", content: "" },
+      { path: "src/Service/Sub", kind: "directory" },
+    ]);
+  });
+
+  it("maps an instance path to the folder or file that backs it", () => {
+    expect(rojoParentTarget(project, ["ServerScriptService", "Combat"])).toEqual({
+      kind: "directory",
+      base: "src/ServerScriptService",
+      rest: ["Combat"],
+    });
+    expect(rojoParentTarget(project, ["ReplicatedStorage", "Config"])).toEqual({
+      kind: "file",
+      file: "src/shared/Config.luau",
+    });
+    expect(rojoParentTarget(project, ["Workspace"])).toBeUndefined();
+    expect(rojoEntryParent(project, ["ServerScriptService", "Combat", "Hit"])).toEqual({
+      directory: "src/ServerScriptService/Combat",
+      name: "Hit",
+    });
+    expect(rojoEntryParent(project, ["ServerScriptService"])).toBeUndefined();
+    expect(rojoEntryParent(project, ["ReplicatedStorage", "Config", "Child"])).toBeUndefined();
+  });
+
+  it("renames files and sidecars without losing the script suffix", () => {
+    expect(renameRojoEntry("Main.server.luau", "file", "Boot")).toBe("Boot.server.luau");
+    expect(renameRojoEntry("Util.luau", "file", "Tools")).toBe("Tools.luau");
+    expect(renameRojoEntry("Combat", "directory", "Fight")).toBe("Fight");
+    expect(renameRojoEntry("data.json", "file", "x")).toBeUndefined();
+    expect(rojoSidecarName("Main.server.luau")).toBe("Main.meta.json");
+    expect(rojoEntryNameProblem("Good Name")).toBeUndefined();
+    expect(rojoEntryNameProblem("a/b")).toContain("characters");
+    expect(rojoEntryNameProblem("..")).toBeDefined();
+  });
+
+  it("builds trash paths under the workspace's .harp folder", () => {
+    expect(rojoTrashStamp(0)).toBe("1970-01-01T00-00-00-000Z");
+    expect(rojoTrashTarget("stamp", "src/server/Main.server.luau")).toBe(
+      ".harp/rojo-trash/stamp/src/server/Main.server.luau",
+    );
+  });
+
+  it("flags only Studio text that is neither the baseline nor the file", () => {
+    const base = { baseline: "a\n", fileText: "a\n", studioText: "a\r\n" };
+    expect(rojoTextConflict(base)).toBe(false);
+    expect(rojoTextConflict({ ...base, studioText: "typed in Studio\n" })).toBe(true);
+    expect(rojoTextConflict({ ...base, fileText: "b\n", studioText: "b\n" })).toBe(false);
+    expect(rojoTextConflict({ ...base, baseline: undefined, studioText: "x" })).toBe(false);
   });
 });
