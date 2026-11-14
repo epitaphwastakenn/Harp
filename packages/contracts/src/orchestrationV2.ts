@@ -1660,6 +1660,15 @@ export const OrchestrationV2ModelSwitch = Schema.Struct({
 export type OrchestrationV2ModelSwitch = typeof OrchestrationV2ModelSwitch.Type;
 
 const AssistantMessagePhase = Schema.Literals(["commentary", "partial_answer", "final_answer"]);
+/** Code a Studio tool is about to run or write, so the approval can show it. */
+export const OrchestrationV2ApprovalStudioCode = Schema.Struct({
+  tool: Schema.String,
+  language: Schema.Literals(["luau", "python"]),
+  code: Schema.String,
+  risk: Schema.Literals(["mutation", "irreversible"]),
+  peer: Schema.String,
+});
+export type OrchestrationV2ApprovalStudioCode = typeof OrchestrationV2ApprovalStudioCode.Type;
 
 const OrchestrationV2TurnItemBaseFields = {
   /** Wire-only cursor for collapsed work; persisted items keep their complete history. */
@@ -1873,6 +1882,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     fullAccessOverride: Schema.optional(ProviderApprovalFullAccessOverride),
     appName: Schema.optional(Schema.String),
     options: Schema.optional(Schema.Array(ProviderApprovalOption)),
+    studioCode: Schema.optional(OrchestrationV2ApprovalStudioCode),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2762,6 +2772,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     fullAccessOverride: Schema.optional(ProviderApprovalFullAccessOverride),
     appName: Schema.optional(Schema.String),
     options: Schema.optional(Schema.Array(ProviderApprovalOption)),
+    studioCode: Schema.optional(OrchestrationV2ApprovalStudioCode),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

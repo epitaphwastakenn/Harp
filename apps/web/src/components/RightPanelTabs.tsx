@@ -41,6 +41,7 @@ import {
   Files,
   GitCompareArrows,
   GlobeIcon,
+  Images,
   MessagesSquare,
   Plus,
   TerminalSquare,
@@ -141,6 +142,8 @@ export interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  /** Absent where there is no thread turn to collect results from. */
+  onAddResults?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -149,6 +152,7 @@ export interface RightPanelTabsProps {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   sideChatAvailable?: boolean;
+  resultsAvailable?: boolean;
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
@@ -219,6 +223,13 @@ const surfaceActions = [
     shortcut: "S",
     unavailableHint: "Available after the first message.",
   },
+  {
+    id: "results",
+    label: "Results",
+    icon: Images,
+    shortcut: "R",
+    unavailableHint: "Available after the first turn.",
+  },
 ] as const;
 
 type SurfaceActionId = (typeof surfaceActions)[number]["id"];
@@ -234,6 +245,7 @@ function resolveSurfaceActions(
     | "onAddPullRequest"
     | "onAddPullRequests"
     | "onAddSideChat"
+    | "onAddResults"
     | "browserAvailable"
     | "terminalAvailable"
     | "filesAvailable"
@@ -242,6 +254,7 @@ function resolveSurfaceActions(
     | "pullRequestAvailable"
     | "pullRequestsAvailable"
     | "sideChatAvailable"
+    | "resultsAvailable"
     | "sideChatDisabledReason"
   >,
 ) {
@@ -253,6 +266,7 @@ function resolveSurfaceActions(
     diffCenter: props.diffCenterAvailable,
     pullRequests: props.pullRequestsAvailable || props.pullRequestAvailable,
     sideChat: props.sideChatAvailable === true && !props.sideChatDisabledReason,
+    results: props.resultsAvailable === true,
   };
   const onClick: Record<SurfaceActionId, () => void> = {
     browser: props.onAddBrowser,
@@ -262,9 +276,11 @@ function resolveSurfaceActions(
     diffCenter: props.onAddDiffCenter,
     pullRequests: props.pullRequestsAvailable ? props.onAddPullRequests : props.onAddPullRequest,
     sideChat: props.onAddSideChat ?? (() => {}),
+    results: props.onAddResults ?? (() => {}),
   };
   return surfaceActions
     .filter((action) => action.id !== "sideChat" || props.onAddSideChat !== undefined)
+    .filter((action) => action.id !== "results" || props.onAddResults !== undefined)
     .map((action) => ({
       ...action,
       unavailableHint:
@@ -575,6 +591,8 @@ function surfaceTitle(
       return "Pull requests";
     case "side-chat":
       return "Side chat";
+    case "results":
+      return "Results";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -674,6 +692,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.pullRequest className="size-3.5 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
+    case "results":
+      return <Images className="size-3.5 shrink-0" />;
   }
 }
 

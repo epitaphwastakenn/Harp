@@ -29,6 +29,7 @@ import { type AssistantCitationTarget } from "./AssistantCitationSource";
 import { type MessagesTimelineRow, type WorkGroupScrollAnchor } from "./MessagesTimeline.logic";
 import { type DiffPresentation, type TimestampFormat } from "@t3tools/contracts/settings";
 import type { TurnItemDetailSource } from "../../state/queries";
+import type { ResultRunFlags } from "./results/turnResults.logic";
 import { type HandoffTimelineRun } from "./V2LifecycleRow";
 
 /**
@@ -74,6 +75,8 @@ export interface TimelineRowSharedState {
   onOpenToolDiff: ((target: ToolCallDiffTarget) => void) | undefined;
   /** Unset where there is no diff to open, so the timeline shows no "Open diff" button. */
   onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
+  onOpenResults?: ((runId: RunId) => void) | undefined;
+  resultRunFlags?: ReadonlyMap<RunId, ResultRunFlags> | undefined;
   /**
    * Draws a published HTML visual. Unset, the row loads it from the environment.
    */

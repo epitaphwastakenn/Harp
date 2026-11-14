@@ -1,3 +1,6 @@
+import { parseInstancePath } from "@t3tools/shared/instancePath";
+import * as DateTime from "effect/DateTime";
+
 export type RojoProjectKind = "place" | "model";
 
 export interface RojoProject {
@@ -168,38 +171,7 @@ export const rojoLayout = (projects: ReadonlyArray<RojoProject>): RojoLayout => 
   return served.length === 0 ? "none" : served.length === 1 ? "single" : "multi";
 };
 
-export const parseInstancePath = (path: string): ReadonlyArray<string> | undefined => {
-  const segments: string[] = [];
-  let index = 0;
-  const text = path.trim();
-  while (index < text.length) {
-    if (text[index] === ".") {
-      index += 1;
-      continue;
-    }
-    if (text[index] === "[") {
-      const quote = text[index + 1];
-      if (quote !== '"' && quote !== "'") return undefined;
-      let value = "";
-      index += 2;
-      while (index < text.length && text[index] !== quote) {
-        if (text[index] === "\\" && index + 1 < text.length) index += 1;
-        value += text[index];
-        index += 1;
-      }
-      if (text[index] !== quote || text[index + 1] !== "]") return undefined;
-      segments.push(value);
-      index += 2;
-      continue;
-    }
-    const match = /^[^.[]+/u.exec(text.slice(index));
-    if (match === null) return undefined;
-    segments.push(match[0]);
-    index += match[0].length;
-  }
-  if (segments[0] === "game") segments.shift();
-  return segments.length === 0 ? undefined : segments;
-};
+export { parseInstancePath };
 
 const joinPath = (base: string, ...rest: ReadonlyArray<string>) =>
   [base, ...rest]
@@ -316,3 +288,159 @@ export const applyScriptEdits = (
   }
   return { ok: true, text: text + source.slice(cursor) };
 };
+
+export type RojoScriptClass = "Script" | "LocalScript" | "ModuleScript";
+
+export const isRojoScriptClass = (value: unknown): value is RojoScriptClass =>
+  value === "Script" || value === "LocalScript" || value === "ModuleScript";
+
+const rojoScriptFileSuffix = (className: RojoScriptClass, runContext?: unknown): string =>
+  className === "ModuleScript"
+    ? ".luau"
+    : className === "LocalScript" || runContext === "Client"
+      ? ".client.luau"
+      : ".server.luau";
+
+export interface RojoNewNode {
+  readonly name: string;
+  readonly className: RojoScriptClass | "Folder";
+  readonly source?: string | undefined;
+  readonly runContext?: unknown;
+  readonly children: ReadonlyArray<RojoNewNode>;
+}
+
+export interface RojoPlannedEntry {
+  readonly path: string;
+  readonly kind: "file" | "directory";
+  readonly content?: string;
+}
+
+export const rojoEntryNameProblem = (name: string): string | undefined => {
+  if (name.trim() === "" || name === "." || name === "..") return "the name is empty";
+  if (/[/:*?"<>|\u0000-\u001F]/u.test(name)) return `"${name}" has characters a file name cannot`;
+  if (/[. ]$/u.test(name)) return `"${name}" ends with a dot or space`;
+  if (name.toLowerCase() === "init") {
+    return `"${name}" would be read by Rojo as its parent's own script`;
+  }
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(name)) {
+    return `"${name}" is a reserved device name on Windows`;
+  }
+  if (/\.(?:meta|project)$/iu.test(name)) {
+    return `"${name}" would be read by Rojo as a sidecar or project file`;
+  }
+  return undefined;
+};
+
+export const planRojoCreation = (
+  parentDirectory: string,
+  nodes: ReadonlyArray<RojoNewNode>,
+): ReadonlyArray<RojoPlannedEntry> => {
+  const entries: RojoPlannedEntry[] = [];
+  const visit = (directory: string, node: RojoNewNode) => {
+    const here = joinPath(directory, node.name);
+    if (node.className === "Folder") {
+      entries.push({ path: here, kind: "directory" });
+      for (const child of node.children) visit(here, child);
+      return;
+    }
+    const suffix = rojoScriptFileSuffix(node.className, node.runContext);
+    const content = node.source ?? "";
+    if (node.children.length === 0) {
+      entries.push({ path: `${here}${suffix}`, kind: "file", content });
+      return;
+    }
+    entries.push({ path: here, kind: "directory" });
+    entries.push({ path: joinPath(here, `init${suffix}`), kind: "file", content });
+    for (const child of node.children) visit(here, child);
+  };
+  for (const node of nodes) visit(parentDirectory, node);
+  return entries;
+};
+
+export const splitRojoScriptName = (basename: string) => {
+  const suffix = scriptSuffixes
+    .filter((candidate) => basename.toLowerCase().endsWith(candidate))
+    .toSorted((left, right) => right.length - left.length)[0];
+  return suffix === undefined
+    ? undefined
+    : { stem: basename.slice(0, basename.length - suffix.length), suffix };
+};
+
+export const renameRojoEntry = (
+  basename: string,
+  kind: "file" | "directory",
+  name: string,
+): string | undefined => {
+  if (kind === "directory") return name;
+  const parts = splitRojoScriptName(basename);
+  return parts === undefined ? undefined : `${name}${parts.suffix}`;
+};
+
+export const rojoSidecarName = (basename: string): string | undefined => {
+  const parts = splitRojoScriptName(basename);
+  return parts === undefined ? undefined : `${parts.stem}.meta.json`;
+};
+
+export const rojoTrashStamp = (millis: number) =>
+  DateTime.formatIso(DateTime.makeUnsafe(millis)).replace(/[:.]/gu, "-");
+
+export const rojoTrashTarget = (stamp: string, relative: string) =>
+  joinPath(".harp/rojo-trash", stamp, relative);
+
+export const rojoTextConflict = (input: {
+  readonly baseline: string | undefined;
+  readonly fileText: string;
+  readonly studioText: string;
+}): boolean => {
+  if (input.baseline === undefined) return false;
+  const eol = (text: string) => text.replaceAll("\r\n", "\n");
+  const studio = eol(input.studioText);
+  return studio !== eol(input.baseline) && studio !== eol(input.fileText);
+};
+
+export type RojoParentTarget =
+  | { readonly kind: "directory"; readonly base: string; readonly rest: ReadonlyArray<string> }
+  | { readonly kind: "file"; readonly file: string };
+
+const unsyncedFile = /\.(?:json|rbxm|rbxmx|txt|csv|toml|yaml|yml|md)$/i;
+
+const walkRojoTree = (project: Pick<RojoProject, "tree">, segments: ReadonlyArray<string>) => {
+  let node = project.tree;
+  let consumed = 0;
+  while (consumed < segments.length) {
+    const child = node[segments[consumed]!];
+    if (segments[consumed]!.startsWith("$") || !isNode(child)) break;
+    node = child;
+    consumed += 1;
+  }
+  const base = typeof node.$path === "string" ? node.$path : undefined;
+  return base === undefined ? undefined : { base, rest: segments.slice(consumed) };
+};
+
+export const rojoParentTarget = (
+  project: Pick<RojoProject, "tree">,
+  segments: ReadonlyArray<string>,
+): RojoParentTarget | undefined => {
+  const walked = walkRojoTree(project, segments);
+  if (walked === undefined) return undefined;
+  if (isScriptFile(walked.base)) {
+    return walked.rest.length === 0 ? { kind: "file", file: walked.base } : undefined;
+  }
+  if (unsyncedFile.test(walked.base)) return undefined;
+  return { kind: "directory", base: walked.base, rest: walked.rest };
+};
+
+export const rojoEntryParent = (
+  project: Pick<RojoProject, "tree">,
+  segments: ReadonlyArray<string>,
+): { readonly directory: string; readonly name: string } | undefined => {
+  const walked = walkRojoTree(project, segments);
+  if (walked === undefined || walked.rest.length === 0) return undefined;
+  if (isScriptFile(walked.base) || unsyncedFile.test(walked.base)) return undefined;
+  return {
+    directory: joinPath(walked.base, ...walked.rest.slice(0, -1)),
+    name: walked.rest.at(-1)!,
+  };
+};
+
+export const rojoScriptSuffixes = scriptSuffixes;

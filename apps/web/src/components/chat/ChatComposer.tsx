@@ -99,6 +99,7 @@ import { onToggleComposerVoice } from "../../composerVoiceBus";
 import { appendTranscriptToPrompt } from "../../lib/voiceRecorder";
 import { getTraitsSectionVisibility } from "./TraitsPicker";
 import { ComposerUsageMeter } from "./ComposerUsageMeter";
+import { useUsageWarningBanner } from "./useUsageWarningBanner";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -148,6 +149,7 @@ import {
 } from "./composerContextUndo";
 import type { ThreadSyncPhase } from "../../threadSync";
 import { ComposerBanner } from "./ComposerBanner";
+import { ComposerStudioSelectionChip } from "./ComposerStudioSelectionChip";
 import { ComposerSurface } from "./ComposerSurface";
 import { CollapsedComposerPromptPreview } from "./CollapsedComposerPromptPreview";
 import {
@@ -543,6 +545,7 @@ export interface ChatComposerProps {
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   studioControls?: OrchestrationV2StudioControls | undefined;
+  studioSelectionChip?: { readonly label: string; readonly onDismiss: () => void } | undefined;
   onStudioControlsChange?: ((change: StudioControlsChange) => void) | undefined;
 
   focusComposer: () => void;
@@ -647,6 +650,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     getModelDisabledReason,
     handleRuntimeModeChange,
     studioControls,
+    studioSelectionChip,
     onStudioControlsChange,
     focusComposer,
     scheduleComposerFocus,
@@ -2913,12 +2917,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }),
           },
         ];
+  const usageWarningItem = useUsageWarningBanner({
+    environmentId,
+    instanceId: selectedInstanceId,
+    provider: selectedProviderStatus,
+    model: selectedModel,
+    running: phase === "running",
+  });
   // An open question owns the space above the composer. Only a machine problem,
   // which is why an answer could not go through, stays beside it.
   const shelfBannerItems = [...props.bannerItems, ...replyBannerItems, ...managedRuntimeModeItems];
   const bannerStackItems = [
     ...(activityStackItem ? [activityStackItem] : []),
     ...(submissionErrorItem ? [submissionErrorItem] : []),
+    ...(usageWarningItem ? [usageWarningItem] : []),
     ...(hasBlockingComposerTopDrawer
       ? shelfBannerItems.filter((item) => item.variant === "error" || item.variant === "warning")
       : shelfBannerItems),
@@ -4079,6 +4091,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               {composerAttachmentMediaRow}
 
               {composerAttachmentFileList}
+
+              {studioSelectionChip !== undefined && !isComposerCollapsedMobile ? (
+                <ComposerStudioSelectionChip {...studioSelectionChip} />
+              ) : null}
 
               <div
                 className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}

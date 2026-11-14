@@ -63,6 +63,22 @@
       "types": "./src/agentAwareness.ts",
       "import": "./src/agentAwareness.ts"
     },
+    "./studioCode": {
+      "types": "./src/studioCode.ts",
+      "import": "./src/studioCode.ts"
+    },
+    "./secretScan": {
+      "types": "./src/secretScan.ts",
+      "import": "./src/secretScan.ts"
+    },
+    "./studioSelection": {
+      "types": "./src/studioSelection.ts",
+      "import": "./src/studioSelection.ts"
+    },
+    "./instancePath": {
+      "types": "./src/instancePath.ts",
+      "import": "./src/instancePath.ts"
+    },
     "./studioControls": {
       "types": "./src/studioControls.ts",
       "import": "./src/studioControls.ts"

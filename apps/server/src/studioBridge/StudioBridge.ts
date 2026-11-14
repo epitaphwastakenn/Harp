@@ -31,6 +31,7 @@ import {
   type RoutingErrorCode,
 } from "./StudioRouter.ts";
 import type { StudioExcludedPlace } from "./studioControls.ts";
+import * as StudioEvidence from "./studioEvidence.ts";
 
 export const STUDIO_BRIDGE_BUILD = packageJson.version;
 
@@ -403,6 +404,7 @@ export class StudioBridge extends Context.Service<
 
 const make = Effect.gen(function* () {
   const crypto = yield* SecureRandom.SecureRandom;
+  const evidence = yield* StudioEvidence.StudioEvidence;
   const sessions = new Map<string, Session>();
   const byToken = new Map<string, Session>();
   const pending = new Map<string, Pending>();
@@ -854,6 +856,7 @@ const make = Effect.gen(function* () {
           typeof rest.message === "string"
         ) {
           const key = session.peer.instanceId;
+          yield* evidence.playtestError([...(placeThreads.get(resolveAlias(key))?.keys() ?? [])]);
           const window = errorWindows.get(key);
           if (window !== undefined && now - window.at < ERROR_ALERT_WINDOW_MS) {
             window.folded += 1;
@@ -1219,4 +1222,6 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(StudioBridge, make);
+export const layer = Layer.effect(StudioBridge, make).pipe(
+  Layer.provideMerge(StudioEvidence.layer),
+);

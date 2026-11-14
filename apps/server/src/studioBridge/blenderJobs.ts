@@ -1,17 +1,29 @@
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off globalDateInEffect:off globalRandomInEffect:off globalTimers:off preferSchemaOverJson:off globalFetchInEffect:off -Blender runs as a headless child process on job folders.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeOS from "node:os";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import type { ModelPreviewReference } from "@t3tools/shared/toolOutput";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 const decodeJsonUnknown = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
+import { EPILOGUE, PRELUDE } from "./blenderScripts.ts";
+import {
+  JOB_FOLDER_PREFIX,
+  MODEL_PREVIEW_FILE,
+  MODEL_PREVIEW_INDEX_FILE,
+  pruneJobFolders,
+  registerModelPreview,
+  validateGlb,
+} from "./modelPreviews.ts";
+
 /**
  * Headless Blender jobs. The agent's Python runs inside a prelude that gives it the job folder
- * and, afterwards, Harp measures the result itself: a topology report for every mesh, an
- * optional preview render, and an optional OBJ export Studio can import.
+ * and Harp's modeling helpers. Afterwards Harp measures the result itself: a topology report for
+ * every mesh, export checks, an optional preview render, and an OBJ and a GLB export.
  */
 
 export interface BlenderJobResult {
@@ -24,182 +36,116 @@ export interface BlenderJobResult {
   readonly files: ReadonlyArray<string>;
   readonly previewPng?: Buffer | undefined;
   readonly objPath?: string | undefined;
+  readonly modelPreview?: ModelPreviewReference | undefined;
+  readonly modelPreviewError?: string | undefined;
 }
 
-const PRELUDE = String.raw`
-import bpy, bmesh, json, math, os, sys, traceback
-from mathutils import Vector
-JOB_DIR = os.environ["SEALCODE_JOB_DIR"]
-if os.environ.get("SEALCODE_FRESH") == "1":
-    # Start from nothing: no default cube, camera or light to clean up or export by mistake.
-    bpy.ops.wm.read_homefile(use_empty=True)
-def job_path(name):
-    return os.path.join(JOB_DIR, name)
-`;
+export const MAX_AGENT_SCRIPT_BYTES = 256 * 1024;
 
-// Runs after the agent's script, even when it failed part-way, so the report shows the state.
-const EPILOGUE = String.raw`
-def _sealcode_report():
-    meshes = []
-    for obj in bpy.context.scene.objects:
-        if obj.type != "MESH":
-            continue
-        me = obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh()
-        bm = bmesh.new()
-        bm.from_mesh(me)
-        ngons = sum(1 for f in bm.faces if len(f.verts) > 4)
-        quads = sum(1 for f in bm.faces if len(f.verts) == 4)
-        tris = sum(len(f.verts) - 2 for f in bm.faces)
-        non_manifold = sum(1 for e in bm.edges if not e.is_manifold and not e.is_boundary)
-        boundary = sum(1 for e in bm.edges if e.is_boundary)
-        loose_verts = sum(1 for v in bm.verts if not v.link_edges)
-        loose_edges = sum(1 for e in bm.edges if not e.link_faces)
-        zero_faces = sum(1 for f in bm.faces if f.calc_area() < 1e-8)
-        dims = obj.dimensions
-        meshes.append({
-            "name": obj.name,
-            "faces": len(bm.faces), "triangles": tris, "quads": quads, "ngons": ngons,
-            "nonManifoldEdges": non_manifold, "openBoundaryEdges": boundary,
-            "looseVerts": loose_verts, "looseEdges": loose_edges, "zeroAreaFaces": zero_faces,
-            "materials": [s.material.name for s in obj.material_slots if s.material],
-            "dimensions": [round(dims.x, 3), round(dims.y, 3), round(dims.z, 3)],
-            "scaleApplied": all(abs(s - 1) < 1e-6 for s in obj.scale),
-        })
-        bm.free()
-        obj.to_mesh_clear()
-    return {"meshes": meshes, "totalTriangles": sum(m["triangles"] for m in meshes)}
+export const agentScriptSizeError = (script: string): string | undefined => {
+  const bytes = Buffer.byteLength(script, "utf8");
+  return bytes > MAX_AGENT_SCRIPT_BYTES
+    ? `The script is ${Math.ceil(bytes / 1024)} KB; the limit is ${MAX_AGENT_SCRIPT_BYTES / 1024} KB. Split the work into several jobs and chain them with continueFrom.`
+    : undefined;
+};
 
-def _sealcode_preview(path):
-    objs = [o for o in bpy.context.scene.objects if o.type == "MESH"]
-    if not objs:
-        return False
-    # Workbench shows a material's viewport colour; mirror each node Base Color into it so the
-    # preview shows the colours the model really has.
-    for mat in bpy.data.materials:
-        try:
-            if mat.use_nodes:
-                bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-                if bsdf is not None:
-                    mat.diffuse_color = tuple(bsdf.inputs["Base Color"].default_value)
-        except Exception:
-            pass
-    lo = Vector((math.inf,) * 3); hi = Vector((-math.inf,) * 3)
-    for o in objs:
-        for c in o.bound_box:
-            w = o.matrix_world @ Vector(c)
-            lo = Vector(map(min, lo, w)); hi = Vector(map(max, hi, w))
-    center = (lo + hi) / 2
-    radius = max((hi - lo).length / 2, 0.01)
-    scene = bpy.context.scene
-    try:
-        scene.render.engine = "BLENDER_WORKBENCH"
-    except TypeError:
-        pass
-    try:
-        scene.display.shading.light = "STUDIO"
-        scene.display.shading.color_type = "MATERIAL"
-        scene.display.shading.show_cavity = True
-        scene.display.shading.show_object_outline = True
-    except Exception:
-        pass
-    try:
-        scene.world.color = (0.82, 0.84, 0.87)
-    except Exception:
-        pass
-    cell_w, cell_h = 480, 360
-    scene.render.resolution_x = cell_w
-    scene.render.resolution_y = cell_h
-    scene.render.film_transparent = False
-    scene.render.image_settings.file_format = "PNG"
-    cam_data = bpy.data.cameras.new("SealCodePreviewCam")
-    cam_data.type = "ORTHO"
-    cam_data.ortho_scale = radius * 2.3
-    cam_data.clip_end = radius * 40
-    cam = bpy.data.objects.new("SealCodePreviewCam", cam_data)
-    scene.collection.objects.link(cam)
-    scene.camera = cam
-    # Four views on one sheet: front, right side, top, and a perspective three-quarter view.
-    views = [
-        ("front", Vector((0, -1, 0.0001)), "ORTHO"),
-        ("right", Vector((1, 0, 0.0001)), "ORTHO"),
-        ("top", Vector((0, -0.0001, 1)), "ORTHO"),
-        ("iso", Vector((1.0, -1.2, 0.8)), "PERSP"),
-    ]
-    files = []
-    for name, direction, kind in views:
-        cam_data.type = kind
-        direction = direction.normalized()
-        cam.location = center + direction * radius * (3.2 if kind == "PERSP" else 6)
-        cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
-        out = job_path("preview-" + name + ".png")
-        scene.render.filepath = out
-        bpy.ops.render.render(write_still=True)
-        files.append(out)
-    bpy.data.objects.remove(cam, do_unlink=True)
-    try:
-        import numpy as np
-        sheet = np.ones((cell_h * 2, cell_w * 2, 4), dtype=np.float32)
-        for index, file in enumerate(files):
-            img = bpy.data.images.load(file)
-            px = np.array(img.pixels[:], dtype=np.float32).reshape(img.size[1], img.size[0], 4)
-            row, col = divmod(index, 2)
-            # Blender images start at the bottom row: the first view goes to the top-left.
-            y0 = (1 - row) * cell_h
-            sheet[y0:y0 + cell_h, col * cell_w:(col + 1) * cell_w] = px[:cell_h, :cell_w]
-            bpy.data.images.remove(img)
-        out_img = bpy.data.images.new("SealCodePreviewSheet", cell_w * 2, cell_h * 2, alpha=True)
-        out_img.pixels = sheet.ravel()
-        out_img.filepath_raw = path
-        out_img.file_format = "PNG"
-        out_img.save()
-    except Exception:
-        import shutil
-        shutil.copyfile(files[-1], path)
-    return True
+const SECRET_NAME =
+  /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|AUTH|COOKIE|CREDENTIAL|SESSION|ROBLOSECURITY/iu;
+const KEPT_NAMES = new Set([
+  "SESSIONNAME",
+  "XAUTHORITY",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+  "XDG_SESSION_CLASS",
+  "XDG_SESSION_DESKTOP",
+]);
 
-def _sealcode_export(path):
-    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
-    if not meshes:
-        return False
-    bpy.ops.object.select_all(action="DESELECT")
-    for o in meshes:
-        o.select_set(True)
-    kwargs = dict(filepath=path, export_selected_objects=True, export_materials=True, forward_axis="NEGATIVE_Z", up_axis="Y", export_triangulated_mesh=True)
-    try:
-        bpy.ops.wm.obj_export(**kwargs)
-    except TypeError:
-        kwargs.pop("export_triangulated_mesh", None)
-        bpy.ops.wm.obj_export(**kwargs)
-    # A GLB beside it, for importing or publishing the model in Studio by hand.
-    try:
-        bpy.ops.export_scene.gltf(filepath=path[:-4] + ".glb", export_format="GLB", use_selection=True)
-    except Exception:
-        pass
-    return True
+/** The agent's script can print or send its environment, so Blender never sees credential-looking variables. */
+export const blenderEnvironment = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    const upper = name.toUpperCase();
+    if (!upper.startsWith("BLENDER_") && !KEPT_NAMES.has(upper) && SECRET_NAME.test(name)) continue;
+    clean[name] = value;
+  }
+  return clean;
+};
 
-_status = {"scriptError": _sealcode_error}
-try:
-    _status["report"] = _sealcode_report()
-except Exception as e:
-    _status["reportError"] = str(e)
-if os.environ.get("SEALCODE_PREVIEW") == "1":
-    try:
-        _status["preview"] = _sealcode_preview(job_path("preview.png"))
-    except Exception as e:
-        _status["previewError"] = str(e)
-if os.environ.get("SEALCODE_EXPORT") == "1":
-    try:
-        _status["exported"] = _sealcode_export(job_path("model.obj"))
-    except Exception as e:
-        _status["exportError"] = str(e)
-if os.environ.get("SEALCODE_SAVE_BLEND") == "1":
-    try:
-        bpy.ops.wm.save_as_mainfile(filepath=job_path("scene.blend"))
-    except Exception as e:
-        _status["saveError"] = str(e)
-with open(job_path("sealcode-status.json"), "w") as f:
-    json.dump(_status, f)
-`;
+const killProcessTree = (child: NodeChildProcess.ChildProcess) => {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (NodeOS.platform() === "win32") {
+    NodeChildProcess.spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    }).on("error", () => child.kill());
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+};
+
+const SUMMARY_BUDGET_BYTES = 12_000;
+
+const byteSize = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
+
+const trimOutput = (output: string, keep: number) => {
+  if (keep <= 0) return "";
+  let tail = output.slice(-keep);
+  while (Buffer.byteLength(tail, "utf8") > keep * 2) tail = tail.slice(Math.ceil(tail.length / 4));
+  return `…${tail}`;
+};
+
+/** Client output compaction reads only the first 16 KB of a result, so the summary stays under it. */
+export const fitJobSummary = <T extends { output: string; result: unknown }>(summary: T): T => {
+  const fits = (value: unknown) => byteSize(value) <= SUMMARY_BUDGET_BYTES;
+  if (fits(summary)) return summary;
+  const fitted = { ...summary };
+  for (const keep of [6000, 3000, 1000, 0]) {
+    fitted.output = trimOutput(summary.output, keep);
+    if (fits(fitted)) return fitted;
+  }
+  const original = (fitted.result ?? {}) as Record<string, unknown>;
+  const withResult = (result: Record<string, unknown>) => {
+    Object.assign(fitted, { result });
+    return fits(fitted);
+  };
+  const lintOf = (result: Record<string, unknown>) =>
+    result.lint !== null && typeof result.lint === "object"
+      ? (result.lint as Record<string, unknown>)
+      : {};
+  const { objects: _objects, ...lintWithoutObjects } = lintOf(original);
+  let result: Record<string, unknown> = {
+    ...original,
+    ...(original.lint === undefined
+      ? {}
+      : { lint: { ...lintWithoutObjects, objectsOmitted: true } }),
+  };
+  if (withResult(result)) return fitted;
+  const meshes = Array.isArray(original.meshes) ? original.meshes : undefined;
+  if (meshes !== undefined) {
+    for (const limit of [40, 20, 10, 5, 0]) {
+      if (meshes.length <= limit) continue;
+      result = { ...result, meshes: meshes.slice(0, limit), meshesOmitted: meshes.length - limit };
+      if (withResult(result)) return fitted;
+    }
+  }
+  for (const limit of [20, 8, 3, 0]) {
+    const lint: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(lintOf(result))) {
+      lint[key] = Array.isArray(value) && value.length > limit ? value.slice(0, limit) : value;
+    }
+    result = { ...result, lint };
+    if (withResult(result)) return fitted;
+  }
+  const { meshes: _meshes, lint: _lint, ...rest } = result;
+  withResult({ ...rest, reportTrimmed: true });
+  return fitted;
+};
 
 /** The job script: prelude, the agent's file run with its own line numbers, then the measurements. */
 export const buildJobScript = (agentScriptPath: string): string =>
@@ -215,6 +161,72 @@ export const buildJobScript = (agentScriptPath: string): string =>
     EPILOGUE,
   ].join("\n");
 
+const numberTriple = (value: unknown): [number, number, number] | undefined =>
+  Array.isArray(value) &&
+  value.length === 3 &&
+  value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
+    ? [value[0], value[1], value[2]]
+    : undefined;
+
+/** Validates the exported GLB and gives it a preview id, or says why it has none. */
+const readModelPreview = (
+  jobDir: string,
+  status: Record<string, unknown>,
+  openBlend?: string,
+): { modelPreview?: ModelPreviewReference; modelPreviewError?: string } => {
+  if (typeof status.glbError === "string") {
+    return { modelPreviewError: `GLB export failed: ${status.glbError}` };
+  }
+  if (status.glb !== true) return {};
+  let bytes: Buffer;
+  try {
+    bytes = NodeFS.readFileSync(NodePath.join(jobDir, MODEL_PREVIEW_FILE));
+  } catch {
+    return { modelPreviewError: "GLB export reported success but model.glb is missing." };
+  }
+  const checked = validateGlb(bytes);
+  if (!checked.ok) return { modelPreviewError: checked.reason };
+  const continuedFrom = openBlend?.split(/[\\/]/u).filter(Boolean).at(-2);
+  const model = (
+    status.lint as { model?: { dimensions?: unknown; triangles?: unknown } } | undefined
+  )?.model;
+  const triangles =
+    typeof model?.triangles === "number" && Number.isSafeInteger(model.triangles)
+      ? model.triangles
+      : 0;
+  return {
+    modelPreview: registerModelPreview(jobDir, {
+      triangles,
+      dimensions: numberTriple(model?.dimensions) ?? [0, 0, 0],
+      animationClips: checked.info.animationClips,
+      sizeBytes: checked.info.sizeBytes,
+      jobId: NodePath.basename(jobDir),
+      ...(continuedFrom === undefined ? {} : { continuedFrom }),
+    }),
+  };
+};
+
+export const resolveContinueBlend = (
+  jobsRoot: string,
+  continueFrom: string,
+): { readonly path: string } | { readonly error: string } => {
+  try {
+    const root = NodeFS.realpathSync(jobsRoot);
+    const folder = NodeFS.realpathSync(NodePath.resolve(jobsRoot, continueFrom));
+    const relative = NodePath.relative(root, folder);
+    if (relative === "" || relative.startsWith("..") || NodePath.isAbsolute(relative)) {
+      return { error: "continueFrom must be the jobDir of an earlier blender job." };
+    }
+    const blend = NodePath.join(folder, "scene.blend");
+    if (!NodeFS.existsSync(blend)) {
+      return { error: `${continueFrom} has no scene.blend; that job did not save its scene.` };
+    }
+    return { path: blend };
+  } catch {
+    return { error: `continueFrom ${continueFrom} was not found; it may have been pruned.` };
+  }
+};
+
 export const runBlenderJob = (input: {
   readonly executable: string;
   readonly jobsRoot: string;
@@ -227,8 +239,16 @@ export const runBlenderJob = (input: {
   readonly openBlend?: string | undefined;
 }) =>
   Effect.tryPromise({
-    try: async (): Promise<BlenderJobResult> => {
-      const id = `job-${new Date().toISOString().replace(/[:.]/gu, "-")}-${Math.random().toString(36).slice(2, 7)}`;
+    try: async (signal): Promise<BlenderJobResult> => {
+      const tooLarge = agentScriptSizeError(input.script);
+      if (tooLarge !== undefined) throw new Error(tooLarge);
+      if (input.openBlend !== undefined && !NodeFS.existsSync(input.openBlend)) {
+        throw new Error(`continue_from_missing: ${input.openBlend} does not exist.`);
+      }
+      pruneJobFolders(input.jobsRoot, Date.now(), {
+        protect: input.openBlend ? [NodePath.dirname(input.openBlend)] : [],
+      });
+      const id = `${JOB_FOLDER_PREFIX}${new Date().toISOString().replace(/[:.]/gu, "-")}-${Math.random().toString(36).slice(2, 7)}`;
       const jobDir = NodePath.join(input.jobsRoot, id);
       NodeFS.mkdirSync(jobDir, { recursive: true });
       const agentPath = NodePath.join(jobDir, "agent.py");
@@ -238,7 +258,7 @@ export const runBlenderJob = (input: {
       const args = [
         ...(input.openBlend ? [input.openBlend] : []),
         "-b",
-        ...(input.openBlend ? [] : ["--factory-startup"]),
+        "--factory-startup",
         "--python",
         scriptPath,
       ];
@@ -248,8 +268,9 @@ export const runBlenderJob = (input: {
         const child = NodeChildProcess.spawn(input.executable, args, {
           cwd: jobDir,
           windowsHide: true,
+          detached: NodeOS.platform() !== "win32",
           env: {
-            ...process.env,
+            ...blenderEnvironment(process.env),
             SEALCODE_JOB_DIR: jobDir,
             SEALCODE_PREVIEW: input.preview ? "1" : "0",
             SEALCODE_EXPORT: input.exportObj ? "1" : "0",
@@ -265,19 +286,31 @@ export const runBlenderJob = (input: {
         child.stdout.on("data", collect);
         child.stderr.on("data", collect);
         let timedOut = false;
+        let finished = false;
+        const finish = (code: number | null) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          signal.removeEventListener("abort", onAbort);
+          resolve({ code, timedOut });
+        };
+        // Grandchildren holding the pipes open would keep "close" from ever firing.
+        const stop = () => {
+          killProcessTree(child);
+          setTimeout(() => finish(null), 5000).unref();
+        };
         const timer = setTimeout(() => {
           timedOut = true;
-          child.kill();
+          stop();
         }, input.timeoutMs);
+        const onAbort = () => stop();
+        signal.addEventListener("abort", onAbort);
+        if (signal.aborted) stop();
         child.on("error", (error) => {
           output.push(String(error));
-          clearTimeout(timer);
-          resolve({ code: null, timedOut });
+          finish(null);
         });
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          resolve({ code, timedOut });
-        });
+        child.on("close", (code) => finish(code));
       });
       let status: Record<string, unknown> = {};
       try {
@@ -303,10 +336,14 @@ export const runBlenderJob = (input: {
         output: text.length > 12_000 ? `…${text.slice(-12_000)}` : text,
         report: status,
         files: NodeFS.readdirSync(jobDir).filter(
-          (name) => name !== "job.py" && name !== "sealcode-status.json",
+          (name) =>
+            name !== "job.py" &&
+            name !== "sealcode-status.json" &&
+            name !== MODEL_PREVIEW_INDEX_FILE,
         ),
         previewPng: NodeFS.existsSync(previewPath) ? NodeFS.readFileSync(previewPath) : undefined,
         objPath: NodeFS.existsSync(objPath) ? objPath : undefined,
+        ...readModelPreview(jobDir, status, input.openBlend),
       };
     },
     catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),

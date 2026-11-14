@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useRef,
   useState,
   type ReactNode,
@@ -14,6 +16,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
+import { ExpandedModelControls } from "./ExpandedModelControls";
 import { ExpandedImageFilmstrip, expandedImageFilmstripHeightPx } from "./ExpandedImageFilmstrip";
 import { OpenMediaLink } from "../media/OpenMediaLink";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
@@ -36,6 +39,14 @@ import { expandedImageKey } from "./ExpandedImagePreview";
 import { registerThreadOverlay } from "./threadOverlayRetention";
 import { mediaReferenceFileName } from "@t3tools/client-runtime/media-reference";
 import { mediaMimeType, mediaMimeTypeFromExtension } from "@t3tools/shared/mediaPreview";
+
+const ModelViewer = lazy(() => import("./modelViewer/ModelViewer"));
+
+interface ModelViewState {
+  readonly still?: boolean | undefined;
+  readonly version?: number;
+  readonly reason?: string | undefined;
+}
 
 interface ExpandedImageDialogProps {
   preview: ExpandedImagePreview;
@@ -120,6 +131,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   const [imageOffset, setImageOffset] = useState(0);
   const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
   const [accessibilityDetailsSrc, setAccessibilityDetailsSrc] = useState<string | null>(null);
+  const [modelViews, setModelViews] = useState<Readonly<Record<number, ModelViewState>>>({});
   const zoomableImageRef = useRef<ZoomableImageHandle>(null);
   const swipeStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [returnFocus] = useState(() => {
@@ -138,7 +150,26 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   const imageCount = preview.images.length;
   const index =
     imageCount > 0 ? (((preview.index + imageOffset) % imageCount) + imageCount) % imageCount : 0;
-  const item = preview.images[index];
+  const baseItem = preview.images[index];
+  const modelView = modelViews[index];
+  const modelVersions = baseItem?.model?.versions;
+  const versionIndex =
+    modelVersions === undefined
+      ? 0
+      : Math.min(modelView?.version ?? modelVersions.length - 1, modelVersions.length - 1);
+  const modelVersion = modelVersions?.[versionIndex];
+  const item =
+    baseItem?.model !== undefined && modelVersion !== undefined && baseItem.actionsSource
+      ? {
+          ...baseItem,
+          actionsSource: {
+            ...baseItem.actionsSource,
+            asset: { environmentId: baseItem.model.environmentId, resource: modelVersion.resource },
+          },
+        }
+      : baseItem;
+  const updateModelView = (patch: ModelViewState) =>
+    setModelViews((current) => ({ ...current, [index]: { ...current[index], ...patch } }));
   const source: MediaActionSource = item?.actionsSource ?? {
     kind: item?.type === "video" ? "video" : "image",
     name: item?.name ?? "Media",
@@ -188,7 +219,15 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.defaultPrevented || isContextMenuOpen() || event.target instanceof HTMLVideoElement)
+    if (
+      event.defaultPrevented ||
+      isContextMenuOpen() ||
+      event.target instanceof HTMLVideoElement ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement
+    )
+      return;
+    if (event.target instanceof Element && event.target.closest("[data-model-viewer]") !== null)
       return;
     if (zoomableImageRef.current?.pan(event.key)) {
       event.preventDefault();
@@ -218,8 +257,10 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
     const inFilmstrip =
       event.target instanceof Element &&
       event.target.closest("[data-expanded-image-filmstrip]") !== null;
+    const inModelViewer =
+      event.target instanceof Element && event.target.closest("[data-model-viewer]") !== null;
     swipeStartRef.current =
-      event.pointerType === "mouse" || imageCount <= 1 || inFilmstrip
+      event.pointerType === "mouse" || imageCount <= 1 || inFilmstrip || inModelViewer
         ? null
         : { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
   };
@@ -237,6 +278,11 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
 
   if (!item) return null;
   const showFilmstrip = preview.filmstrip === true && imageCount > 1;
+  const activeModel =
+    item.model !== undefined && modelVersion !== undefined && modelView?.still !== true
+      ? { environmentId: item.model.environmentId, preview: modelVersion.preview }
+      : null;
+  const showingModel = activeModel !== null;
   const mediaLabel = item.type === "video" ? "video" : "image";
   const openOriginalLink =
     item.originalUrl && resolveExternalWebLinkHost(item.originalUrl) !== null ? (
@@ -313,7 +359,24 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         )}
         <MediaActions source={actionsSource} showTooltip={false}>
           <div className="relative isolate z-10 flex max-h-full max-w-[var(--media-width)] flex-col items-center">
-            {item.type === "video" ? (
+            {activeModel !== null ? (
+              <div className="h-[min(var(--media-height),44rem)] w-[min(var(--media-width),60rem)]">
+                <Suspense
+                  fallback={
+                    <div className={EXPANDED_MEDIA_STATE_CLASS_NAME}>
+                      <Spinner size="lg" />
+                    </div>
+                  }
+                >
+                  <ModelViewer
+                    key={activeModel.preview.previewId}
+                    environmentId={activeModel.environmentId}
+                    preview={activeModel.preview}
+                    onUnavailable={(reason) => updateModelView({ still: true, reason })}
+                  />
+                </Suspense>
+              </div>
+            ) : item.type === "video" ? (
               <ExpandedVideo key={index} item={item} />
             ) : showingAccessibilityDetails ? (
               accessibilityDetails ? (
@@ -346,6 +409,22 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                 onError={() => setFailedImageSrc(imageSrc)}
               />
             )}
+            {item.model !== undefined && modelVersions !== undefined ? (
+              <ExpandedModelControls
+                showStill={!showingModel}
+                versionIndex={versionIndex}
+                versionCount={modelVersions.length}
+                reason={modelView?.reason}
+                onShowStill={(still) => updateModelView({ still, reason: undefined })}
+                onVersionChange={(version) =>
+                  updateModelView({
+                    version,
+                    still: modelView?.reason === undefined ? modelView?.still : false,
+                    reason: undefined,
+                  })
+                }
+              />
+            ) : null}
             <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-1.5 text-xs text-white/80 max-sm:px-10">
               <span className="truncate" aria-live="polite" aria-atomic="true">
                 {item.name}

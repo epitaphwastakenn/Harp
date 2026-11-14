@@ -132,6 +132,8 @@ import * as ProjectDiffIndex from "./orchestration-v2/ProjectDiffIndex.ts";
 import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
 import * as RojoWorkspaces from "./roblox/RojoWorkspaces.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
+import { StudioEvidence } from "./studioBridge/studioEvidence.ts";
+import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as VoiceTranscription from "./voiceTranscription.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as ProjectIconResolver from "./project/ProjectIconResolver.ts";
@@ -876,6 +878,8 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(RobloxStudioStatus.RobloxStudioStatusService)({}),
   RojoWorkspaces.layerNone,
   Layer.mock(StudioBridge.StudioBridge)({}),
+  Layer.mock(StudioEvidence)({}),
+  Layer.mock(StudioTools.StudioTools)({ list: [] }),
   Layer.mock(VoiceTranscription.VoiceTranscription)({}),
 );
 

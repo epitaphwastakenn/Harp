@@ -371,6 +371,7 @@ export function buildMessageContext(input: {
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
   replyTo?: ResponseContextRecord | null;
+  studioSelection?: ComposerContextRecord | undefined;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
 }): OrchestrationMessageContext | undefined {
   const screenshotAttachmentIds = new Set(
@@ -384,6 +385,7 @@ export function buildMessageContext(input: {
     ...(input.threadContexts ?? []),
     ...(input.environmentContexts ?? []),
     ...(input.replyTo ? [input.replyTo] : []),
+    ...(input.studioSelection === undefined ? [] : [input.studioSelection]),
     ...input.previewAnnotations.map((annotation) =>
       previewAnnotationContextRecord(annotation, {
         screenshotContextId: screenshotAttachmentIds.has(annotation.id) ? annotation.id : undefined,

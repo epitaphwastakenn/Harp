@@ -5114,6 +5114,7 @@ describe("turn screenshot gallery", () => {
       itemId: TurnItemId.make(id),
       index,
     })),
+    models: [],
   });
   const derive = (
     timelineEntries: ReadonlyArray<TimelineEntry>,

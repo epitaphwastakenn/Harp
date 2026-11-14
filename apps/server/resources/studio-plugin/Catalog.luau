@@ -30,6 +30,7 @@ return {
 			{ "set_properties", "Set properties" },
 			{ "delete_instances", "Delete instances" },
 			{ "build_instances", "Atomic builds" },
+			{ "undo_turn_changes", "Undo the last turn's changes" },
 		},
 	},
 	{
@@ -40,6 +41,7 @@ return {
 			{ "set_script_source", "Write scripts" },
 			{ "edit_script", "Edit scripts" },
 			{ "grep_scripts", "Search scripts" },
+			{ "find_and_replace_in_scripts", "Replace across scripts" },
 		},
 	},
 	{
@@ -99,10 +101,18 @@ return {
 		},
 	},
 	{
+		id = "images",
+		title = "Images",
+		tools = {
+			{ "generate_image", "Generate images with your image service" },
+			{ "stage_texture_preview", "Preview a PNG in Studio before upload" },
+		},
+	},
+	{
 		id = "animation",
 		title = "Animation",
 		tools = {
-			{ "animation", "Inspect, play and create animations" },
+			{ "animation", "Inspect, play, create and review animations" },
 		},
 	},
 	{

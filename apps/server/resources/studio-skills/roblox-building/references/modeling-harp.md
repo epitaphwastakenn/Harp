@@ -156,3 +156,38 @@ Renders are the check; numbers only point at what to look at (guideline).
 The kit check against the reference, each builder looking at its own render, the High design pass,
 the lineup read after every wave, and triangles spent on the face and the prop (guideline: the
 source workflow reported these as the steps that mattered most).
+
+## 8. Harp's Blender helpers and export checks
+
+Every `blender` job script already has these defined (no import). Colour is `(r, g, b)` in 0 to 1,
+or a `'#rrggbb'` sRGB hex string.
+
+| Helper                                                 | Does                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `harp_part(kind, a, b, radius, name, color, segments)` | Box, cylinder or cone between points `a` and `b`; `radius` may be `(rx, ry)`          |
+| `harp_box(name, center, size, color)`                  | Flat-shaded box, scale already baked                                                  |
+| `harp_cylinder(name, center, radius, depth, color)`    | Flat-shaded cylinder along Z                                                          |
+| `harp_sphere(name, center, radius, color, segments)`   | Low-poly flat-shaded sphere                                                           |
+| `harp_vertex_colors(obj, color_or_fn, name="Col")`     | Colour attribute; `fn(local_co)` returns a colour per vertex. Reaches GLB and preview |
+| `harp_join(objs, name)`                                | Joins mesh objects into one and returns it                                            |
+| `harp_apply_scale(objs=None)`                          | Applies scale (all meshes when `None`)                                                |
+| `harp_shade_flat(obj)`, `harp_material(name, color)`   | Flat shading; a named Principled material                                             |
+
+Primitives share one material per colour, so a coloured model imports as one MeshPart per colour.
+Vertex colours are not read by `import_mesh` (it uses material colours); they live in the GLB.
+
+After the script, `result.lint` reports facts. Fix what is real, ignore what is intended:
+
+- `nonFiniteVertices`: objects with NaN or infinite coordinates (GLB export refuses them).
+- `floatingParts` and `separateGroups`: parts that touch nothing, or sets of parts not touching the rest.
+- `interpenetrating`: surfaces that cross and share over 35% of the smaller part's box. Joints that
+  overlap a little are not listed.
+- `hiddenObjects`: hidden meshes, and whether the export carried them.
+- `sidesNotMirrored`: L/R, Left/Right or `.L`/`.R` pairs whose dimensions or triangle counts differ.
+- `colorCarrier`: where colour lives (vertex colours, material colour, image texture, none) and what
+  survives `import_mesh` and the GLB.
+- `objects`: named scene objects, for `continueFrom` jobs.
+
+The result's `modelPreview` (triangles, size, animation clip count) means a valid `model.glb` was
+exported and the user can orbit it in the chat. Actions made in the job stay in the GLB. If
+`modelPreviewError` is set, the GLB failed validation or export; read the reason and fix it.

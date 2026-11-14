@@ -28,6 +28,7 @@ import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
+import { layerModelPreviewRoute } from "./studioBridge/modelPreviewRoute.ts";
 import {
   guardHttpResponseWriteErrors,
   keepIdleConnections,
@@ -81,6 +82,7 @@ import * as RobloxStudioStatus from "./roblox/RobloxStudioStatus.ts";
 import * as StudioBridge from "./studioBridge/StudioBridge.ts";
 import * as StudioBridgeServer from "./studioBridge/StudioBridgeServer.ts";
 import * as StudioPluginInstaller from "./studioBridge/StudioPluginInstaller.ts";
+import * as StudioEvidenceSync from "./studioBridge/studioEvidenceSync.ts";
 import * as StudioPrompt from "./studioBridge/StudioPrompt.ts";
 import * as StudioTools from "./studioBridge/StudioTools.ts";
 import * as RobloxToolVisibility from "./roblox/RobloxToolVisibility.ts";
@@ -507,6 +509,10 @@ const layerIdleCompactionWorker = Layer.effectDiscard(
   IdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(ProjectionStoreV2.layer));
 
+const layerStudioEvidenceWorker = Layer.effectDiscard(
+  StudioEvidenceSync.make.pipe(Effect.flatMap((service) => service.start())),
+);
+
 const layerPromptSuggestionWorker = Layer.effectDiscard(
   PromptSuggestionService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(ProjectionStoreV2.layer));
@@ -577,6 +583,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   VoiceTranscription.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
+  layerStudioEvidenceWorker,
   layerPromptSuggestionWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   DatabaseStorage.layer.pipe(
@@ -734,6 +741,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
+    layerModelPreviewRoute,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,

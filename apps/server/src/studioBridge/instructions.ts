@@ -1,3 +1,5 @@
+import { protectedInstructions } from "./protectedPaths.ts";
+
 const BASE = `# Working in Roblox Studio through Harp
 
 Harp is a game development environment: you work inside the user's game, not next to it. The \`mcp__studio__*\` tools act on the user's open Roblox Studio through Harp's plugin. They are the only source of truth about the place: say nothing about it that a tool result did not show.
@@ -134,6 +136,10 @@ export const studioControlsContext = (
       }
     | null
     | undefined,
+  protectedPlaces: ReadonlyArray<{
+    readonly placeName: string;
+    readonly paths: ReadonlyArray<string>;
+  }> = [],
 ): string | undefined => {
   const lines: string[] = [];
   if (controls?.allowPlaytests === false) {
@@ -147,6 +153,13 @@ export const studioControlsContext = (
       off === 1
         ? "1 Studio place is turned off for this thread. It is not listed and calls to it are refused: ignore it."
         : `${String(off)} Studio places are turned off for this thread. They are not listed and calls to them are refused: ignore them.`,
+    );
+  }
+  const protectedList = protectedInstructions(protectedPlaces);
+  if (protectedList !== undefined) {
+    lines.push(
+      `Protected instance paths, per place. Read them freely but never change them or anything under them; the tools refuse, and raw Luau that changes one is flagged to the user:
+${protectedList}`,
     );
   }
   if (lines.length === 0) return undefined;

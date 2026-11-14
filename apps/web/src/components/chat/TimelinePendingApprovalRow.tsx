@@ -7,6 +7,7 @@ import { memo, use } from "react";
 import { type PendingApproval } from "../../session-logic";
 import { InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { ApprovalStudioCode } from "./ApprovalStudioCode";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ToolActivityIconView, type WorkEntryIconName } from "./TimelineToolActivityIcon";
 import { TimelineRowCtx } from "./timelineRowContext";
@@ -67,6 +68,7 @@ export const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalR
         {approval.appName ? (
           <span className="text-muted-foreground wrap-anywhere">{approval.appName}</span>
         ) : null}
+        {approval.studioCode ? <ApprovalStudioCode code={approval.studioCode} /> : null}
         {approval.reason ? (
           <span className="text-muted-foreground select-text wrap-anywhere">{approval.reason}</span>
         ) : null}

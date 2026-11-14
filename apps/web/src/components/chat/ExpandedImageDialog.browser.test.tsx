@@ -182,7 +182,11 @@ describe("ExpandedImageDialog", () => {
   it("prefetches each neighbour once, even when the other shot is both previous and next", async () => {
     await using _screen = await render(
       <ExpandedImageDialog
-        preview={buildTurnImagesPreview(environmentId, shots.slice(0, 2), 0)}
+        preview={buildTurnImagesPreview(
+          environmentId,
+          shots.slice(0, 2).map((resource) => ({ resource })),
+          0,
+        )}
         onClose={vi.fn()}
       />,
       { router: false },
@@ -196,7 +200,11 @@ describe("ExpandedImageDialog", () => {
   it("shows asset-only shots and flips through them by filmstrip, keys and swipe", async () => {
     await using _screen = await render(
       <ExpandedImageDialog
-        preview={buildTurnImagesPreview(environmentId, shots, 0)}
+        preview={buildTurnImagesPreview(
+          environmentId,
+          shots.map((resource) => ({ resource })),
+          0,
+        )}
         onClose={vi.fn()}
       />,
       { router: false },

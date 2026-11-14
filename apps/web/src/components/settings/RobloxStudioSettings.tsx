@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { MAX_IMAGE_GENERATIONS_PER_TURN } from "@t3tools/contracts";
 import type {
+  ImageGenerationProvider,
   RobloxStudioMode,
   RobloxStudioScope,
   RobloxStudioSettings as RobloxStudioSettingsValue,
@@ -15,6 +17,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { ProtectedPathsSection } from "./ProtectedPathsSection";
 import { McpReconnectButton, McpStatusBadge } from "./McpStatus";
 import {
   SettingsCallout,
@@ -36,6 +39,24 @@ const scopes: ReadonlyArray<{ value: RobloxStudioScope; label: string }> = [
   { value: "roblox-projects", label: "Roblox projects" },
   { value: "all-projects", label: "All projects" },
 ];
+
+const imageProviders: ReadonlyArray<{ value: ImageGenerationProvider; label: string }> = [
+  { value: "openai", label: "OpenAI" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "custom", label: "Custom OpenAI-compatible" },
+];
+
+const imageBaseUrlPlaceholders: Record<ImageGenerationProvider, string> = {
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  custom: "http://localhost:8080/v1",
+};
+
+const imageModelPlaceholders: Record<ImageGenerationProvider, string> = {
+  openai: "gpt-image-1",
+  openrouter: "google/gemini-2.5-flash-image",
+  custom: "Model name",
+};
 
 const redacted = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
@@ -324,6 +345,142 @@ function RobloxStudioSettings() {
                 </Button>
               }
             />
+          ) : null}
+        </SettingsSection>
+      ) : null}
+
+      {roblox.mode === "sealcode" ? (
+        <ProtectedPathsSection
+          saved={roblox.protectedPlaces}
+          places={status?.bridge?.places ?? []}
+          onChange={(protectedPlaces) => update({ protectedPlaces })}
+        />
+      ) : null}
+
+      {roblox.mode === "sealcode" ? (
+        <SettingsSection
+          id="roblox-studio-images"
+          title="Image generation"
+          description="Let agents make textures, icons and particle sprites with an image service you choose, then check them in Studio. Off by default; the service may charge you."
+        >
+          <SettingsRow
+            title="Enable image generation"
+            description="Gives agents a generate_image tool once a service and key are set. Harp sends only the prompt to that service."
+            control={
+              <Switch
+                checked={roblox.imageGeneration}
+                onCheckedChange={(imageGeneration) => update({ imageGeneration })}
+                aria-label="Enable image generation"
+              />
+            }
+          />
+          {roblox.imageGeneration ? (
+            <>
+              <SettingsRow
+                title="Service"
+                description="OpenAI, OpenRouter, or any server with an OpenAI-compatible images API, such as a local LocalAI or ComfyUI wrapper."
+                control={
+                  <Select
+                    value={roblox.imageProvider}
+                    onValueChange={(value) => {
+                      if (typeof value === "string") {
+                        update({ imageProvider: value as ImageGenerationProvider });
+                      }
+                    }}
+                  >
+                    <SelectTrigger aria-label="Image service" className="sm:w-60">
+                      <SelectValue>
+                        {
+                          imageProviders.find((entry) => entry.value === roblox.imageProvider)
+                            ?.label
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {imageProviders.map((entry) => (
+                        <SelectItem key={entry.value} value={entry.value} hideIndicator>
+                          {entry.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                title="Base URL"
+                description="Leave empty for the service's own address."
+                control={
+                  <TextSetting
+                    value={roblox.imageBaseUrl}
+                    placeholder={imageBaseUrlPlaceholders[roblox.imageProvider]}
+                    label="Image service base URL"
+                    onCommit={(imageBaseUrl) => update({ imageBaseUrl })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Model"
+                description="Leave empty for the preset's default."
+                control={
+                  <TextSetting
+                    value={roblox.imageModel}
+                    placeholder={imageModelPlaceholders[roblox.imageProvider]}
+                    label="Image model"
+                    onCommit={(imageModel) => update({ imageModel })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="API key"
+                description={
+                  roblox.imageProvider === "custom"
+                    ? "Optional for a local server. Stored on this computer's Harp server and never sent back to the app."
+                    : "Stored on this computer's Harp server and never sent back to the app."
+                }
+                control={
+                  <TextSetting
+                    value={roblox.imageApiKey}
+                    placeholder="Key"
+                    label="Image service API key"
+                    secret
+                    onCommit={(imageApiKey) => update({ imageApiKey })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Images per turn"
+                description="Agents cannot generate more than this in one turn (1 to 20)."
+                control={
+                  <TextSetting
+                    value={String(roblox.imageMaxPerTurn)}
+                    placeholder="6"
+                    label="Images per turn"
+                    onCommit={(text) => {
+                      const cap = Math.floor(Number(text));
+                      if (Number.isFinite(cap)) {
+                        update({
+                          imageMaxPerTurn: Math.min(
+                            Math.max(cap, 1),
+                            MAX_IMAGE_GENERATIONS_PER_TURN,
+                          ),
+                        });
+                      }
+                    }}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Ask before each image"
+                description="Marks the tool as needing your approval every time, for agents that ask before risky tools."
+                control={
+                  <Switch
+                    checked={roblox.imageRequireApproval}
+                    onCheckedChange={(imageRequireApproval) => update({ imageRequireApproval })}
+                    aria-label="Ask before each image"
+                  />
+                }
+              />
+            </>
           ) : null}
         </SettingsSection>
       ) : null}

@@ -1,3 +1,5 @@
+import { sentStudioSelectionLabel } from "@t3tools/shared/studioSelection";
+import { ContextChip, ContextChipLabel } from "../ContextChip";
 import { InlineAudioPreview } from "../files/InlineAudioPreview";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
 import {
@@ -25,6 +27,7 @@ import {
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import {
+  BoxSelectIcon,
   CalendarClockIcon,
   DownloadIcon,
   EyeIcon,
@@ -319,6 +322,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       : null,
   );
   const resolvedContext = resolveUserMessageContext(row.message);
+  const studioSelectionLabel = sentStudioSelectionLabel(resolvedContext.records);
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const revertTurnCount = row.revertTurnCount;
   const chippedAttachmentIds = new Set(
@@ -615,6 +619,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 collapsible={!folded}
               />
             </div>
+            {studioSelectionLabel === undefined ? null : (
+              <div className="mt-2 flex" data-user-message-studio-selection>
+                <ContextChip kind="environment">
+                  <BoxSelectIcon aria-hidden />
+                  <ContextChipLabel>{studioSelectionLabel}</ContextChipLabel>
+                </ContextChip>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
