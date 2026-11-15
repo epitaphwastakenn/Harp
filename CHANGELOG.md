@@ -10,6 +10,15 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.20.2 · 2026-11-15
+
+> Antigravity works again, and Blender viewport screenshots show up in the chat.
+
+### Fixed
+
+- **Antigravity** — Turns no longer stop with "INVALID_ARGUMENT … enum cannot be empty" before the agent starts.
+- **Blender viewport app** — The viewport screenshot from the Blender MCP app shows in the chat instead of a broken image, and isn't shown twice.
+
 ## 2.20.1 · 2026-11-15
 
 > Open any GLB model in the 3D viewer, from the Files panel or by asking the agent.
