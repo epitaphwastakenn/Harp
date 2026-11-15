@@ -4,11 +4,13 @@ import {
   McpAppHostRefusal,
   mcpAppStyleVariables,
   mcpResourceBytes,
+  withToolResultImageData,
   type McpAppCallToolResult,
   type McpAppDisplayMode,
   type McpAppHost,
   type McpAppHostContext,
 } from "@t3tools/client-runtime/mcp-apps";
+import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   clampMcpAppHeight,
@@ -31,10 +33,13 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
+import { assetEnvironment } from "~/state/assets";
 import { useEnvironmentQuery } from "~/state/query";
 import { useTurnItemDetail } from "~/state/queries";
 import { mcpAppEnvironment } from "~/state/mcpApps";
+import { readPreparedConnection } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { observeResize } from "~/lib/observeResize";
 
 const commandFailure = (result: {
@@ -51,6 +56,7 @@ const fullscreenSupported =
   typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
 
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const imageFetchTimeoutMs = 60_000;
 // Exclude activation left by input elsewhere in T3.
 const PAGE_ACTIVATION_MS = 5_000;
 
@@ -162,6 +168,21 @@ export function McpAppFrame(props: {
   const readResource = useAtomCommand(mcpAppEnvironment.readResource, { reportFailure: false });
   const updateModelContext = useAtomCommand(mcpAppEnvironment.updateModelContext, {
     reportFailure: false,
+  });
+  const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, { reportFailure: false });
+  const loadResultImage = useStableCallback(async (index: number) => {
+    const { environmentId, threadId, itemId } = props;
+    const connection = readPreparedConnection(environmentId);
+    if (connection === null) return null;
+    const resource = { _tag: "tool-output-image" as const, threadId, itemId, index };
+    const minted = await createAssetUrl({ environmentId, input: { resource } });
+    const url =
+      minted._tag === "Success"
+        ? resolveAssetUrl(connection.httpBaseUrl, minted.value.relativeUrl)
+        : null;
+    if (url === null) return null;
+    const response = await fetch(url, { signal: AbortSignal.timeout(imageFetchTimeoutMs) });
+    return response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
   });
 
   // Read live values without rebuilding the host and losing the app session.
@@ -409,9 +430,20 @@ export function McpAppFrame(props: {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends the current tool call to the MCP app host, again for each new iframe document
   useEffect(() => {
-    if (toolCall !== undefined) hostRef.current?.setToolCall(toolCall);
+    if (toolCall === undefined) return;
+    if (toolCall.result === undefined) {
+      hostRef.current?.setToolCall(toolCall);
+      return;
+    }
+    let current = true;
+    void withToolResultImageData(toolCall.result, loadResultImage).then((result) => {
+      if (current) hostRef.current?.setToolCall({ ...toolCall, result });
+    });
+    return () => {
+      current = false;
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Each new document needs the call.
-  }, [toolCall, src, documentGeneration]);
+  }, [toolCall, src, documentGeneration, loadResultImage]);
 
   if (closed) {
     return (

@@ -1,5 +1,6 @@
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import {
+  mapToolOutputBlocks,
   MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH,
   readToolOutputImage,
   toolOutputImageBlocks,
@@ -41,12 +42,7 @@ export function replaceToolOutputImageBlocks(
   replacements: ReadonlyMap<unknown, unknown>,
 ): unknown {
   if (replacements.size === 0) return output;
-  const replace = (block: unknown) => replacements.get(block) ?? block;
-  if (Array.isArray(output)) return output.map(replace);
-  if (Predicate.isObject(output) && Array.isArray(output.content)) {
-    return { ...output, content: output.content.map(replace) };
-  }
-  return replace(output);
+  return mapToolOutputBlocks(output, (block) => replacements.get(block) ?? block);
 }
 
 export interface ToolOutputImageStoreShape {

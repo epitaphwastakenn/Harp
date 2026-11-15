@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { makeMcpAppHost, McpAppHostRefusal, type McpAppHostContext } from "./host.ts";
+import { toolOutputImages } from "@t3tools/shared/toolOutput";
+
+import {
+  makeMcpAppHost,
+  McpAppHostRefusal,
+  withToolResultImageData,
+  type McpAppHostContext,
+} from "./host.ts";
 
 const app = {
   attachmentId: "thread-1-app",
@@ -387,5 +394,37 @@ describe("makeMcpAppHost", () => {
     expect(sent.find((m) => m.id === 2)?.result).toEqual({});
     expect(sent.find((m) => m.id === 3)?.result).toEqual({ isError: true });
     expect(sent.find((m) => m.id === 4)?.error).toMatchObject({ code: -32602 });
+  });
+});
+
+describe("withToolResultImageData", () => {
+  const text = { type: "text", text: "Viewport" };
+  const inline = { type: "image", mimeType: "image/png", data: "AAAA" };
+  const stored = { type: "image", mimeType: "image/png", t3ImageFile: `${"a".repeat(64)}.png` };
+  const marker = { type: "image", mimeType: "image/jpeg" };
+
+  it("fills each image without data from its asset index, keeping the rest", async () => {
+    const result = { content: [text, inline, stored, marker], structuredContent: { frame: 3 } };
+    const asked: number[] = [];
+    const filled = await withToolResultImageData(result, async (index) => {
+      asked.push(index);
+      return index === 1 ? new Uint8Array([1, 2, 3]) : null;
+    });
+
+    expect(asked).toEqual([1, 2]);
+    expect(toolOutputImages({ t3McpApp: {}, result })).toHaveLength(3);
+    expect(filled).toEqual({
+      content: [text, inline, { type: "image", mimeType: "image/png", data: "AQID" }, marker],
+      structuredContent: { frame: 3 },
+    });
+  });
+
+  it("leaves a result alone when its images are inline or cannot load", async () => {
+    const result = { content: [text, inline] };
+    expect(await withToolResultImageData(result, async () => new Uint8Array([1]))).toBe(result);
+    const failing = { content: [stored] };
+    expect(
+      await withToolResultImageData(failing, () => Promise.reject(new Error("offline"))),
+    ).toEqual(failing);
   });
 });

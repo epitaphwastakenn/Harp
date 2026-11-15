@@ -247,6 +247,7 @@ describe("orchestration V2 wire projection", () => {
     expect(projectTurnItemForDetail(appItem)).toMatchObject({
       output: { t3McpApp, result: { content: [text, { type: "image", mimeType: "image/png" }] } },
     });
+    expect(projectTurnItemForWire(appItem)).not.toHaveProperty("outputImageCount");
     const largeOutput = projectTurnItemForDetail(appItem);
     expect(
       JSON.stringify(largeOutput.type === "dynamic_tool" ? largeOutput.output : null),

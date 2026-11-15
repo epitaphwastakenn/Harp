@@ -1,5 +1,6 @@
 // @effect-diagnostics globalTimers:off - The bridge runs in the client, outside an Effect runtime.
 import { MCP_APP_PROTOCOL_VERSION, type McpAppReference } from "@t3tools/shared/mcpApp";
+import { readToolOutputImage, toolOutputImageBlocks } from "@t3tools/shared/toolOutput";
 import * as Base64 from "effect/encoding/Base64";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -144,6 +145,33 @@ function normalizeMcpAppToolResult(result: McpAppCallToolResult): McpAppCallTool
     ...(result.isError === true ? { isError: true } : {}),
     ...(Predicate.isObject(result._meta) ? { _meta: result._meta } : {}),
   };
+}
+
+export async function withToolResultImageData(
+  result: McpAppCallToolResult,
+  load: (index: number) => Promise<Uint8Array | null>,
+): Promise<McpAppCallToolResult> {
+  if (!Array.isArray(result.content)) return result;
+  const missing = toolOutputImageBlocks(result).flatMap((block, index) => {
+    const image = readToolOutputImage(block);
+    return image === null || image.data !== undefined
+      ? []
+      : [{ block, index, mimeType: image.mimeType }];
+  });
+  if (missing.length === 0) return result;
+  const loaded = await Promise.all(
+    missing.map(({ block, index, mimeType }) =>
+      load(index).then(
+        (bytes) =>
+          bytes === null
+            ? []
+            : [[block, { type: "image", mimeType, data: Base64.encode(bytes) }] as const],
+        () => [],
+      ),
+    ),
+  );
+  const replacements = new Map<unknown, unknown>(loaded.flat());
+  return { ...result, content: result.content.map((block) => replacements.get(block) ?? block) };
 }
 
 const errorMessage = (error: unknown) =>

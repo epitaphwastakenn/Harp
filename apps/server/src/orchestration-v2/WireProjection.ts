@@ -202,7 +202,8 @@ export function projectTurnItemForWire(item: OrchestrationV2TurnItem): Orchestra
     case "dynamic_tool": {
       const { output: rawOutput, ...projected } = item;
       const output = compactDynamicToolOutput(rawOutput);
-      const imageCount = toolOutputImages(rawOutput).length;
+      const imageCount =
+        output?.[MCP_APP_OUTPUT_KEY] === undefined ? toolOutputImages(rawOutput).length : 0;
       return {
         ...projected,
         input: summarizeDynamicValue(item.input),

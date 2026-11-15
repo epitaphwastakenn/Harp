@@ -351,10 +351,27 @@ export function readToolOutputImage(block: unknown): ToolOutputImage | null {
   return typeof data === "string" ? { ...image, data } : image;
 }
 
+function mcpAppResult(value: Record<PropertyKey, unknown>) {
+  const result = MCP_APP_OUTPUT_KEY in value ? value.result : undefined;
+  return Predicate.isObject(result) && Array.isArray(result.content)
+    ? { result, content: result.content as ReadonlyArray<unknown> }
+    : undefined;
+}
+
 function outputBlocks(value: unknown): ReadonlyArray<unknown> {
   if (Array.isArray(value)) return value;
-  if (Predicate.isObject(value) && Array.isArray(value.content)) return value.content;
-  return [value];
+  if (!Predicate.isObject(value)) return [value];
+  if (Array.isArray(value.content)) return value.content;
+  return mcpAppResult(value)?.content ?? [value];
+}
+
+export function mapToolOutputBlocks(value: unknown, map: (block: unknown) => unknown): unknown {
+  if (Array.isArray(value)) return value.map(map);
+  if (!Predicate.isObject(value)) return map(value);
+  if (Array.isArray(value.content)) return { ...value, content: value.content.map(map) };
+  const app = mcpAppResult(value);
+  if (app === undefined) return map(value);
+  return { ...value, result: { ...app.result, content: app.content.map(map) } };
 }
 
 export const MAX_TOOL_OUTPUT_IMAGES = 8;
@@ -397,9 +414,5 @@ export function omitToolOutputImageData(value: unknown): unknown {
     const image = readToolOutputImage(block);
     return image?.data === undefined ? block : { type: "image", mimeType: image.mimeType };
   };
-  if (Array.isArray(value)) return value.map(omit);
-  if (Predicate.isObject(value) && Array.isArray(value.content)) {
-    return { ...value, content: value.content.map(omit) };
-  }
-  return omit(value);
+  return mapToolOutputBlocks(value, omit);
 }

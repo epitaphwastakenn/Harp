@@ -87,6 +87,35 @@ describe("ToolOutputImageStore", () => {
       // A tool item is updated many times; each image is still one file.
       yield* store.externalize(item);
       assert.lengthOf(yield* fileSystem.readDirectory(directory), 2);
+
+      const t3McpApp = {
+        attachmentId: "app",
+        server: "blender",
+        tool: "viewport",
+        resourceUri: "ui://blender/viewport",
+      };
+      const structuredContent = { width: 1600 };
+      const app = outputOf(
+        yield* store.externalize(
+          toolItem({
+            t3McpApp,
+            result: {
+              content: [
+                caption,
+                { type: "image", data: PNG.toString("base64"), mimeType: "image/png" },
+              ],
+              structuredContent,
+            },
+          }),
+        ),
+      );
+      assert.deepEqual(app, {
+        t3McpApp,
+        result: {
+          content: [caption, { type: "image", mimeType: "image/png", t3ImageFile: files[0] }],
+          structuredContent,
+        },
+      });
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 

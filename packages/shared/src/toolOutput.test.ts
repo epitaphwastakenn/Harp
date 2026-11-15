@@ -206,6 +206,9 @@ describe("toolOutputImages", () => {
     ]);
     expect(toolOutputImages([mcpImage])).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
     expect(toolOutputImages(mcpImage)).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
+    expect(toolOutputImages({ t3McpApp: {}, result: { content: [text, mcpImage] } })).toEqual([
+      { mimeType: "image/png", data: "AAAA" },
+    ]);
     const structuredContent = { screenshot: { mimeType: "image/png", width: 728, height: 354 } };
     const content = [text, mcpImage];
     const output = mcpToolResultOutput({ content, structuredContent });

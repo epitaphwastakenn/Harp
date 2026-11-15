@@ -119,6 +119,15 @@ describe("stripUnservedToolOutputImageBytes", () => {
       { mimeType: "image/png", data: PNG_BASE64 },
       { mimeType: "image/jpeg", data: PADDED_BASE64 },
     ]);
+
+    const t3McpApp = {
+      attachmentId: "app",
+      server: "blender",
+      tool: "viewport",
+      resourceUri: "ui://blender/viewport",
+    };
+    const appItem = toolItem({ t3McpApp, result: { content: [mcpImage] } }, "blender.viewport");
+    expect(stripUnservedToolOutputImageBytes(appItem)).toBe(appItem);
   });
 
   it("strips only the images past the last one an asset can serve", () => {
