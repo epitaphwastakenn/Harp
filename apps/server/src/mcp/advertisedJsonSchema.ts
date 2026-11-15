@@ -93,6 +93,10 @@ const compact = (schema: Json, optional: boolean): Json => {
     const only = branches.length === 1 ? branches[0] : mergeTaggedObjects(branches);
     result = Predicate.isObject(only) ? { ...only, ...rest } : { ...rest, anyOf: branches };
   }
+  if (Array.isArray(result.enum) && result.enum.some((value) => typeof value !== "string")) {
+    const { enum: _enum, ...rest } = result;
+    result = rest;
+  }
   return result;
 };
 
