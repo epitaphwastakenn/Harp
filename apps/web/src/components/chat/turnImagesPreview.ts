@@ -14,19 +14,28 @@ export function turnImageTileCounts(imageCount: number) {
 
 export function buildTurnImagesPreview(
   environmentId: EnvironmentId,
-  tiles: ReadonlyArray<TurnImageTile>,
+  tiles: ReadonlyArray<Pick<TurnImageTile, "resource" | "versions">>,
   index: number,
 ): ExpandedImagePreview {
   return {
     images: tiles.map(({ resource, versions }, position) => ({
       src: null,
-      name: versions === undefined ? "Screenshot" : "Blender model",
-      actionsSource: {
-        kind: "image",
-        name: `Screenshot ${position + 1}`,
-        src: null,
-        asset: { environmentId, resource },
-      },
+      name:
+        versions === undefined
+          ? "Screenshot"
+          : resource === undefined
+            ? "3D model"
+            : "Blender model",
+      ...(resource === undefined
+        ? {}
+        : {
+            actionsSource: {
+              kind: "image",
+              name: `Screenshot ${position + 1}`,
+              src: null,
+              asset: { environmentId, resource },
+            },
+          }),
       ...(versions === undefined ? {} : { model: { environmentId, versions } }),
     })),
     index,

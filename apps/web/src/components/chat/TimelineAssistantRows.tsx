@@ -13,12 +13,12 @@ import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Spinner } from "../ui/spinner";
 import { useAssetUrlState } from "../../assets/assetUrls";
-import { buildTurnImageTiles } from "./modelViewer/modelPreviewVersions";
 import {
-  buildTurnImagesPreview,
-  turnImageTileCounts,
-  type TurnImageResource,
-} from "./turnImagesPreview";
+  buildTurnImageTiles,
+  type TurnImageTile as ImageTile,
+} from "./modelViewer/modelPreviewVersions";
+import { ModelCardBody } from "./modelViewer/ModelCardBody";
+import { buildTurnImagesPreview, turnImageTileCounts } from "./turnImagesPreview";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure-chevron";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -419,6 +419,7 @@ export function ToolImagesTimelineRow({
   row: Extract<TimelineRow, { kind: "tool-images" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const tiles = buildTurnImageTiles(row.images, row.models);
   return (
     <div className="flex min-w-0 flex-wrap gap-2 px-1">
       {row.images.map((resource) => (
@@ -431,6 +432,21 @@ export function ToolImagesTimelineRow({
           onImageExpand={ctx.onImageExpand}
         />
       ))}
+      {tiles.map((tile) =>
+        tile.resource === undefined ? (
+          <TurnImageTile
+            key={tile.itemId}
+            environmentId={ctx.activeThreadEnvironmentId}
+            tile={tile}
+            label="Open 3D model"
+            single={false}
+            overflow={0}
+            onOpen={() =>
+              ctx.onImageExpand(buildTurnImagesPreview(ctx.activeThreadEnvironmentId, [tile], 0))
+            }
+          />
+        ) : null,
+      )}
     </div>
   );
 }
@@ -463,18 +479,17 @@ export function TurnImagesTimelineRow({
         onClick={() => setCollapsed(ctx.routeThreadKey, row.runId, !collapsed)}
       >
         <DisclosureChevron open={!collapsed} />
-        Screenshots
+        {tiles.every((tile) => tile.resource === undefined) ? "3D models" : "Screenshots"}
         <span className="text-2xs tabular-nums">{tiles.length}</span>
       </Button>
       {collapsed ? null : (
         <div className="mt-1.5 flex flex-wrap gap-2">
-          {tiles.slice(0, shown).map(({ resource, versions }, index) => (
+          {tiles.slice(0, shown).map((tile, index) => (
             <TurnImageTile
-              key={`${resource.itemId}:${String(resource.index)}`}
+              key={`${tile.itemId}:${String(tile.resource?.index ?? "model")}`}
               environmentId={ctx.activeThreadEnvironmentId}
-              resource={resource}
-              model={versions !== undefined}
-              label={`Open ${versions === undefined ? "screenshot" : "3D model"} ${index + 1} of ${tiles.length}`}
+              tile={tile}
+              label={`Open ${tile.versions === undefined ? "screenshot" : "3D model"} ${index + 1} of ${tiles.length}`}
               single={tiles.length === 1}
               overflow={index === shown - 1 ? hidden : 0}
               onOpen={() => openViewer(index)}
@@ -488,22 +503,22 @@ export function TurnImagesTimelineRow({
 
 function TurnImageTile({
   environmentId,
-  resource,
-  model,
+  tile,
   label,
   single,
   overflow,
   onOpen,
 }: {
   environmentId: EnvironmentId;
-  resource: TurnImageResource;
-  model: boolean;
+  tile: ImageTile;
   label: string;
   single: boolean;
   overflow: number;
   onOpen: () => void;
 }) {
-  const assetUrl = useAssetUrlState(environmentId, resource);
+  const { resource, versions } = tile;
+  const modelOnly = resource === undefined ? versions?.at(-1)?.preview : undefined;
+  const assetUrl = useAssetUrlState(environmentId, resource ?? null);
   const [failed, setFailed] = useState(false);
   const unavailable = assetUrl._tag === "Failure" || failed;
 
@@ -514,10 +529,12 @@ function TurnImageTile({
       onClick={onOpen}
       className={cn(
         "relative shrink-0 cursor-zoom-in overflow-hidden rounded-lg border border-border bg-muted transition-colors hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-        single ? "h-44 w-72" : "h-20 w-32",
+        modelOnly !== undefined ? "h-20 w-56 px-3" : single ? "h-44 w-72" : "h-20 w-32",
       )}
     >
-      {unavailable ? (
+      {modelOnly !== undefined ? (
+        <ModelCardBody preview={modelOnly} />
+      ) : unavailable ? (
         <span className="flex size-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           Image unavailable
         </span>
@@ -532,7 +549,7 @@ function TurnImageTile({
           onError={() => setFailed(true)}
         />
       ) : null}
-      {model ? (
+      {versions !== undefined && modelOnly === undefined ? (
         <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-2xs font-semibold leading-4 text-white">
           3D
         </span>

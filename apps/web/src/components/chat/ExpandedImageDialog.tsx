@@ -17,6 +17,7 @@ import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePre
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { ExpandedModelControls } from "./ExpandedModelControls";
+import { previewModelSource } from "./modelViewer/modelPreviewFetch";
 import { ExpandedImageFilmstrip, expandedImageFilmstripHeightPx } from "./ExpandedImageFilmstrip";
 import { OpenMediaLink } from "../media/OpenMediaLink";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
@@ -158,13 +159,14 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
       ? 0
       : Math.min(modelView?.version ?? modelVersions.length - 1, modelVersions.length - 1);
   const modelVersion = modelVersions?.[versionIndex];
+  const versionResource = modelVersion?.resource;
   const item =
-    baseItem?.model !== undefined && modelVersion !== undefined && baseItem.actionsSource
+    baseItem?.model !== undefined && versionResource !== undefined && baseItem.actionsSource
       ? {
           ...baseItem,
           actionsSource: {
             ...baseItem.actionsSource,
-            asset: { environmentId: baseItem.model.environmentId, resource: modelVersion.resource },
+            asset: { environmentId: baseItem.model.environmentId, resource: versionResource },
           },
         }
       : baseItem;
@@ -278,11 +280,18 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
 
   if (!item) return null;
   const showFilmstrip = preview.filmstrip === true && imageCount > 1;
+  const stillAvailable = versionResource !== undefined;
   const activeModel =
-    item.model !== undefined && modelVersion !== undefined && modelView?.still !== true
+    item.model !== undefined &&
+    modelVersion !== undefined &&
+    (modelView?.still !== true || (!stillAvailable && modelView.reason === undefined))
       ? { environmentId: item.model.environmentId, preview: modelVersion.preview }
       : null;
   const showingModel = activeModel !== null;
+  const modelFailure =
+    item.model !== undefined && !stillAvailable && activeModel === null
+      ? (modelView?.reason ?? "The 3D view could not start.")
+      : null;
   const mediaLabel = item.type === "video" ? "video" : "image";
   const openOriginalLink =
     item.originalUrl && resolveExternalWebLinkHost(item.originalUrl) !== null ? (
@@ -370,12 +379,15 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                 >
                   <ModelViewer
                     key={activeModel.preview.previewId}
-                    environmentId={activeModel.environmentId}
-                    preview={activeModel.preview}
+                    source={previewModelSource(activeModel.environmentId, activeModel.preview)}
                     onUnavailable={(reason) => updateModelView({ still: true, reason })}
                   />
                 </Suspense>
               </div>
+            ) : modelFailure !== null ? (
+              <ExpandedMediaFailure>
+                <p>3D view unavailable: {modelFailure}</p>
+              </ExpandedMediaFailure>
             ) : item.type === "video" ? (
               <ExpandedVideo key={index} item={item} />
             ) : showingAccessibilityDetails ? (
@@ -409,12 +421,15 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                 onError={() => setFailedImageSrc(imageSrc)}
               />
             )}
-            {item.model !== undefined && modelVersions !== undefined ? (
+            {item.model !== undefined &&
+            modelVersions !== undefined &&
+            (stillAvailable || modelVersions.length > 1) ? (
               <ExpandedModelControls
+                stillAvailable={stillAvailable}
                 showStill={!showingModel}
                 versionIndex={versionIndex}
                 versionCount={modelVersions.length}
-                reason={modelView?.reason}
+                reason={stillAvailable ? modelView?.reason : undefined}
                 onShowStill={(still) => updateModelView({ still, reason: undefined })}
                 onVersionChange={(version) =>
                   updateModelView({

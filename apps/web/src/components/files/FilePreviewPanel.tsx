@@ -15,6 +15,7 @@ import {
   isWorkspaceAudioPreviewPath,
   isWorkspaceImagePreviewPath,
   isWorkspaceFontPreviewPath,
+  isWorkspaceModelPreviewPath,
   isWorkspaceVideoPreviewPath,
   officePreviewKind,
   binaryPreviewKind,
@@ -59,6 +60,7 @@ import {
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
+import { fileModelSource } from "~/components/chat/modelViewer/modelPreviewFetch";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { HarpMascot } from "~/components/mascot/HarpMascot";
@@ -171,6 +173,8 @@ interface FilePreviewPanelProps {
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
 }
+
+const ModelViewer = lazy(() => import("~/components/chat/modelViewer/ModelViewer"));
 
 const MermaidFilePreview = lazy(() =>
   import("./MermaidFilePreview").then((module) => ({ default: module.MermaidFilePreview })),
@@ -400,6 +404,53 @@ function WorkspaceAudioPreview(props: {
       revision={revision}
       onError={() => setFailedUrl(url)}
     />
+  );
+}
+
+function WorkspaceModelPreview(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
+  readonly draft: boolean;
+  readonly absolutePath: string;
+  readonly workspaceRoot: string;
+  readonly workspaceMutationId: string | null;
+}) {
+  const resource = workspaceAssetResource({
+    kind: "media-file",
+    threadRef: props.threadRef,
+    draft: props.draft,
+    workspaceRoot: props.workspaceRoot,
+    absolutePath: props.absolutePath,
+  });
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    resource,
+    props.workspaceMutationId ?? undefined,
+  );
+  const [failure, setFailure] = useState<{ url: string; reason: string } | null>(null);
+  const fileRevision = assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
+  const revision = fileRevision ?? props.workspaceMutationId;
+  const revisionSuffix =
+    revision === null
+      ? ""
+      : `${assetUrl._tag === "Success" && assetUrl.url.includes("?") ? "&" : "?"}${fileRevision !== undefined ? "file" : "workspace"}-revision=${encodeURIComponent(revision)}`;
+  const url = assetUrl._tag === "Success" ? `${assetUrl.url}${revisionSuffix}` : null;
+  if (assetUrl._tag === "Failure")
+    return <FileSurfaceFailure message="Unable to load the model." />;
+  if (url === null) return <FileSurfaceLoading />;
+  if (failure?.url === url) {
+    return <FileSurfaceFailure message={failure.reason} onRetry={() => setFailure(null)} />;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 p-2">
+      <Suspense fallback={<FileSurfaceLoading />}>
+        <ModelViewer
+          key={url}
+          source={fileModelSource(url)}
+          onUnavailable={(reason) => setFailure({ url, reason })}
+        />
+      </Suspense>
+    </div>
   );
 }
 
@@ -1137,7 +1188,8 @@ export default function FilePreviewPanel({
   const isVideo = relativePath !== null && isWorkspaceVideoPreviewPath(relativePath);
   const isAudio = relativePath !== null && !isVideo && isWorkspaceAudioPreviewPath(relativePath);
   const isImage = relativePath !== null && !isVideo && isWorkspaceImagePreviewPath(relativePath);
-  const isMedia = isImage || isVideo || isAudio;
+  const isModel = relativePath !== null && isWorkspaceModelPreviewPath(relativePath);
+  const isMedia = isImage || isVideo || isAudio || isModel;
   const isPdf = relativePath !== null && isPdfPreviewFile(relativePath);
   const isDocument =
     relativePath !== null &&
@@ -1562,6 +1614,16 @@ export default function FilePreviewPanel({
               absolutePath={absolutePath}
               workspaceRoot={cwd}
               name={relativePath}
+              workspaceMutationId={workspaceMutationId}
+            />
+          ) : relativePath && isModel && absolutePath ? (
+            <WorkspaceModelPreview
+              key={`${environmentId}:${threadRef.threadId}:${absolutePath}`}
+              environmentId={environmentId}
+              threadRef={threadRef}
+              draft={draft}
+              absolutePath={absolutePath}
+              workspaceRoot={cwd}
               workspaceMutationId={workspaceMutationId}
             />
           ) : relativePath && isImage && absolutePath ? (

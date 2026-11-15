@@ -13,15 +13,20 @@ export function buildResultsPreview(
   for (const [position, subject] of subjects.entries()) {
     if (subject.tile.versions !== undefined) {
       if (position === subjectIndex) index = images.length;
+      const resource = subject.tile.resource;
       images.push({
         src: null,
         name: subject.label,
-        actionsSource: {
-          kind: "image",
-          name: subject.label,
-          src: null,
-          asset: { environmentId, resource: subject.tile.resource },
-        },
+        ...(resource === undefined
+          ? {}
+          : {
+              actionsSource: {
+                kind: "image",
+                name: subject.label,
+                src: null,
+                asset: { environmentId, resource },
+              },
+            }),
         model: { environmentId, versions: subject.tile.versions },
       });
       continue;

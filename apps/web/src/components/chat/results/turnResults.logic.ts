@@ -122,14 +122,15 @@ export function resultSourcesFromRows(
   for (const { item } of rows) {
     if (item.type !== "dynamic_tool" || item.status !== "completed") continue;
     const images = turnItemOutputImages(item);
-    if (images.length === 0) continue;
+    const model = modelPreviewFromToolItem(item);
+    if (images.length === 0 && model === undefined) continue;
     sources.push({
       itemId: item.id,
       runId: item.runId,
       toolName: item.toolName,
       input: item.input,
       images,
-      model: modelPreviewFromToolItem(item),
+      model,
     });
   }
   return sources;
@@ -215,18 +216,21 @@ export function buildTurnResults(
     }
   >();
   for (const [order, tile] of tiles.entries()) {
-    const source = sourceByItem.get(tile.resource.itemId);
+    const source = sourceByItem.get(tile.itemId);
     if (source === undefined) continue;
     if (tile.versions !== undefined) {
-      subjects.set(`blender:${tile.resource.itemId}`, {
+      subjects.set(`blender:${tile.itemId}`, {
         origin: "blender",
-        label: "Blender model",
-        images: tile.versions.map((version) => version.resource),
+        label: tile.resource === undefined ? "3D model" : "Blender model",
+        images: tile.versions.flatMap((version) =>
+          version.resource === undefined ? [] : [version.resource],
+        ),
         tile,
         order,
       });
       continue;
     }
+    if (tile.resource === undefined) continue;
     const origin = classifyResultOrigin(resultToolName(source.toolName), false);
     const { key, label } = subjectIdentity(source, origin, tile.resource);
     const existing = subjects.get(key);

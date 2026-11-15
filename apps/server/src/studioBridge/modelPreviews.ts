@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off globalDateInEffect:off globalRandomInEffect:off globalTimers:off preferSchemaOverJson:off -Blender job folders are plain files read and pruned outside Effect.
+// @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off globalDateInEffect:off globalDate:off globalRandomInEffect:off globalRandom:off globalTimers:off preferSchemaOverJson:off -Blender job folders are plain files read and pruned outside Effect.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -10,6 +10,9 @@ export const MODEL_PREVIEW_FILE = "model.glb";
 export const MODEL_PREVIEW_INDEX_FILE = "preview-index.json";
 export const MODEL_PREVIEW_ROUTE_PREFIX = "/api/studio/model-previews";
 export const JOB_FOLDER_PREFIX = "job-";
+
+export const jobFolderName = (now: number) =>
+  `${JOB_FOLDER_PREFIX}${new Date(now).toISOString().replace(/[:.]/gu, "-")}-${Math.random().toString(36).slice(2, 7)}`;
 
 const PREVIEW_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 const GLB_MAGIC = 0x46546c67;
@@ -29,7 +32,7 @@ export type GlbValidation =
   | { readonly ok: true; readonly info: GlbInfo }
   | { readonly ok: false; readonly reason: string };
 
-const invalid = (reason: string): GlbValidation => ({ ok: false, reason });
+const invalid = (reason: string) => ({ ok: false, reason }) as const;
 
 const hasExternalUri = (entries: unknown): boolean =>
   Array.isArray(entries) &&
@@ -38,13 +41,11 @@ const hasExternalUri = (entries: unknown): boolean =>
     return uri !== undefined && !(typeof uri === "string" && uri.startsWith("data:"));
   });
 
-/** Checks the binary glTF 2.0 container and what a viewer would need to fetch or decode. */
-export const validateGlb = (bytes: Uint8Array): GlbValidation => {
-  if (bytes.byteLength > MAX_GLB_BYTES) {
-    return invalid(
-      `The GLB is ${(bytes.byteLength / 1048576).toFixed(1)} MB; previews are capped at ${MAX_GLB_BYTES / 1048576} MB.`,
-    );
-  }
+type GlbJson =
+  | { readonly ok: true; readonly json: Record<string, unknown> }
+  | { readonly ok: false; readonly reason: string };
+
+const readGlbJson = (bytes: Uint8Array): GlbJson => {
   if (bytes.byteLength < 20) return invalid("The GLB is too short to hold a header and a chunk.");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, true) !== GLB_MAGIC) return invalid("Not a binary glTF file.");
@@ -56,7 +57,6 @@ export const validateGlb = (bytes: Uint8Array): GlbValidation => {
   if (view.getUint32(16, true) !== JSON_CHUNK || 20 + jsonLength > bytes.byteLength) {
     return invalid("The GLB has no valid JSON chunk first.");
   }
-  let json: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(
       new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(20, 20 + jsonLength)),
@@ -64,10 +64,22 @@ export const validateGlb = (bytes: Uint8Array): GlbValidation => {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return invalid("The GLB JSON chunk is not an object.");
     }
-    json = parsed as Record<string, unknown>;
+    return { ok: true, json: parsed as Record<string, unknown> };
   } catch {
     return invalid("The GLB JSON chunk does not parse.");
   }
+};
+
+/** Checks the binary glTF 2.0 container and what a viewer would need to fetch or decode. */
+export const validateGlb = (bytes: Uint8Array): GlbValidation => {
+  if (bytes.byteLength > MAX_GLB_BYTES) {
+    return invalid(
+      `The GLB is ${(bytes.byteLength / 1048576).toFixed(1)} MB; previews are capped at ${MAX_GLB_BYTES / 1048576} MB.`,
+    );
+  }
+  const parsed = readGlbJson(bytes);
+  if (!parsed.ok) return parsed;
+  const json = parsed.json;
   const version = (json.asset as { version?: unknown } | undefined)?.version;
   if (typeof version !== "string" || !version.startsWith("2")) {
     return invalid("The GLB asset version is not 2.0.");
@@ -85,6 +97,130 @@ export const validateGlb = (bytes: Uint8Array): GlbValidation => {
       sizeBytes: bytes.byteLength,
       animationClips: Array.isArray(json.animations) ? json.animations.length : 0,
     },
+  };
+};
+
+interface GlbStats {
+  readonly triangles: number;
+  readonly dimensions: readonly [number, number, number];
+}
+
+type Matrix = ReadonlyArray<number>;
+
+const identityMatrix: Matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+const multiply = (left: Matrix, right: Matrix): Matrix =>
+  Array.from({ length: 16 }, (_, cell) => {
+    const column = Math.floor(cell / 4);
+    const row = cell % 4;
+    let sum = 0;
+    for (let k = 0; k < 4; k += 1) sum += left[k * 4 + row]! * right[column * 4 + k]!;
+    return sum;
+  });
+
+const finiteList = (value: unknown, length: number): ReadonlyArray<number> | undefined =>
+  Array.isArray(value) &&
+  value.length === length &&
+  value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
+    ? (value as ReadonlyArray<number>)
+    : undefined;
+
+const localMatrix = (node: Record<string, unknown>): Matrix => {
+  const matrix = finiteList(node.matrix, 16);
+  if (matrix !== undefined) return matrix;
+  const [tx = 0, ty = 0, tz = 0] = finiteList(node.translation, 3) ?? [];
+  const [x = 0, y = 0, z = 0, w = 1] = finiteList(node.rotation, 4) ?? [];
+  const [sx = 1, sy = 1, sz = 1] = finiteList(node.scale, 3) ?? [];
+  return [
+    (1 - 2 * (y * y + z * z)) * sx,
+    2 * (x * y + z * w) * sx,
+    2 * (x * z - y * w) * sx,
+    0,
+    2 * (x * y - z * w) * sy,
+    (1 - 2 * (x * x + z * z)) * sy,
+    2 * (y * z + x * w) * sy,
+    0,
+    2 * (x * z + y * w) * sz,
+    2 * (y * z - x * w) * sz,
+    (1 - 2 * (x * x + y * y)) * sz,
+    0,
+    tx,
+    ty,
+    tz,
+    1,
+  ];
+};
+
+const records = (value: unknown): ReadonlyArray<Record<string, unknown>> =>
+  Array.isArray(value) ? value.map(recordOf) : [];
+
+const recordOf = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+
+const indexOf = (value: unknown): number | undefined =>
+  Number.isSafeInteger(value) ? (value as number) : undefined;
+
+const indexList = (value: unknown): ReadonlyArray<number> =>
+  Array.isArray(value) ? value.filter((entry): entry is number => Number.isSafeInteger(entry)) : [];
+
+const trianglesOf = (mode: unknown, count: number) => {
+  if (mode === undefined || mode === 4) return Math.floor(count / 3);
+  return mode === 5 || mode === 6 ? Math.max(count - 2, 0) : 0;
+};
+
+const visitLimit = 100_000;
+
+export const glbStats = (bytes: Uint8Array): GlbStats => {
+  const parsed = readGlbJson(bytes);
+  if (!parsed.ok) return { triangles: 0, dimensions: [0, 0, 0] };
+  const { json } = parsed;
+  const accessors = records(json.accessors);
+  const meshes = records(json.meshes);
+  const nodes = records(json.nodes);
+  const scene = records(json.scenes)[indexOf(json.scene) ?? 0];
+  const children = new Set(nodes.flatMap((node) => indexList(node.children)));
+  const roots =
+    scene === undefined
+      ? nodes.flatMap((_, index) => (children.has(index) ? [] : [index]))
+      : indexList(scene.nodes);
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  let triangles = 0;
+  let visits = 0;
+  const visit = (index: number, parent: Matrix, depth: number) => {
+    const node = nodes[index];
+    visits += 1;
+    if (node === undefined || depth > 64 || visits > visitLimit) return;
+    const world = multiply(parent, localMatrix(node));
+    const mesh = meshes[indexOf(node.mesh) ?? -1];
+    for (const primitive of records(mesh?.primitives)) {
+      const position = accessors[indexOf(recordOf(primitive.attributes).POSITION) ?? -1];
+      const indices = accessors[indexOf(primitive.indices) ?? -1] ?? position;
+      triangles += trianglesOf(primitive.mode, indexOf(indices?.count) ?? 0);
+      const min = finiteList(position?.min, 3);
+      const max = finiteList(position?.max, 3);
+      if (min === undefined || max === undefined) continue;
+      for (let corner = 0; corner < 8; corner += 1) {
+        const point = [0, 1, 2].map((axis) => ((corner >> axis) & 1 ? max[axis]! : min[axis]!));
+        for (let axis = 0; axis < 3; axis += 1) {
+          const value =
+            world[axis]! * point[0]! +
+            world[axis + 4]! * point[1]! +
+            world[axis + 8]! * point[2]! +
+            world[axis + 12]!;
+          low[axis] = Math.min(low[axis]!, value);
+          high[axis] = Math.max(high[axis]!, value);
+        }
+      }
+    }
+    for (const child of indexList(node.children)) visit(child, world, depth + 1);
+  };
+  for (const root of roots) visit(root, identityMatrix, 0);
+  const size = (axis: number) =>
+    Number.isFinite(low[axis]!) ? Math.round((high[axis]! - low[axis]!) * 1000) / 1000 : 0;
+  return {
+    triangles: Number.isSafeInteger(triangles) ? triangles : 0,
+    dimensions: [size(0), size(2), size(1)],
   };
 };
 
@@ -216,4 +352,70 @@ export const pruneJobFolders = (
     if (!NodeFS.existsSync(preview.jobDir)) previews.delete(id);
   }
   return removed;
+};
+
+type ShownModel =
+  | {
+      readonly ok: true;
+      readonly file: string;
+      readonly jobDir: string;
+      readonly modelPreview: ModelPreviewReference;
+    }
+  | { readonly ok: false; readonly error: string; readonly reason: string };
+
+export const showModelFile = (input: {
+  readonly path: string;
+  readonly cwd: string | undefined;
+  readonly jobsRoot: string;
+  readonly now: number;
+}): ShownModel => {
+  if (!/\.glb$/iu.test(input.path)) {
+    return {
+      ok: false,
+      error: "not_glb",
+      reason: `${input.path} is not a .glb file. Only binary glTF (.glb) can be shown; export other formats to .glb first.`,
+    };
+  }
+  if (!NodePath.isAbsolute(input.path) && input.cwd === undefined) {
+    return {
+      ok: false,
+      error: "invalid_arguments",
+      reason: "This thread has no project folder, so path must be absolute.",
+    };
+  }
+  const file = NodePath.resolve(input.cwd ?? "", input.path);
+  let size: number;
+  try {
+    const stat = NodeFS.statSync(file);
+    if (!stat.isFile())
+      return { ok: false, error: "file_not_found", reason: `${file} is not a file.` };
+    size = stat.size;
+  } catch {
+    return { ok: false, error: "file_not_found", reason: `No file at ${file}.` };
+  }
+  if (size > MAX_GLB_BYTES) {
+    return {
+      ok: false,
+      error: "invalid_glb",
+      reason: `The GLB is ${(size / 1048576).toFixed(1)} MB; previews are capped at ${MAX_GLB_BYTES / 1048576} MB.`,
+    };
+  }
+  const bytes = NodeFS.readFileSync(file);
+  const checked = validateGlb(bytes);
+  if (!checked.ok) return { ok: false, error: "invalid_glb", reason: checked.reason };
+  pruneJobFolders(input.jobsRoot, input.now);
+  const jobDir = NodePath.join(input.jobsRoot, jobFolderName(input.now));
+  NodeFS.mkdirSync(jobDir, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(jobDir, MODEL_PREVIEW_FILE), bytes);
+  return {
+    ok: true,
+    file,
+    jobDir,
+    modelPreview: registerModelPreview(jobDir, {
+      ...glbStats(bytes),
+      animationClips: checked.info.animationClips,
+      sizeBytes: checked.info.sizeBytes,
+      jobId: NodePath.basename(jobDir),
+    }),
+  };
 };

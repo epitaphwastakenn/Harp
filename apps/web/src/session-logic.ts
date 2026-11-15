@@ -856,9 +856,11 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       ...attemptMetadata,
     });
     const images = turnItemOutputImages(item);
-    if (images.length > 0 && item.status === "completed") {
-      const modelPreview =
-        item.type === "dynamic_tool" ? modelPreviewFromToolItem(item) : undefined;
+    const modelPreview =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? modelPreviewFromToolItem(item)
+        : undefined;
+    if ((images.length > 0 || modelPreview !== undefined) && item.status === "completed") {
       entries.push({
         id: `${item.id}:images`,
         kind: "tool-images",

@@ -8,6 +8,7 @@ import {
   dimensionsInStuds,
   formatStudSize,
   formatStuds,
+  glbHeaderProblem,
   groupModelVersions,
   metresPerStud,
   metresToStuds,
@@ -103,9 +104,9 @@ describe("buildTurnImageTiles", () => {
         { itemId: "c", preview: preview("c", "job-9") },
       ],
     );
-    expect(tiles.map((tile) => tile.resource.itemId)).toEqual(["shot", "b", "c"]);
+    expect(tiles.map((tile) => tile.itemId)).toEqual(["shot", "b", "c"]);
     expect(tiles[0]?.versions).toBeUndefined();
-    expect(tiles[1]?.versions?.map((version) => version.resource.itemId)).toEqual(["a", "b"]);
+    expect(tiles[1]?.versions?.map((version) => version.resource?.itemId)).toEqual(["a", "b"]);
     expect(tiles[2]?.versions).toHaveLength(1);
   });
 
@@ -118,15 +119,25 @@ describe("buildTurnImageTiles", () => {
     expect(tiles[1]?.versions).toBeUndefined();
   });
 
-  it("ignores a model whose image is missing", () => {
+  it("keeps a model without an image as a 3D-only version or tile", () => {
     const tiles = buildTurnImageTiles(
-      [image("b")],
+      [image("b"), image("shot")],
       [
         { itemId: "a", preview: preview("a", "job-1") },
         { itemId: "b", preview: preview("b", "job-2", "job-1") },
+        { itemId: "glb", preview: preview("glb", "job-3") },
       ],
     );
-    expect(tiles[0]?.versions).toHaveLength(1);
+    expect(tiles.map((tile) => tile.itemId)).toEqual(["b", "shot", "glb"]);
+    expect(tiles[0]?.versions?.map((version) => version.resource?.itemId)).toEqual([
+      undefined,
+      "b",
+    ]);
+    expect(tiles[2]).toEqual({
+      itemId: "glb",
+      resource: undefined,
+      versions: [{ preview: preview("glb", "job-3"), resource: undefined }],
+    });
   });
 });
 
@@ -150,6 +161,28 @@ describe("framingDistance", () => {
   it("backs off further for narrow viewports", () => {
     expect(framingDistance(1, 40, 0.5)).toBeGreaterThan(framingDistance(1, 40, 2));
     expect(framingDistance(2, 40, 1.5)).toBeCloseTo(framingDistance(1, 40, 1.5) * 2);
+  });
+});
+
+describe("glbHeaderProblem", () => {
+  const header = (length: number, version = 2, chunk = 0x4e4f534a) => {
+    const view = new DataView(new ArrayBuffer(length));
+    view.setUint32(0, 0x46546c67, true);
+    view.setUint32(4, version, true);
+    view.setUint32(8, length, true);
+    view.setUint32(16, chunk, true);
+    return view.buffer;
+  };
+
+  it("accepts a GLB 2.0 header and explains what else it refuses", () => {
+    expect(glbHeaderProblem(header(32))).toBeUndefined();
+    expect(glbHeaderProblem(new TextEncoder().encode("solid cube, an STL file").buffer)).toMatch(
+      /not a binary glTF/,
+    );
+    expect(glbHeaderProblem(header(32, 1))).toMatch(/2\.0/);
+    expect(glbHeaderProblem(header(32).slice(0, 24))).toMatch(/truncated/);
+    expect(glbHeaderProblem(header(32, 2, 0))).toMatch(/truncated/);
+    expect(glbHeaderProblem(new ArrayBuffer(30 * 1024 * 1024 + 1))).toMatch(/30 MB/);
   });
 });
 

@@ -11,12 +11,28 @@ export interface ModelPreviewEntry {
 
 export interface ModelVersion {
   readonly preview: ModelPreviewReference;
-  readonly resource: TurnImageResource;
+  readonly resource: TurnImageResource | undefined;
 }
 
 export interface TurnImageTile {
-  readonly resource: TurnImageResource;
+  readonly itemId: string;
+  readonly resource: TurnImageResource | undefined;
   readonly versions?: ReadonlyArray<ModelVersion>;
+}
+
+export const maxGlbBytes = 30 * 1024 * 1024;
+
+export function glbHeaderProblem(buffer: ArrayBuffer): string | undefined {
+  if (buffer.byteLength > maxGlbBytes) return "3D previews are limited to 30 MB.";
+  const view = new DataView(buffer);
+  if (buffer.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67) {
+    return "This is not a binary glTF (.glb) file.";
+  }
+  if (view.getUint32(4, true) !== 2) return "Only glTF 2.0 models can be shown.";
+  if (view.getUint32(8, true) !== buffer.byteLength || view.getUint32(16, true) !== 0x4e4f534a) {
+    return "The model file is truncated or damaged.";
+  }
+  return undefined;
 }
 
 export function metresToStuds(metres: number): number {
@@ -81,34 +97,30 @@ export function buildTurnImageTiles(
   images: ReadonlyArray<TurnImageResource>,
   models: ReadonlyArray<ModelPreviewEntry>,
 ): ReadonlyArray<TurnImageTile> {
-  const previewByItem = new Map(models.map((entry) => [entry.itemId, entry.preview]));
-  const present = models.filter((entry) =>
-    images.some((image) => image.itemId === entry.itemId && image.index === 0),
-  );
+  const coverOf = (itemId: string) =>
+    images.find((image) => image.itemId === itemId && image.index === 0);
   const latestItems = new Map<string, ReadonlyArray<ModelVersion>>();
   const folded = new Set<string>();
-  for (const group of groupModelVersions(present)) {
+  for (const group of groupModelVersions(models)) {
     const latest = group[group.length - 1]!;
     latestItems.set(
       latest.itemId,
-      group.map((entry) => ({
-        preview: entry.preview,
-        resource: images.find((image) => image.itemId === entry.itemId && image.index === 0)!,
-      })),
+      group.map((entry) => ({ preview: entry.preview, resource: coverOf(entry.itemId) })),
     );
     for (const entry of group.slice(0, -1)) folded.add(entry.itemId);
   }
   const tiles: TurnImageTile[] = [];
   for (const image of images) {
-    if (image.index === 0 && previewByItem.has(image.itemId)) {
-      if (folded.has(image.itemId)) continue;
-      const versions = latestItems.get(image.itemId);
-      if (versions !== undefined) {
-        tiles.push({ resource: image, versions });
-        continue;
-      }
-    }
-    tiles.push({ resource: image });
+    if (image.index === 0 && folded.has(image.itemId)) continue;
+    const versions = image.index === 0 ? latestItems.get(image.itemId) : undefined;
+    tiles.push(
+      versions === undefined
+        ? { itemId: image.itemId, resource: image }
+        : { itemId: image.itemId, resource: image, versions },
+    );
+  }
+  for (const [itemId, versions] of latestItems) {
+    if (coverOf(itemId) === undefined) tiles.push({ itemId, resource: undefined, versions });
   }
   return tiles;
 }

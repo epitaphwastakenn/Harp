@@ -4,6 +4,7 @@ import { Button } from "../ui/button";
 import { versionLabel } from "./modelViewer/modelPreviewVersions";
 
 export function ExpandedModelControls({
+  stillAvailable,
   showStill,
   versionIndex,
   versionCount,
@@ -11,6 +12,7 @@ export function ExpandedModelControls({
   onShowStill,
   onVersionChange,
 }: {
+  readonly stillAvailable: boolean;
   readonly showStill: boolean;
   readonly versionIndex: number;
   readonly versionCount: number;
@@ -20,26 +22,28 @@ export function ExpandedModelControls({
 }) {
   return (
     <div className="mt-2 flex max-w-[var(--media-width)] flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-white/80">
-      <div className="flex items-center gap-1" role="group" aria-label="Model view">
-        <Button
-          type="button"
-          size="micro"
-          variant={showStill ? "overlay" : "secondary"}
-          aria-pressed={!showStill}
-          onClick={() => onShowStill(false)}
-        >
-          3D
-        </Button>
-        <Button
-          type="button"
-          size="micro"
-          variant={showStill ? "secondary" : "overlay"}
-          aria-pressed={showStill}
-          onClick={() => onShowStill(true)}
-        >
-          Still
-        </Button>
-      </div>
+      {stillAvailable ? (
+        <div className="flex items-center gap-1" role="group" aria-label="Model view">
+          <Button
+            type="button"
+            size="micro"
+            variant={showStill ? "overlay" : "secondary"}
+            aria-pressed={!showStill}
+            onClick={() => onShowStill(false)}
+          >
+            3D
+          </Button>
+          <Button
+            type="button"
+            size="micro"
+            variant={showStill ? "secondary" : "overlay"}
+            aria-pressed={showStill}
+            onClick={() => onShowStill(true)}
+          >
+            Still
+          </Button>
+        </div>
+      ) : null}
       {versionCount > 1 ? (
         <div className="flex items-center gap-1">
           <Button

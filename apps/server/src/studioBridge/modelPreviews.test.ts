@@ -7,6 +7,7 @@ import { compactDynamicToolOutput, modelPreviewFromToolItem } from "@t3tools/sha
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  glbStats,
   JOB_KEEP_NEWEST,
   JOB_MAX_AGE_MS,
   MAX_GLB_BYTES,
@@ -14,6 +15,7 @@ import {
   pruneJobFolders,
   registerModelPreview,
   resolveModelPreview,
+  showModelFile,
   validateGlb,
 } from "./modelPreviews.ts";
 
@@ -78,6 +80,46 @@ describe("validateGlb", () => {
   });
 });
 
+const halfTurn = Math.SQRT1_2;
+
+const scene = {
+  ...asset,
+  scene: 0,
+  scenes: [{ nodes: [0] }],
+  nodes: [
+    { mesh: 0, translation: [10, 0, 0], scale: [2, 2, 2], children: [1] },
+    { mesh: 1, matrix: [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1] },
+    { mesh: 0, translation: [100, 0, 0], rotation: [0, halfTurn, 0, halfTurn] },
+  ],
+  meshes: [
+    { primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] },
+    { primitives: [{ attributes: { POSITION: 2 } }, { attributes: { POSITION: 2 }, mode: 1 }] },
+  ],
+  accessors: [
+    { count: 24, min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+    { count: 36 },
+    { count: 9, min: [0, 0, 0], max: [1, 2, 3] },
+  ],
+};
+
+describe("glbStats", () => {
+  it("counts triangles and measures the default scene through node transforms", () => {
+    expect(glbStats(glb(scene))).toEqual({ triangles: 15, dimensions: [7, 3, 5] });
+  });
+
+  it("walks parentless nodes when there is no scene and reports nothing for a broken file", () => {
+    const { scene: _, scenes: __, ...sceneless } = scene;
+    const rotated = glbStats(
+      glb({ ...sceneless, nodes: [scene.nodes[2]!], meshes: [scene.meshes[0]!] }),
+    );
+    expect(rotated).toEqual({ triangles: 12, dimensions: [1, 1, 1] });
+    expect(glbStats(new TextEncoder().encode("not a glb at all, really not"))).toEqual({
+      triangles: 0,
+      dimensions: [0, 0, 0],
+    });
+  });
+});
+
 const tempRoot = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "harp-previews-"));
 
 describe("model previews", () => {
@@ -125,6 +167,52 @@ describe("model previews", () => {
     const recent = make("job-recent", 1000);
     expect(pruneJobFolders(root, now)).toBe(2);
     expect(NodeFS.existsSync(recent)).toBe(true);
+  });
+});
+
+describe("showModelFile", () => {
+  const setup = () => {
+    const root = tempRoot();
+    const project = NodePath.join(root, "project");
+    NodeFS.mkdirSync(project);
+    NodeFS.writeFileSync(NodePath.join(project, "ship.glb"), glb(scene));
+    NodeFS.writeFileSync(NodePath.join(project, "broken.glb"), "not a glb at all, really not");
+    NodeFS.writeFileSync(NodePath.join(project, "ship.obj"), "v 0 0 0");
+    const jobsRoot = NodePath.join(root, "jobs");
+    const show = (path: string) =>
+      showModelFile({ path, cwd: project, jobsRoot, now: 1_800_000_000_000 });
+    return { project, jobsRoot, show };
+  };
+
+  it("copies a GLB into a new job folder and registers it", () => {
+    const { project, jobsRoot, show } = setup();
+    const shown = show("ship.glb");
+    if (!shown.ok) throw new Error(shown.reason);
+    expect(shown.file).toBe(NodePath.join(project, "ship.glb"));
+    expect(NodePath.basename(shown.jobDir)).toMatch(/^job-/);
+    expect(shown.modelPreview).toMatchObject({
+      triangles: 15,
+      dimensions: [7, 3, 5],
+      jobId: NodePath.basename(shown.jobDir),
+    });
+    expect(resolveModelPreview(jobsRoot, shown.modelPreview.previewId)?.path).toBe(
+      NodePath.join(shown.jobDir, MODEL_PREVIEW_FILE),
+    );
+    expect(show(NodePath.join(project, "ship.glb")).ok).toBe(true);
+  });
+
+  it("refuses what it cannot show", () => {
+    const { show } = setup();
+    const failure = (path: string) => {
+      const shown = show(path);
+      return shown.ok ? "ok" : `${shown.error}: ${shown.reason}`;
+    };
+    expect(failure("ship.obj")).toMatch(/^not_glb: /);
+    expect(failure("broken.glb")).toBe("invalid_glb: Not a binary glTF file.");
+    expect(failure("missing.glb")).toMatch(/^file_not_found: No file at /);
+    expect(
+      showModelFile({ path: "ship.glb", cwd: undefined, jobsRoot: "/unused", now: 0 }).ok,
+    ).toBe(false);
   });
 });
 

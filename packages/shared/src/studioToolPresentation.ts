@@ -101,6 +101,7 @@ const STUDIO_TOOLS: Readonly<Record<string, readonly [title: string, detail?: De
   manage_studio: ["Studio windows", (args) => text(args.action)],
   blender: ["Blender job"],
   import_mesh: ["Import mesh", (args) => text(args.name)],
+  show_model: ["Show 3D model", (args) => fileName(args.path)],
   animation: [
     "Animation",
     (args) =>

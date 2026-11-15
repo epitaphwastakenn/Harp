@@ -12,7 +12,7 @@ const decodeJsonUnknown = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.
 
 import { EPILOGUE, PRELUDE } from "./blenderScripts.ts";
 import {
-  JOB_FOLDER_PREFIX,
+  jobFolderName,
   MODEL_PREVIEW_FILE,
   MODEL_PREVIEW_INDEX_FILE,
   pruneJobFolders,
@@ -248,8 +248,7 @@ export const runBlenderJob = (input: {
       pruneJobFolders(input.jobsRoot, Date.now(), {
         protect: input.openBlend ? [NodePath.dirname(input.openBlend)] : [],
       });
-      const id = `${JOB_FOLDER_PREFIX}${new Date().toISOString().replace(/[:.]/gu, "-")}-${Math.random().toString(36).slice(2, 7)}`;
-      const jobDir = NodePath.join(input.jobsRoot, id);
+      const jobDir = NodePath.join(input.jobsRoot, jobFolderName(Date.now()));
       NodeFS.mkdirSync(jobDir, { recursive: true });
       const agentPath = NodePath.join(jobDir, "agent.py");
       NodeFS.writeFileSync(agentPath, input.script);

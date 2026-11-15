@@ -17,6 +17,7 @@ import { PanelSubheader } from "../../PanelSubheader";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
+import { ModelCardBody } from "../modelViewer/ModelCardBody";
 import { ChangedFilesCard } from "../ChangedFilesTree";
 import { openExpandedImagePreview } from "../ExpandedImageDialog";
 import { buildResultsPreview } from "./resultsPreview";
@@ -187,8 +188,10 @@ function ResultTile({
   const { ref, visible } = useBecameVisible();
   const assetUrl = useAssetUrlState(
     visible ? environmentId : null,
-    visible ? subject.tile.resource : null,
+    visible ? (subject.tile.resource ?? null) : null,
   );
+  const modelOnly =
+    subject.tile.resource === undefined ? subject.tile.versions?.at(-1)?.preview : undefined;
   const [failed, setFailed] = useState(false);
   const unavailable = assetUrl._tag === "Failure" || failed;
   const versions = subjectVersionLabel(subject);
@@ -204,7 +207,11 @@ function ResultTile({
       className="group/result flex min-w-0 flex-col gap-1 text-left [contain-intrinsic-size:auto_8rem] [content-visibility:auto] focus-visible:outline-none"
     >
       <span className="relative block aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover/result:border-brand/40 group-focus-visible/result:ring-2 group-focus-visible/result:ring-inset group-focus-visible/result:ring-ring/70">
-        {unavailable ? (
+        {modelOnly !== undefined ? (
+          <span className="flex size-full items-center px-3">
+            <ModelCardBody preview={modelOnly} />
+          </span>
+        ) : unavailable ? (
           <span className="flex size-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
             Image unavailable
           </span>

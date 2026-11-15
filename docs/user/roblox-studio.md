@@ -200,6 +200,10 @@ front, -Z), play its animations, or switch to the still image. When the agent re
 several jobs, only the latest version has a tile and **Version 2 of 4** steps through the rest.
 The 3D file is kept with the job folder, so older models show the still once it is cleaned up.
 
+Any `.glb` file opens in the same 3D viewer from the Files panel (up to 30 MB). Ask an agent to show
+you a model and it opens the GLB in the conversation as a **3D model** card, wherever the file came
+from.
+
 **Blender MCP** connects a separate MCP server that drives your open Blender, such as MCP for
 Blender.
 

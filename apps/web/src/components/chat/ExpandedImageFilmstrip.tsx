@@ -1,3 +1,5 @@
+import { BoxIcon } from "lucide-react";
+
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { cn } from "~/lib/utils";
 import type { ExpandedImageItem } from "./ExpandedImagePreview";
@@ -16,6 +18,13 @@ function FilmstripImage({ item }: { item: ExpandedImageItem }) {
     item.src === null && item.type !== "video" ? (asset?.resource ?? null) : null,
   );
   const src = item.src ?? (assetUrl._tag === "Success" ? assetUrl.url : null);
+  if (src === null && asset === undefined && item.model !== undefined) {
+    return (
+      <span className="flex size-full items-center justify-center text-muted-foreground">
+        <BoxIcon className="size-5" aria-hidden />
+      </span>
+    );
+  }
   if (src === null || item.type === "video") return null;
   return (
     <img src={src} alt="" decoding="async" draggable={false} className="size-full object-cover" />
@@ -42,7 +51,13 @@ export function ExpandedImageFilmstrip({
         const active = position === index;
         return (
           <button
-            key={item.src ?? JSON.stringify(item.actionsSource?.asset?.resource)}
+            key={
+              item.src ??
+              JSON.stringify(
+                item.actionsSource?.asset?.resource ??
+                  item.model?.versions.at(-1)?.preview.previewId,
+              )
+            }
             type="button"
             aria-label={`Show ${item.name} ${position + 1} of ${images.length}`}
             aria-current={active ? "true" : undefined}

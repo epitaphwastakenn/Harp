@@ -1507,6 +1507,27 @@ describe("HTML renders in the timeline", () => {
     expect(rowsFor(entries, true)).toEqual(["message", "turn-fold", "attempt-fold", "html-render"]);
   });
 
+  it("shows a model preview that came without an image", () => {
+    const preview = {
+      previewId: "abcdefghijklmnop1234",
+      triangles: 12,
+      dimensions: [1, 2, 3],
+      animationClips: 0,
+      sizeBytes: 900,
+    };
+    const entries = turn(
+      renderCall("completed", [
+        { type: "text", text: JSON.stringify({ success: true, modelPreview: preview }) },
+      ]),
+    );
+    expect(entries.find((entry) => entry.kind === "tool-images")).toMatchObject({
+      id: "render:images",
+      images: [],
+      models: [{ itemId: "render", preview }],
+    });
+    expect(rowsFor(entries, false)).toEqual(["message", "turn-fold", "message", "turn-images"]);
+  });
+
   it.each([
     ["running", "running", undefined],
     ["failed", "failed", { content: [{ type: "text", text: "Invalid HTML" }], isError: true }],

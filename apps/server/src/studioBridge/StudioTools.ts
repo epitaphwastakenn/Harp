@@ -42,6 +42,7 @@ import {
   writeImageJob,
 } from "./imageGeneration.ts";
 import { readStageSource, stageIntoContent, studioContentDirectory } from "./textureStaging.ts";
+import { showModelFile } from "./modelPreviews.ts";
 import { lookupRobloxDocs, makeDocsFetcher } from "./robloxDocs.ts";
 import {
   closeStudio,
@@ -3128,6 +3129,33 @@ const make = Effect.gen(function* () {
       } satisfies StudioToolResult;
     }).pipe(Effect.catch((error) => Effect.succeed(errorResult("blender_failed", String(error)))));
 
+  const showModel = Effect.fn("StudioTools.showModel")(function* (
+    args: Args,
+    context: StudioToolContext,
+  ) {
+    const path = str(args.path);
+    if (path === undefined) return errorResult("invalid_arguments", "path is required.");
+    const now = yield* Clock.currentTimeMillis;
+    const shown = yield* Effect.try({
+      try: () =>
+        showModelFile({
+          path,
+          cwd: context.workspaceRoot,
+          jobsRoot: robloxConfig.environment.blenderJobsRoot,
+          now,
+        }),
+      catch: (cause) => ({ ok: false as const, error: "show_model_failed", reason: String(cause) }),
+    }).pipe(Effect.catch((failure) => Effect.succeed(failure)));
+    if (!shown.ok) return errorResult(shown.error, shown.reason);
+    const { triangles, dimensions } = shown.modelPreview;
+    return jsonResult({
+      success: true,
+      file: shown.file,
+      modelPreview: shown.modelPreview,
+      summary: `Showing ${shown.file.split(/[\\/]/u).at(-1) ?? "the model"} in the chat's 3D viewer: ${triangles.toLocaleString("en-US")} triangles, ${dimensions.join(" x ")} m (width x depth x height, glTF units as metres).`,
+    });
+  });
+
   const generateImage = (
     args: Args,
     context: StudioToolContext,
@@ -4776,6 +4804,23 @@ const make = Effect.gen(function* () {
       ),
       risk: "mutation",
       run: blender,
+    },
+    {
+      name: "show_model",
+      title: "Show 3D model",
+      description:
+        "Shows a .glb file (binary glTF, up to 30 MB, self-contained) in the chat's 3D viewer, where the user can orbit it and play its animations. Use it whenever the user asks to view, open or preview a 3D model or GLB, instead of building an HTML page. Returns triangles and size (metres, width x depth x height). Other formats must be exported to .glb first.",
+      inputSchema: object(
+        {
+          path: {
+            type: "string",
+            description: "The .glb file, absolute or relative to the project folder.",
+          },
+        },
+        ["path"],
+      ),
+      risk: "read",
+      run: showModel,
     },
     {
       name: "generate_image",

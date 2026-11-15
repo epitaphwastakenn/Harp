@@ -7,6 +7,7 @@ import {
   hostPreviewMimeTypeFromExtension,
   isWorkspaceFontPreviewPath,
   isWorkspaceImagePreviewPath,
+  isWorkspaceModelPreviewPath,
   isWorkspacePreviewEntryPath,
   mediaKindFromPath,
   officePreviewKind,
@@ -64,6 +65,12 @@ describe("workspace file previews", () => {
       );
     },
   );
+  it("previews .glb models through signed host assets", () => {
+    expect(isWorkspaceModelPreviewPath("/tmp/Ship.GLB")).toBe(true);
+    expect(isWorkspaceModelPreviewPath("ship.gltf")).toBe(false);
+    expect(isWorkspacePreviewEntryPath("models/ship.glb")).toBe(true);
+    expect(hostPreviewMimeTypeFromExtension(".glb")).toBe("model/gltf-binary");
+  });
   it.each([
     [
       "quarterly-report.DOCX",

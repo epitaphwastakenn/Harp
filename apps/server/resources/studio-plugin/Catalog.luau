@@ -98,6 +98,7 @@ return {
 		tools = {
 			{ "blender", "Run Blender jobs" },
 			{ "import_mesh", "Import meshes into Studio" },
+			{ "show_model", "Show 3D models in the chat" },
 		},
 	},
 	{

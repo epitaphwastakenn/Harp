@@ -78,7 +78,7 @@ describe("buildTurnResults", () => {
     );
     expect(results.subjects.map((subject) => subject.label)).toEqual(["Studio view", "Client 2"]);
     expect(results.subjects[0]?.images.map((image) => image.itemId)).toEqual(["a", "c"]);
-    expect(results.subjects[0]?.tile.resource.itemId).toBe("c");
+    expect(results.subjects[0]?.tile.itemId).toBe("c");
     expect(subjectVersionLabel(results.subjects[0]!)).toBe("2 captures");
     expect(subjectVersionLabel(results.subjects[1]!)).toBeNull();
     expect(results.counts).toEqual({ studio: 2, blender: 0, animation: 0, other: 0 });
@@ -91,13 +91,16 @@ describe("buildTurnResults", () => {
         source("m1", "blender", {}, { model: preview("job-1") }),
         source("m2", "blender", {}, { model: preview("job-2", "job-1") }),
         source("m3", "blender", {}, { model: preview("job-3") }),
+        source("g1", "mcp__studio__show_model", {}, { images: 0, model: preview("job-4") }),
       ],
       run("run-1"),
     );
-    expect(results.counts.blender).toBe(2);
-    const [newest, older] = results.subjects;
-    expect(newest?.tile.resource.itemId).toBe("m3");
-    expect(older?.tile.resource.itemId).toBe("m2");
+    expect(results.counts.blender).toBe(3);
+    const [shown, newest, older] = results.subjects;
+    expect(shown).toMatchObject({ label: "3D model", images: [], versionCount: 1 });
+    expect(shown?.tile.resource).toBeUndefined();
+    expect(newest?.tile.itemId).toBe("m3");
+    expect(older?.tile.itemId).toBe("m2");
     expect(older?.versionCount).toBe(2);
     expect(subjectVersionLabel(older!)).toBe("2 versions");
   });

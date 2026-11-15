@@ -201,6 +201,12 @@ export function isWorkspaceFontPreviewPath(path: string): boolean {
   return /\.(ttf|otf|woff2?)$/i.test(path);
 }
 
+const modelPreviewMimeType = "model/gltf-binary";
+
+export function isWorkspaceModelPreviewPath(path: string): boolean {
+  return /\.glb$/i.test(path);
+}
+
 export function hostPreviewMimeTypeFromExtension(extension: string): string | null {
   if (!/^\.[a-z0-9-]+$/i.test(extension)) return null;
   return (
@@ -208,6 +214,7 @@ export function hostPreviewMimeTypeFromExtension(extension: string): string | nu
     audioMimeTypeFromExtension(extension) ??
     BROWSER_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
     FONT_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
+    (extension.toLowerCase() === ".glb" ? modelPreviewMimeType : null) ??
     BINARY_MIME_TYPES.get(extension.toLowerCase()) ??
     (Object.hasOwn(OFFICE_MIME_TYPES, extension.toLowerCase().slice(1))
       ? OFFICE_MIME_TYPES[extension.toLowerCase().slice(1) as OfficePreviewKind]
@@ -235,6 +242,7 @@ export function isWorkspacePreviewEntryPath(path: string): boolean {
     isWorkspaceBrowserPreviewPath(path) ||
     isWorkspaceImagePreviewPath(path) ||
     isWorkspaceFontPreviewPath(path) ||
+    isWorkspaceModelPreviewPath(path) ||
     officePreviewKind({ name: path }) !== null ||
     binaryPreviewKind({ name: path }) !== null
   );

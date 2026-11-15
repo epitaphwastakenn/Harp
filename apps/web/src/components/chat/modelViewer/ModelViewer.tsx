@@ -1,17 +1,14 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { PauseIcon, PlayIcon, RepeatIcon, RotateCcwIcon } from "lucide-react";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { ModelPreviewReference } from "@t3tools/shared/toolOutput";
 
 import { Button } from "../../ui/button";
 import { Spinner } from "../../ui/spinner";
-import { fetchModelPreviewGlb } from "./modelPreviewFetch";
+import type { ModelViewerSource } from "./modelPreviewFetch";
 import { formatMetreSize, formatStudSize, metresPerStud } from "./modelPreviewVersions";
 import { createModelScene, type ModelScene } from "./modelScene";
 
 interface ModelViewerProps {
-  readonly environmentId: EnvironmentId;
-  readonly preview: ModelPreviewReference;
+  readonly source: ModelViewerSource;
   readonly onUnavailable: (reason: string) => void;
 }
 
@@ -90,7 +87,7 @@ function ClipControls({
   );
 }
 
-export default function ModelViewer({ environmentId, preview, onUnavailable }: ModelViewerProps) {
+export default function ModelViewer({ source, onUnavailable }: ModelViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [scene, setScene] = useState<ModelScene | null>(null);
   const [clipIndex, setClipIndex] = useState(0);
@@ -100,6 +97,7 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
     () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
   const reportUnavailable = useEffectEvent(onUnavailable);
+  const load = useEffectEvent(source.load);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the WebGL context, which must be created after fetching the GLB and released on close
   useEffect(() => {
@@ -108,11 +106,7 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
     const controller = new AbortController();
     let created: ModelScene | null = null;
     void (async () => {
-      const buffer = await fetchModelPreviewGlb(
-        environmentId,
-        preview.previewId,
-        controller.signal,
-      );
+      const buffer = await load(controller.signal);
       const next = await createModelScene(
         host,
         buffer,
@@ -137,11 +131,16 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
       controller.abort();
       created?.dispose();
     };
-  }, [environmentId, preview.previewId]);
+  }, []);
 
-  const dimensions = preview.dimensions.some((value) => value > 0)
-    ? preview.dimensions
-    : (scene?.measuredSize ?? preview.dimensions);
+  const dimensions =
+    source.dimensions !== undefined && source.dimensions.some((value) => value > 0)
+      ? source.dimensions
+      : (scene?.measuredSize ?? [0, 0, 0]);
+  const triangles =
+    source.triangles !== undefined && source.triangles > 0
+      ? source.triangles
+      : (scene?.measuredTriangles ?? 0);
 
   return (
     <div
@@ -163,7 +162,7 @@ export default function ModelViewer({ environmentId, preview, onUnavailable }: M
         <>
           <div className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-5rem)] rounded-md bg-black/70 px-2 py-1 text-xs leading-4 text-white/85">
             <div className="tabular-nums">
-              {preview.triangles.toLocaleString()} triangles · {formatStudSize(dimensions)} studs
+              {triangles.toLocaleString()} triangles · {formatStudSize(dimensions)} studs
             </div>
             <div className="text-white/60 tabular-nums">
               {formatMetreSize(dimensions)} m · 1 stud = {metresPerStud} m · grid{" "}

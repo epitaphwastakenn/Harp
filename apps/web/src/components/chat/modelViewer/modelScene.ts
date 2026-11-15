@@ -51,6 +51,7 @@ export interface ModelSceneHooks {
 export interface ModelScene {
   readonly clips: ReadonlyArray<ModelClip>;
   readonly measuredSize: readonly [number, number, number];
+  readonly measuredTriangles: number;
   readonly gridStudsPerCell: number;
   resetView: () => void;
   selectClip: (index: number) => void;
@@ -93,6 +94,17 @@ function shadowTexture() {
     context.fillRect(0, 0, 128, 128);
   }
   return new CanvasTexture(canvas);
+}
+
+function countTriangles(root: Object3D) {
+  let triangles = 0;
+  root.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    const geometry = object.geometry as BufferGeometry;
+    const count = geometry.index?.count ?? geometry.getAttribute("position")?.count ?? 0;
+    triangles += Math.floor(count / 3);
+  });
+  return triangles;
 }
 
 function parseGlb(buffer: ArrayBuffer) {
@@ -299,7 +311,8 @@ export async function createModelScene(
 
   const handle: ModelScene = {
     clips,
-    measuredSize: [size.x, size.y, size.z],
+    measuredSize: [size.x, size.z, size.y],
+    measuredTriangles: countTriangles(root),
     gridStudsPerCell: grid.studsPerCell,
     resetView: () => {
       placeCamera();

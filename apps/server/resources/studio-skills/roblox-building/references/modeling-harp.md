@@ -191,3 +191,9 @@ After the script, `result.lint` reports facts. Fix what is real, ignore what is 
 The result's `modelPreview` (triangles, size, animation clip count) means a valid `model.glb` was
 exported and the user can orbit it in the chat. Actions made in the job stay in the GLB. If
 `modelPreviewError` is set, the GLB failed validation or export; read the reason and fix it.
+
+To show the user any other `.glb` (a downloaded asset, a file in the project, an earlier job's
+export), call `show_model` with its path. It opens in the same 3D viewer and returns its
+`modelPreview` (triangles, size in metres as width x depth x height). Use it whenever the user asks
+to view, open or preview a 3D model; never build an HTML page for that. Convert other formats to
+GLB first (a Blender job can import and export them).

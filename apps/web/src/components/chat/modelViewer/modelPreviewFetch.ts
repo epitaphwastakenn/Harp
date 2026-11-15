@@ -1,9 +1,17 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import type { ModelPreviewReference } from "@t3tools/shared/toolOutput";
 
 import { readPreparedConnection } from "~/state/session";
 
-import { modelPreviewFailureReason } from "./modelPreviewVersions";
+import { readBoundedDocument } from "../../files/readBoundedDocument";
+import { glbHeaderProblem, maxGlbBytes, modelPreviewFailureReason } from "./modelPreviewVersions";
+
+export interface ModelViewerSource {
+  readonly load: (signal: AbortSignal) => Promise<ArrayBuffer>;
+  readonly triangles?: number;
+  readonly dimensions?: readonly [number, number, number];
+}
 
 const modelPreviewRoute = "/api/studio/model-previews";
 const fetchTimeoutMs = 60_000;
@@ -40,4 +48,26 @@ export async function fetchModelPreviewGlb(
   });
   if (!response.ok) throw new Error(modelPreviewFailureReason(response.status));
   return response.arrayBuffer();
+}
+
+export function previewModelSource(
+  environmentId: EnvironmentId,
+  preview: ModelPreviewReference,
+): ModelViewerSource {
+  return {
+    load: (signal) => fetchModelPreviewGlb(environmentId, preview.previewId, signal),
+    triangles: preview.triangles,
+    dimensions: preview.dimensions,
+  };
+}
+
+export function fileModelSource(url: string): ModelViewerSource {
+  return {
+    load: async (signal) => {
+      const buffer = await readBoundedDocument(url, signal, maxGlbBytes);
+      const problem = glbHeaderProblem(buffer);
+      if (problem !== undefined) throw new Error(problem);
+      return buffer;
+    },
+  };
 }

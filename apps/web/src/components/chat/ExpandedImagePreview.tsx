@@ -154,7 +154,8 @@ export function buildAttachmentVideoPreview(
 export function expandedImageKey(preview: ExpandedImagePreview): string {
   const item = preview.images[preview.index];
   const asset = item?.actionsSource?.asset;
-  return `${item?.src ?? (asset ? JSON.stringify([asset.environmentId, asset.resource]) : "image")}:${preview.index}`;
+  const model = item?.model?.versions.at(-1)?.preview.previewId;
+  return `${item?.src ?? (asset ? JSON.stringify([asset.environmentId, asset.resource]) : (model ?? "image"))}:${preview.index}`;
 }
 
 export function attachVideoThumbnail(video: HTMLVideoElement, file: File): () => void {
