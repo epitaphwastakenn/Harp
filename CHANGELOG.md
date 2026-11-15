@@ -10,6 +10,18 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.20.1 · 2026-11-15
+
+> Open any GLB model in the 3D viewer, from the Files panel or by asking the agent.
+
+### New
+
+- **Open any 3D model** — A `.glb` file opens in the 3D viewer from the Files panel, and agents can show any GLB in the chat with `show_model` instead of making a web page for it.
+
+### Improved
+
+- **Models without a preview image** — A 3D model with no rendered image now shows as a 3D card in the chat and the Results tab, and opens straight into the viewer.
+
 ## 2.20.0 · 2026-11-14
 
 > Harp catches up with two weeks of T3 Code: Harp in your language, Claude Fable 5.2, replies to a single response, and a faster, steadier app.
