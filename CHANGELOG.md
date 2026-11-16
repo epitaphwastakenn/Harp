@@ -10,6 +10,14 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.20.3 · 2026-11-16
+
+> Antigravity's model list is short again: one entry per model, with its level on the reasoning slider.
+
+### Fixed
+
+- **Antigravity models** — Levels such as Low, Medium, High and Extra no longer show up as separate models. Each model has one entry, and the reasoning slider picks the level. Models that come only as a standard and an Extra version get a Standard and Extra High setting.
+
 ## 2.20.2 · 2026-11-15
 
 > Antigravity works again, and Blender viewport screenshots show up in the chat.
