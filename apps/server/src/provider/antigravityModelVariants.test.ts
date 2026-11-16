@@ -108,7 +108,7 @@ describe("groupAntigravityModels", () => {
     );
   });
 
-  it("never drops a model: a repeated level or an occupied base id stays its own entry", () => {
+  it("never drops a model: a repeated level stays its own entry, a bare base id joins its levels", () => {
     expect(
       summarize([
         { value: "model-a-high", name: "Model A (High)" },
@@ -121,9 +121,58 @@ describe("groupAntigravityModels", () => {
     ).toEqual([
       ["model-a-low", "model-a-high"],
       ["model-a-high-v2"],
-      ["model-b"],
-      ["model-b-high"],
-      ["model-b-low"],
+      ["model-b-low", "model-b", "model-b-high"],
+    ]);
+  });
+
+  it("folds the bare model and its Extra level into one, hiding the bare one behind Medium", () => {
+    expect(
+      summarize([
+        { value: "gemini-4-argon", name: "Gemini 4 Argon" },
+        { value: "gemini-4-argon-xhigh", name: "Gemini 4 Argon (Extra)" },
+        { value: "gemini-pro-orchestrator-g1", name: "Orchestrator (Argon)" },
+        { value: "gemini-pro-orchestrator-g1-low", name: "Orchestrator (Argon) (Low)" },
+        { value: "gemini-pro-orchestrator-g1-medium", name: "Orchestrator (Argon) (Medium)" },
+        { value: "gemini-pro-orchestrator-g1-high", name: "Orchestrator (Argon) (High)" },
+        { value: "gemini-pro-orchestrator-g1-xhigh", name: "Orchestrator (Argon) (Extra)" },
+        { value: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
+        { value: "gpt-oss-120b-medium-low", name: "GPT-OSS 120B (Medium) (Low)" },
+        { value: "gpt-oss-120b-medium-high", name: "GPT-OSS 120B (Medium) (High)" },
+        { value: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      ]),
+    ).toEqual([
+      {
+        slug: "gemini-4-argon",
+        name: "Gemini 4 Argon",
+        variants: [
+          ["gemini-4-argon", "standard"],
+          ["gemini-4-argon-xhigh", "xhigh"],
+        ],
+      },
+      {
+        slug: "gemini-pro-orchestrator-g1",
+        name: "Orchestrator (Argon)",
+        variants: [
+          ["gemini-pro-orchestrator-g1-low", "low"],
+          ["gemini-pro-orchestrator-g1-medium", "medium"],
+          ["gemini-pro-orchestrator-g1-high", "high"],
+          ["gemini-pro-orchestrator-g1-xhigh", "xhigh"],
+        ],
+      },
+      {
+        slug: "gpt-oss-120b-medium",
+        name: "GPT-OSS 120B (Medium)",
+        variants: [
+          ["gpt-oss-120b-medium-low", "low"],
+          ["gpt-oss-120b-medium", "standard"],
+          ["gpt-oss-120b-medium-high", "high"],
+        ],
+      },
+      {
+        slug: "claude-opus-5-5",
+        name: "Claude Opus 5.5",
+        variants: [["claude-opus-5-5", undefined]],
+      },
     ]);
   });
 

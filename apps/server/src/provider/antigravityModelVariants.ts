@@ -29,6 +29,7 @@ const LEVELS = [
   { id: "minimal", label: "Minimal" },
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
+  { id: "standard", label: "Standard" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "Extra High" },
   { id: "max", label: "Max" },
@@ -37,7 +38,7 @@ const LEVELS = [
 
 export type AntigravityEffortLevel = (typeof LEVELS)[number]["id"];
 
-const LEVEL_WORDS = "minimal|low|medium|high|extra[ -]?high|x-?high|max|thinking";
+const LEVEL_WORDS = "minimal|low|medium|high|extra[ -]?high|extra|x-?high|max|thinking";
 // Real names: "Gemini 3.8 Flash (High)". The slug carries the level as a
 // suffix ("gemini-3.8-flash-high"), except for the top level of Pro, which is
 // "gemini-pro-agent", so the name is the primary signal.
@@ -48,7 +49,7 @@ const SLUG_WITH_LEVEL = /^(.+)-(minimal|low|medium|high|xhigh|max|thinking)$/i;
 function levelFromWord(word: string | undefined): AntigravityEffortLevel | undefined {
   if (word === undefined) return undefined;
   const normalized = word.toLowerCase().replace(/[\s-]/g, "");
-  const id = normalized === "extrahigh" ? "xhigh" : normalized;
+  const id = normalized === "extrahigh" || normalized === "extra" ? "xhigh" : normalized;
   return LEVELS.find((level) => level.id === id)?.id;
 }
 
@@ -153,21 +154,35 @@ export function groupAntigravityModels(
         firstPerLevel.set(item.level, item);
       }
     }
-    if (firstPerLevel.size < 2) continue;
-    const members = [...firstPerLevel.entries()].map(([level, item]) => ({ level, item }));
-    const slug = members
+    const leveled = [...firstPerLevel.entries()].map(([level, item]) => ({ level, item }));
+    const slug = leveled
       .flatMap(({ item }) => (item.baseSlug === undefined ? [] : [item.baseSlug]))
       .toSorted((left, right) => left.length - right.length)[0];
-    // A family must not take over an id the account already offers on its own.
-    if (slug === undefined || takenSlugs.has(slug)) continue;
+    if (slug === undefined) continue;
+    const bare = parsed.find((item) => item.entry.value === slug && !grouped.has(item));
+    if (firstPerLevel.size < (bare === undefined ? 2 : 1)) continue;
+    if (bare === undefined && takenSlugs.has(slug)) continue;
     takenSlugs.add(slug);
-    for (const { item } of members) grouped.add(item);
-    const byPosition = members.toSorted((left, right) => left.item.index - right.item.index);
+    for (const { item } of leveled) grouped.add(item);
+    if (bare !== undefined) grouped.add(bare);
+    const members =
+      bare === undefined || firstPerLevel.has("medium")
+        ? leveled
+        : [...leveled, { level: "standard" as const, item: bare }];
+    const first = [
+      ...leveled.map(({ item }) => item),
+      ...(bare === undefined ? [] : [bare]),
+    ].toSorted((left, right) => left.index - right.index)[0];
     slots.push({
-      index: byPosition[0]?.item.index ?? 0,
+      index: first?.index ?? 0,
       family: {
         slug,
-        name: byPosition[0]?.item.baseName ?? slug,
+        name:
+          bare === undefined
+            ? (first?.baseName ?? slug)
+            : bare.entry.name.trim()
+              ? bare.entry.name
+              : slug,
         variants: members
           .toSorted((left, right) => levelRank(left.level) - levelRank(right.level))
           .map(({ level, item }) => ({ modelId: item.entry.value, level })),
