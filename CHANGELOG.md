@@ -10,6 +10,14 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.20.4 · 2026-11-16
+
+> Antigravity no longer drops every other message when its model is slow to answer.
+
+### Fixed
+
+- **Antigravity slow starts** — A turn that takes more than 30 seconds to start answering is no longer stopped and restarted. Harp now shows a note that Antigravity is still waiting on its model and keeps the turn running. It restarts Antigravity only after 3 minutes with no sign of life.
+
 ## 2.20.3 · 2026-11-16
 
 > Antigravity's model list is short again: one entry per model, with its level on the reasoning slider.
