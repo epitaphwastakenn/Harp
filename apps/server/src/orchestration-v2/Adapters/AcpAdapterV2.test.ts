@@ -76,6 +76,7 @@ import {
 } from "@t3tools/provider-grok/testing";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { makeTurnInput } from "./AcpAdapterV2.testkit.ts";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
@@ -611,9 +612,11 @@ const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
     prompt: AcpSessionRuntime.AcpSessionRuntime["Service"]["prompt"],
   ) => AcpSessionRuntime.AcpSessionRuntime["Service"]["prompt"];
   readonly cancelled?: Deferred.Deferred<void>;
+  readonly silentTurnNotice?: AcpAdapterV2Flavor["silentTurnNotice"];
 }) {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const natives: Array<AcpSessionRuntime.AcpSessionRuntime["Service"]> = [];
+  let reportProviderRetry: AcpAdapterV2ExtensionContext["reportProviderRetry"] | undefined;
   const instanceId = ProviderInstanceId.make("acp-prompt-inactivity");
   const adapter = yield* makeAcpAdapterV2({
     instanceId,
@@ -621,6 +624,11 @@ const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
       driver: ACP_TEST_DRIVER,
       capabilities: AcpProviderCapabilitiesV2,
       promptInactivityTimeout: "15 minutes",
+      ...(input.silentTurnNotice === undefined ? {} : { silentTurnNotice: input.silentTurnNotice }),
+      registerExtensions: (context) =>
+        Effect.sync(() => {
+          reportProviderRetry = context.reportProviderRetry;
+        }),
       makeRuntime: makeMockRuntime({
         childProcessSpawner,
         mockAgentPath: yield* bundledMockAgentPath,
@@ -680,6 +688,10 @@ const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
       ),
     emitUpdate: (notification: EffectAcpSchema.SessionNotification) =>
       natives.at(-1)!.request("_test/emit-update", notification),
+    reportProviderRetry: (
+      notice: Parameters<AcpAdapterV2ExtensionContext["reportProviderRetry"]>[0],
+    ) =>
+      Effect.suspend(() => reportProviderRetry?.(notice) ?? Effect.die("no extensions registered")),
     terminals: (count: number) =>
       runtime.events.pipe(
         Stream.filter((event) => event.type === "turn.terminal"),
@@ -4693,6 +4705,44 @@ describe("AcpAdapterV2", () => {
         assert.equal(silent?.status, "failed");
         assert.equal(next?.status, "completed");
       }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("neither notes nor restarts a silent turn whose agent reports a provider retry", () =>
+    Effect.gen(function* () {
+      const answer = yield* Deferred.make<void>();
+      const harness = yield* makePromptInactivityHarness({
+        environment: () => ({}),
+        silentTurnNotice: {
+          afterMs: 30_000,
+          message: "Still waiting.",
+          restart: { afterMs: 180_000, message: "Restarted.", spentMessage: "Check the network." },
+        },
+        wrapPrompt: (prompt) => (payload, options) =>
+          Deferred.await(answer).pipe(Effect.andThen(prompt(payload, options))),
+      });
+      yield* harness.startTurn(1);
+      yield* harness.reportProviderRetry({
+        sessionId: "mock-session-1",
+        failure: makeProviderFailure({ message: "503 No capacity available", retryable: true }),
+      });
+      yield* TestClock.adjust("5 minutes");
+      yield* Deferred.succeed(answer, undefined);
+      const events = Array.from(
+        yield* harness.runtime.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        ),
+      );
+      const notices = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+          ? [event.turnItem.message]
+          : [],
+      );
+      const terminal = events.at(-1);
+      assert.deepEqual(notices, []);
+      assert.equal(terminal?.type === "turn.terminal" ? terminal.status : undefined, "completed");
+      assert.lengthOf(harness.natives, 1);
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("delivers a follow-up the agent rejects while it is still processing", () =>

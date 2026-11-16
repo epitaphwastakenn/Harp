@@ -17,6 +17,7 @@ import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -44,6 +45,7 @@ import {
   ANTIGRAVITY_SILENT_TURN_MESSAGE,
   ANTIGRAVITY_SILENT_TURN_RESTART_MESSAGE,
   ANTIGRAVITY_STALLED_TURN_MESSAGE,
+  antigravitySilentTurnWaitingMessage,
   makeAntigravityAcpAdapterFlavor,
   makeAntigravityAdapterV2,
 } from "./AntigravityAdapterV2.ts";
@@ -646,11 +648,14 @@ describe("AntigravityAdapterV2 workspace changes", () => {
   );
 });
 
-// Starts a turn the mock agent never finishes, so only Stop can end it.
+// Starts a turn the mock agent never finishes, unless `holdPrompts` hands each prompt to the test.
 const startHangingTurn = Effect.fn("test.startHangingTurn")(function* (
   name: string,
   env: Record<string, string>,
-  silentTurnNoticeMs?: number,
+  options: {
+    readonly silentTurnMs?: { readonly notice: number; readonly restart: number };
+    readonly holdPrompts?: boolean;
+  } = {},
 ) {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -661,6 +666,13 @@ const startHangingTurn = Effect.fn("test.startHangingTurn")(function* (
   );
   const instanceId = ProviderInstanceId.make(`antigravity-${name}-test`);
   const promptSent = yield* Deferred.make<void>();
+  const heldPrompts = yield* Queue.unbounded<Deferred.Deferred<void>>();
+  const holdPrompt = Effect.gen(function* () {
+    const release = yield* Deferred.make<void>();
+    yield* Queue.offer(heldPrompts, release);
+    yield* Deferred.await(release);
+  });
+  const hang = options.holdPrompts === true ? "0" : "1";
   let spawns = 0;
   const adapter = yield* makeAntigravityAdapterV2({
     instanceId,
@@ -675,19 +687,22 @@ const startHangingTurn = Effect.fn("test.startHangingTurn")(function* (
             command: process.execPath,
             args: [mockAgentPath],
             cwd: input.cwd,
-            env: { T3_ACP_ANTIGRAVITY: "1", T3_ACP_HANG_PROMPT_FOREVER: "1", ...env },
+            env: { T3_ACP_ANTIGRAVITY: "1", T3_ACP_HANG_PROMPT_FOREVER: hang, ...env },
           },
         }).pipe(
           Effect.provideService(SecureRandom.SecureRandom, crypto),
           Effect.map((runtime): AcpSessionRuntime.AcpSessionRuntime["Service"] => ({
             ...runtime,
             prompt: (request) =>
-              Deferred.succeed(promptSent, undefined).pipe(Effect.andThen(runtime.prompt(request))),
+              Deferred.succeed(promptSent, undefined).pipe(
+                Effect.andThen(options.holdPrompts === true ? holdPrompt : Effect.void),
+                Effect.andThen(runtime.prompt(request)),
+              ),
           })),
         );
       }),
     withProcess: (_stop, task) => task,
-    ...(silentTurnNoticeMs === undefined ? {} : { silentTurnNoticeMs }),
+    ...(options.silentTurnMs === undefined ? {} : { silentTurnMs: options.silentTurnMs }),
     // @effect-diagnostics-next-line effectSucceedWithVoid:off - No default model is a value, not a void step.
     defaultModel: Effect.undefined,
   });
@@ -789,6 +804,9 @@ const startHangingTurn = Effect.fn("test.startHangingTurn")(function* (
   return {
     stop,
     promptSent,
+    heldPrompt: Queue.take(heldPrompts).pipe(
+      Effect.map((release) => Deferred.succeed(release, undefined)),
+    ),
     turnItems,
     turnUpdates,
     startNextTurn: startTurn(2),
@@ -848,7 +866,11 @@ describe("AntigravityAdapterV2 silent turns", () => {
   // Live: stopping the runtime waits on the real process exiting.
   it.live("restarts a silent agent once, then tells the user what to check", () =>
     Effect.gen(function* () {
-      const turn = yield* startHangingTurn("silent", {}, 100);
+      const turn = yield* startHangingTurn(
+        "silent",
+        {},
+        { silentTurnMs: { notice: 100, restart: 200 } },
+      );
       const ended = yield* Queue.take(turn.turnUpdates).pipe(
         Effect.repeat({
           until: (event) =>
@@ -860,6 +882,7 @@ describe("AntigravityAdapterV2 silent turns", () => {
         "interrupted",
       );
       assert.deepEqual(silentTurnNotices(yield* Queue.clear(turn.turnItems)), [
+        antigravitySilentTurnWaitingMessage,
         ANTIGRAVITY_SILENT_TURN_RESTART_MESSAGE,
       ]);
 
@@ -868,14 +891,44 @@ describe("AntigravityAdapterV2 silent turns", () => {
       yield* turn.startNextTurn;
       yield* Queue.take(turn.turnUpdates);
       assert.equal(turn.spawns(), 2);
-      const notice = yield* Queue.take(turn.turnItems).pipe(
-        Effect.repeat({
-          until: (event) =>
-            event.type === "turn_item.updated" && event.turnItem.type === "system_notice",
-        }),
-      );
-      assert.deepEqual(silentTurnNotices([notice]), [ANTIGRAVITY_SILENT_TURN_MESSAGE]);
+      const notices: Array<string> = [];
+      while (notices.length < 2) {
+        notices.push(...silentTurnNotices([yield* Queue.take(turn.turnItems)]));
+      }
+      assert.deepEqual(notices, [
+        antigravitySilentTurnWaitingMessage,
+        ANTIGRAVITY_SILENT_TURN_MESSAGE,
+      ]);
       assert.include(ANTIGRAVITY_SILENT_TURN_MESSAGE, "proxy");
+    }).pipe(Effect.provide(layerSession), Effect.scoped),
+  );
+
+  it.effect("only notes a slow turn and lets it answer, also right after an answered one", () =>
+    Effect.gen(function* () {
+      const turn = yield* startHangingTurn("slow", {}, { holdPrompts: true });
+      const answerAfter = Effect.fnUntraced(function* (wait: Duration.Input) {
+        const answer = yield* turn.heldPrompt;
+        yield* TestClock.adjust(wait);
+        yield* answer;
+        const ended = yield* Queue.take(turn.turnUpdates).pipe(
+          Effect.repeat({
+            until: (event) =>
+              event.type === "provider_turn.updated" && event.providerTurn.status !== "running",
+          }),
+        );
+        return {
+          status: ended.type === "provider_turn.updated" && ended.providerTurn.status,
+          notices: silentTurnNotices(yield* Queue.clear(turn.turnItems)),
+        };
+      });
+      const answered = {
+        status: "completed" as const,
+        notices: [antigravitySilentTurnWaitingMessage],
+      };
+      assert.deepEqual(yield* answerAfter("1 minute"), answered);
+      yield* turn.startNextTurn;
+      assert.deepEqual(yield* answerAfter("2 minutes"), answered);
+      assert.equal(turn.spawns(), 1);
     }).pipe(Effect.provide(layerSession), Effect.scoped),
   );
 

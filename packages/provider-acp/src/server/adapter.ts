@@ -492,18 +492,23 @@ export interface AcpAdapterV2Flavor {
   /** Prefer resume over load when both exist; Antigravity's load replays history slowly. */
   readonly preferResumeSession?: boolean;
   /**
-   * Posts a warning in the thread when a turn gets no agent output this long
-   * after its prompt, for agents whose silence usually means they cannot reach
-   * their model service.
+   * Posts a note in the thread when a turn gets no agent output or provider retry
+   * this long after its prompt, for agents whose silence usually means they are
+   * waiting on, or cannot reach, their model service. The turn keeps running.
    */
   readonly silentTurnNotice?: {
     readonly afterMs: number;
     readonly message: string;
     /**
-     * The first silent turn stops with this message and its runtime restarts; `message`
-     * marks a later silence, until a turn gets agent output again.
+     * A turn still silent at `restart.afterMs`, also counted from its prompt, stops with
+     * `restart.message` and its runtime restarts, once until a turn gets agent output again;
+     * a later one gets `spentMessage` and keeps running.
      */
-    readonly restartMessage?: string;
+    readonly restart?: {
+      readonly afterMs: number;
+      readonly message: string;
+      readonly spentMessage: string;
+    };
   };
   /**
    * Posts a warning when an agent that has started answering sends nothing for
@@ -2722,7 +2727,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (
             context.finalized ||
             context.interrupted ||
-            (notice.kind !== "stalled" && context.agentOutputSeen) ||
+            (notice.kind !== "stalled" &&
+              (context.agentOutputSeen || context.providerRetry !== undefined)) ||
             (yield* Ref.get(activeTurn)) !== context
           )
             return false;
@@ -8719,19 +8725,28 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const promptGeneration = yield* Ref.get(runtimeCallbackGeneration);
             if (flavor.silentTurnNotice !== undefined) {
               const notice = flavor.silentTurnNotice;
-              yield* Deferred.await(context.completed).pipe(
-                Effect.timeoutOrElse({
-                  duration: notice.afterMs,
-                  orElse: () =>
-                    notice.restartMessage !== undefined && !silentTurnRestartSpent
-                      ? restartSilentTurn(context, promptGeneration, notice.restartMessage)
-                      : runRuntimeCallbackAtGeneration(
-                          promptGeneration,
-                          emitTurnNotice(context, { kind: "silent", message: notice.message }),
-                        ).pipe(Effect.asVoid),
-                }),
-                Effect.forkIn(sessionScope),
-              );
+              const { restart } = notice;
+              const finishedWithin = (duration: number) =>
+                Deferred.await(context.completed).pipe(
+                  Effect.as(true),
+                  Effect.timeoutOrElse({ duration, orElse: () => Effect.succeed(false) }),
+                );
+              yield* Effect.gen(function* () {
+                if (yield* finishedWithin(notice.afterMs)) return;
+                const posted = yield* runRuntimeCallbackAtGeneration(
+                  promptGeneration,
+                  emitTurnNotice(context, { kind: "silent", message: notice.message }),
+                );
+                if (restart === undefined || !Option.getOrElse(posted, () => false)) return;
+                if (yield* finishedWithin(Math.max(restart.afterMs - notice.afterMs, 0))) return;
+                if (!silentTurnRestartSpent) {
+                  return yield* restartSilentTurn(context, promptGeneration, restart.message);
+                }
+                yield* runRuntimeCallbackAtGeneration(
+                  promptGeneration,
+                  emitTurnNotice(context, { kind: "recovery", message: restart.spentMessage }),
+                );
+              }).pipe(Effect.forkIn(sessionScope));
             }
             if (flavor.stalledTurnNotice !== undefined) {
               const notice = flavor.stalledTurnNotice;

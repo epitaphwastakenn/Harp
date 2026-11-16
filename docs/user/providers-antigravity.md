@@ -172,9 +172,11 @@ used as is. On Windows, Antigravity also trusts the certificates Windows trusts,
 antivirus HTTPS scanning or a company certificate does not block it.
 
 Antigravity unpacks its files each time it starts. Antivirus scanning can make that take
-a minute or more; Harp waits and says so. Once it is running, if it does not answer
-within 30 seconds, Harp restarts it once: sign-in retries on its own, and a turn
-stops and asks you to send your message again. When sign-in fails because of the
+a minute or more; Harp waits and says so. Once it is running, if sign-in does not
+answer within 30 seconds, Harp restarts it once and sign-in retries on its own. A busy
+model can take a few minutes to start answering a message: after 30 seconds the turn
+notes that Antigravity is still waiting, and only after 3 minutes with no answer does
+Harp restart it and ask you to send your message again. When sign-in fails because of the
 network, Harp names the cause it finds, such as intercepted HTTPS, a wrong clock or
 a DNS failure.
 

@@ -53,11 +53,15 @@ import {
 } from "@t3tools/provider-acp/server/adapter";
 
 const ANTIGRAVITY_PROVIDER = ProviderDriverKind.make("antigravity");
-// A healthy agent streams its first thought or reply within seconds. A silent one is restarted
-// once, since a fresh process opens new connections; a second silence means the network.
+// A busy model can take minutes to send a first thought or reply, so a silent turn first gets a
+// note. One still silent at 3 minutes is restarted once, since a fresh process opens new
+// connections; a second such silence means the network.
 export const ANTIGRAVITY_SILENT_TURN_NOTICE_MS = 30_000;
+export const antigravitySilentTurnWaitingMessage =
+  "Antigravity is still waiting on its model service, which can take a few minutes when the model is busy. Nothing to do yet.";
+const antigravitySilentTurnRestartMs = 3 * 60_000;
 export const ANTIGRAVITY_SILENT_TURN_RESTART_MESSAGE =
-  "Antigravity did not respond for 30 seconds, so Harp stopped this turn and restarted it. Send your message again.";
+  "Antigravity did not respond for 3 minutes, so Harp stopped this turn and restarted it. Send your message again.";
 export const ANTIGRAVITY_SILENT_TURN_MESSAGE =
   "Antigravity still has not responded after a restart. Check this machine's internet connection and any proxy, VPN or firewall, then send your message again.";
 // Its prompt stays open after a model call dies mid-answer, so the turn would look busy forever.
@@ -93,8 +97,8 @@ export interface AntigravityAdapterV2Options {
     Scope.Scope
   >;
   readonly withProcess: AntigravityAuth["withProcess"];
-  /** Live tests that restart a real process shorten the 30 second wait. */
-  readonly silentTurnNoticeMs?: number;
+  /** Live tests that restart a real process shorten the 30 second note and 3 minute restart. */
+  readonly silentTurnMs?: { readonly notice: number; readonly restart: number };
   readonly defaultModel: Effect.Effect<string | undefined>;
   readonly supportsNativeGoals?: Effect.Effect<boolean>;
   readonly onSessionStarted?: (
@@ -251,9 +255,13 @@ export function makeAntigravityAcpAdapterFlavor(
     // Loading history replays tool calls; resume avoids replay.
     preferResumeSession: true,
     silentTurnNotice: {
-      afterMs: options.silentTurnNoticeMs ?? ANTIGRAVITY_SILENT_TURN_NOTICE_MS,
-      message: ANTIGRAVITY_SILENT_TURN_MESSAGE,
-      restartMessage: ANTIGRAVITY_SILENT_TURN_RESTART_MESSAGE,
+      afterMs: options.silentTurnMs?.notice ?? ANTIGRAVITY_SILENT_TURN_NOTICE_MS,
+      message: antigravitySilentTurnWaitingMessage,
+      restart: {
+        afterMs: options.silentTurnMs?.restart ?? antigravitySilentTurnRestartMs,
+        message: ANTIGRAVITY_SILENT_TURN_RESTART_MESSAGE,
+        spentMessage: ANTIGRAVITY_SILENT_TURN_MESSAGE,
+      },
     },
     stalledTurnNotice: {
       afterMs: ANTIGRAVITY_STALLED_TURN_NOTICE_MS,
