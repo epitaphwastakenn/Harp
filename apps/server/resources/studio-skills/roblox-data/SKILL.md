@@ -2,7 +2,7 @@
 name: roblox-data
 description: "Use when writing, changing, debugging, or auditing Roblox player saves: DataStore, ProfileStore, session locks, schemas, migrations."
 when_to_use: "Also when data is lost, rolled back, duplicated or not saving, when adding a field to the save, changing currency or inventory storage, or reviewing save code."
-last_reviewed: 2026-10-14
+last_reviewed: 2026-11-20
 sources:
   - https://create.roblox.com/docs/reference/engine/classes/DataModel
   - https://create.roblox.com/docs/cloud-services/data-stores
@@ -25,18 +25,22 @@ sources:
 
 Load for player saves, migrations, retries, shutdowns, or session ownership. Leaderboards/messaging/world data: `roblox-server-data`; Open Cloud: `roblox-cloud`.
 
-## Harp default: DataService (typed)
+## Established game first: keep its data layer
 
-For any player data or DataStore work, use **DataService (typed) by Leif** unless the user explicitly asks for another approach. Load [references/dataservice-typed.md](references/dataservice-typed.md) first: it covers install (Wally), the template, `Data.Service:init()`, reads/writes/listeners, client replication, migrations, and a coins + inventory example. Do not write your own DataStore wrapper or session-locking system for player data. When in doubt about how it works, read the docs at https://leifstout.github.io/dataServiceTyped/docs/intro/ instead of guessing or reading the library's code.
+In a game that already saves player data, its data layer is the one to use, whatever it is (ProfileStore, ProfileService, DataStore2, DataService or its own wrapper). Find it before you change any save code (`grep_scripts` for `DataStoreService`, `ProfileStore`, `ProfileService`, `DataStore2`, `DataService`), extend it the way the game already does, and never add a second one beside it. Changing the shape of saved data in a live game needs old saves to keep loading: add fields with defaults, never rename or drop a saved key without a migration, and remember that servers still on the previous version keep reading and writing the same keys after a publish. Moving live saves to another library is a migration project: only on the user's explicit request, with a plan they approve first (`references/full.md` §6 and §9).
+
+## Harp default for a new game: DataService (typed)
+
+When the game has no data layer yet (a new or nearly empty game), use **DataService (typed) by Leif** for player data unless the user asks for another approach. Load [references/dataservice-typed.md](references/dataservice-typed.md) first: it covers install (Wally), the template, `Data.Service:init()`, reads/writes/listeners, client replication, migrations, and a coins + inventory example. Do not write your own DataStore wrapper or session-locking system for player data. When in doubt about how it works, read the docs at https://leifstout.github.io/dataServiceTyped/docs/intro/ instead of guessing or reading the library's code.
 
 The rest of this skill (and `references/full.md`) stays valid for non-player data, for reviewing or migrating existing save code, and for the DataStore limits, budgets, RTBF, and shutdown rules DataService does not remove.
 
 ## Quick Reference
 
-- Player data: DataService (typed), per the section above. The lines below are general DataStore knowledge, for non-player data and for existing code that does not use it.
+- Player data: the game's own data layer in an established game, DataService (typed) in a new one, per the sections above. The lines below are general DataStore knowledge, for non-player data and for existing code that does not use DataService.
 - Define a serializable template and a version field before storing player state. Deep-copy templates so nested defaults are not shared; migrate, then reconcile missing fields against the template. Scope store names by environment (`PlayerData_Studio`) so Studio writes stay out of production.
 - Use `UpdateAsync` for read-modify-write; handle throttling and transient errors.
-- Prevent concurrent profile mutation with a session-ownership protocol. For player data this is DataService (ProfileStore underneath); do not build your own.
+- Prevent concurrent profile mutation with a session-ownership protocol: the one the game's data layer already has, or DataService (ProfileStore underneath) in a new game; do not build your own.
 - Raw ProfileStore (only when the user asks for it or the project already uses it directly): `StartSessionAsync`, `Profile.OnSessionEnd`, `EndSession` as documented; no `Steal` for normal loads; `ProfileStore.Mock` for ephemeral Studio writes.
 - Save on meaningful changes and lifecycle boundaries; `PlayerRemoving` alone is not sufficient; `BindToClose` finishes pending work (DataService handles this for player data).
 - Store primitives/arrays/dictionaries; convert Instances/userdata/functions/cyclic tables first. Validate numbers (no NaN/inf), strings (`utf8.len`), nested tables: one bad value fails the write.

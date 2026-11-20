@@ -663,7 +663,11 @@ export const layer: Layer.Layer<
         });
         return;
       }
-      const { frame: frameTurnText, attachments: turnAttachments } = sealInput.success;
+      const {
+        frame: frameSealText,
+        attachments: turnAttachments,
+        instructions: harnessInstructions,
+      } = sealInput.success;
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
@@ -773,6 +777,8 @@ export const layer: Layer.Layer<
         return;
       }
       const session = sessionResult.success;
+      const instructionsInChannel = session.takesHarnessInstructions === true;
+      const frameTurnText = (text: string) => frameSealText(text, instructionsInChannel);
       if (!(yield* isCurrentAttemptInStatus("starting"))) return;
       const loadFromProvider = Effect.fn("ProviderTurnStartService.loadFromProvider")(function* (
         load: Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapter.ProviderAdapterV2Error>,
@@ -1799,6 +1805,9 @@ export const layer: Layer.Layer<
         },
         modelSelection: run.modelSelection,
         runtimePolicy: resolvedRuntimePolicy,
+        ...(instructionsInChannel && harnessInstructions !== undefined
+          ? { harnessInstructions }
+          : {}),
       });
     });
 

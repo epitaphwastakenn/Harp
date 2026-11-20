@@ -38,8 +38,14 @@ export class SealTurnInputError extends Schema.TaggedError<SealTurnInputError>()
 export interface SealTurnInput {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
-  /** Wraps the final provider text; handoff context is built later and must still follow it. */
-  readonly frame: (text: string) => string;
+  /** The user's rules and Harp's Studio guidance for a provider channel, outside the prompt. */
+  readonly instructions?: string | undefined;
+  /**
+   * Wraps the final provider text; handoff context is built later and must still follow it.
+   * With `instructionsInChannel` the text keeps only what the user attached, such as the Studio
+   * selection; otherwise it also carries the instructions.
+   */
+  readonly frame: (text: string, instructionsInChannel: boolean) => string;
 }
 
 type StudioTurnProject = Parameters<typeof RobloxStudioConfig.robloxProjectTarget>[1];
@@ -170,13 +176,12 @@ export const layer = Layer.effect(
 
     const prepare: SealTurnInputShape["prepare"] = Effect.fn("SealTurnInput.prepare")(
       function* (input) {
-        if (isSlashCommand(input.text, input.attachments)) {
-          if (isCompaction(input.text)) {
-            if (input.providerThreadId !== undefined)
-              studioDelivered.delete(input.providerThreadId);
-            if (input.threadId !== undefined) forgetLoadedSkills(input.threadId);
-          }
-          return { text: input.text, attachments: input.attachments, frame: (text) => text };
+        // A slash command is parsed by the provider, so its text stays bare; a channel still gets
+        // the instructions, or the provider would see them change and restart for nothing.
+        const slashCommand = isSlashCommand(input.text, input.attachments);
+        if (slashCommand && isCompaction(input.text)) {
+          if (input.providerThreadId !== undefined) studioDelivered.delete(input.providerThreadId);
+          if (input.threadId !== undefined) forgetLoadedSkills(input.threadId);
         }
         const current = yield* settings.getSettings.pipe(
           Effect.mapError((cause) => new SealTurnInputError({ detail: cause.message })),
@@ -185,6 +190,7 @@ export const layer = Layer.effect(
         let attachments = input.attachments;
         // Off by default: images then reach the main model untouched, with no error of ours.
         if (
+          !slashCommand &&
           current.imageViewerEnabled &&
           attachments.some((attachment) => attachment.type === "image") &&
           (yield* lacksVision(input.modelSelection))
@@ -206,15 +212,16 @@ export const layer = Layer.effect(
         yield* rememberStudioProject(current, input.project, target);
         const studio = yield* roblox.instructions(current, { ...target, cwd: input.cwd });
         const conversation = input.providerThreadId;
-        if (input.freshConversation === true && input.threadId !== undefined) {
+        if (!slashCommand && input.freshConversation === true && input.threadId !== undefined) {
           forgetLoadedSkills(input.threadId);
         }
         const sendStudio =
+          !slashCommand &&
           studio !== undefined &&
           (input.freshConversation === true ||
             conversation === undefined ||
             studioDelivered.get(conversation) !== studio);
-        if (studio !== undefined && conversation !== undefined) {
+        if (!slashCommand && studio !== undefined && conversation !== undefined) {
           studioDelivered.set(conversation, studio);
           if (studioDelivered.size > 512) {
             studioDelivered.delete(studioDelivered.keys().next().value ?? conversation);
@@ -247,19 +254,31 @@ export const layer = Layer.effect(
           studioApplies && rojoRoot !== undefined && rojoWorkspaces._tag === "Some"
             ? rojoContext(yield* rojoWorkspaces.value.status(rojoRoot))
             : undefined;
-        const harness = [
+        const joinParts = (parts: ReadonlyArray<string>) =>
+          parts.filter((part) => part.length > 0).join("\n\n");
+        const studioText = studio === undefined ? "" : withStudioInstructions(studio);
+        const instructions = joinParts([
           current.sealsInstructions.trim(),
-          sendStudio && studio !== undefined ? withStudioInstructions(studio) : "",
+          studioText,
+          studioLimits ?? "",
+          rojo ?? "",
+        ]);
+        const inPrompt = joinParts([
+          current.sealsInstructions.trim(),
+          sendStudio ? studioText : "",
           studioContext ?? "",
           studioLimits ?? "",
           rojo ?? "",
-        ]
-          .filter((part) => part.length > 0)
-          .join("\n\n");
+        ]);
         return {
           text,
           attachments,
-          frame: (framed) => frameWithSealsInstructions(harness, framed),
+          instructions,
+          frame: (framed, instructionsInChannel) => {
+            if (slashCommand) return framed;
+            if (!instructionsInChannel) return frameWithSealsInstructions(inPrompt, framed);
+            return studioContext === undefined ? framed : `${studioContext}\n\n${framed}`;
+          },
         };
       },
     );

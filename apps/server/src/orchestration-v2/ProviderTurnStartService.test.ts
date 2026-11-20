@@ -404,6 +404,8 @@ function makeLocalCommandHarness(input: {
   };
   readonly sealInput?: Layer.Layer<SealTurnInput.SealTurnInputV2>;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
+  /** The opened session delivers Harp's instructions through its own channel. */
+  readonly harnessChannel?: boolean;
   /**
    * A side chat whose context targets this run, an earlier run that failed or was cancelled before
    * the provider, or an earlier run that delivered it. `nativeForkFrom` plans a native fork of the
@@ -950,6 +952,7 @@ function makeLocalCommandHarness(input: {
                     providerSession,
                     ensureThread: () => Effect.succeed(providerThread),
                     resumeThread: () => Effect.succeed(projection.providerThreads[0]),
+                    ...(input.harnessChannel === true ? { takesHarnessInstructions: true } : {}),
                   } as never)
                 : Effect.die("A local command must not open a native session."),
   );
@@ -2246,6 +2249,34 @@ ${text}`,
     const message = harness.startRootRun.mock.calls[0]![0].message;
     expect(message.text).toBe("<rules>\n<described>");
     expect(message.attachments).toEqual([]);
+    expect(harness.startRootRun.mock.calls[0]![0].harnessInstructions).toBeUndefined();
+  }),
+);
+
+effectIt.effect("sends the instructions through a provider channel that takes them", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "what is wrong here?",
+      failReadsAfterRunning: true,
+      harnessChannel: true,
+      sealInput: Layer.succeed(
+        SealTurnInput.SealTurnInputV2,
+        SealTurnInput.SealTurnInputV2.of({
+          prepare: () =>
+            Effect.succeed({
+              text: "what is wrong here?",
+              attachments: [],
+              instructions: "Seals rule.",
+              frame: (text, instructionsInChannel) =>
+                instructionsInChannel ? text : `<rules>\n${text}`,
+            }),
+        }),
+      ),
+    });
+    yield* harness.start;
+    const started = harness.startRootRun.mock.calls[0]![0];
+    expect(started.message.text).toBe("what is wrong here?");
+    expect(started.harnessInstructions).toBe("Seals rule.");
   }),
 );
 

@@ -20078,6 +20078,138 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("reopens the process when Harp's instructions change, and only then", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-harness-" });
+      const processQueues: Array<Queue.Queue<SDKMessage>> = [];
+      const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
+      let closes = 0;
+      const terminals = yield* Queue.unbounded<void>();
+      const appendOf = (options: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined) =>
+        (options?.systemPrompt as { readonly append?: string } | undefined)?.append;
+      const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+        instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_CLAUDE_SETTINGS,
+        environment: {},
+        attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-harness-attachments-",
+        }),
+        fileSystem,
+        path: yield* Path.Path,
+        random: yield* SecureRandom.SecureRandom,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        continuationRequests: { offer: () => Effect.void },
+        queryRunner: {
+          allocateSessionId: Effect.succeed(WAKE_NATIVE_SESSION),
+          open: (input) =>
+            Effect.gen(function* () {
+              const sdkMessages = yield* Queue.unbounded<SDKMessage>();
+              processQueues.push(sdkMessages);
+              opened.push(input.options);
+              return {
+                messages: Stream.fromQueue(sdkMessages),
+                offer: () => Effect.void,
+                setModel: () => Effect.void,
+                applyFlagSettings: () => Effect.void,
+                setPermissionMode: () => Effect.void,
+                backgroundTasks: () => Effect.succeed(false),
+                mcpServerStatus: Effect.succeed([]),
+                readMcpResource: () => Effect.die("unexpected MCP resource read"),
+                callMcpTool: () => Effect.die("unexpected MCP tool call"),
+                listPermissionRules: Effect.die("unexpected permission rules read"),
+                stopTask: () => Effect.void,
+                interrupt: Effect.void,
+                close: Effect.sync(() => {
+                  closes += 1;
+                }).pipe(Effect.andThen(Queue.shutdown(sdkMessages))),
+              };
+            }),
+          forkSession: () => Effect.die("unused forkSession"),
+          subagentLaunchToolUseId: () => Effect.succeed(null),
+          subagentModel: () => Effect.succeed(null),
+          assertComplete: Effect.void,
+        },
+      });
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd,
+      });
+      const threadId = ThreadId.make("thread-claude-harness");
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-claude-harness"),
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      assert.isTrue(runtime.takesHarnessInstructions);
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      yield* runtime.events.pipe(
+        Stream.runForEach((event) =>
+          event.type === "turn.terminal" ? Queue.offer(terminals, undefined) : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
+      const now = yield* DateTime.now;
+      const turn = (ordinal: number, harnessInstructions?: string) =>
+        runtime.startTurn({
+          ...makeClaudeTestTurnInput({
+            threadId,
+            providerThread:
+              ordinal === 1 ? providerThread : { ...providerThread, status: "active" },
+            now,
+            attemptId: RunAttemptId.make(`attempt-claude-harness-${String(ordinal)}`),
+            text: `Turn ${String(ordinal)}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+            runtimePolicy,
+          }),
+          ...(harnessInstructions === undefined ? {} : { harnessInstructions }),
+        });
+      const finish = (queue: number, ordinal: number) =>
+        Queue.offer(
+          processQueues[queue]!,
+          makeResultFrame({
+            uuid: `00000000-0000-4000-8000-00000000c00${String(ordinal)}`,
+            result: "done",
+          }),
+        ).pipe(Effect.andThen(Queue.take(terminals)));
+
+      yield* turn(1, "Rule A");
+      assert.include(appendOf(opened[0]) ?? "", "Rule A");
+      yield* finish(0, 1);
+
+      yield* turn(2, "Rule A");
+      assert.lengthOf(processQueues, 1);
+      yield* finish(0, 2);
+
+      yield* turn(3, "Rule B");
+      assert.lengthOf(processQueues, 2);
+      assert.equal(closes, 1);
+      assert.include(appendOf(opened[1]) ?? "", "Rule B");
+      assert.notInclude(appendOf(opened[1]) ?? "", "Rule A");
+      yield* finish(1, 3);
+
+      // A turn without instructions (a continuation, a slash command) keeps the live process.
+      yield* turn(4);
+      assert.lengthOf(processQueues, 2);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect(
     "keeps the process and its roster when a model change meets a running background shell",
     () =>

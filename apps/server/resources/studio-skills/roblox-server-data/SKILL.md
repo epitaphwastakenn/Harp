@@ -20,7 +20,7 @@ sources:
 
 Load for leaderboards, messaging, MemoryStore coordination, world state, seasons, or guilds. Player persistence: `roblox-data`; Open Cloud: `roblox-cloud`.
 
-Harp default: per-player saves use DataService (typed) by Leif (load the `roblox-data` skill with its dataservice-typed reference); this skill is for cross-server and non-player data only.
+Per-player saves belong to `roblox-data` (the game's existing data layer, or DataService (typed) by Leif in a new game); this skill is for cross-server and non-player data only.
 
 ## Quick Reference
 

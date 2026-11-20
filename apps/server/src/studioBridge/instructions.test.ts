@@ -35,12 +35,24 @@ describe("studioSelectionContext", () => {
 describe("studioBridgeInstructions", () => {
   it("includes the skill catalog only when there are skills", () => {
     const base = { autoPlaytest: true, officialMcp: false, blenderMcp: false };
-    expect(studioBridgeInstructions({ ...base, skillCatalog: "" })).not.toContain(
-      "## Roblox skills",
-    );
-    expect(studioBridgeInstructions({ ...base, skillCatalog: "- `roblox-gui`: UI" })).toContain(
-      "## Roblox skills",
-    );
+    expect(studioBridgeInstructions({ ...base, skillCatalog: "" })).not.toContain("## Skills");
+    const text = studioBridgeInstructions({ ...base, skillCatalog: "- `roblox-gui`: UI" });
+    expect(text).toContain("## Skills");
+    expect(text).toContain("- `roblox-gui`: UI");
+  });
+
+  it("asks the agent to size up the game before imposing any default", () => {
+    const text = studioBridgeInstructions({
+      skillCatalog: "",
+      autoPlaytest: false,
+      officialMcp: false,
+      blenderMcp: false,
+    });
+    expect(text.indexOf("## Size up the game first")).toBeLessThan(text.indexOf("## Working"));
+    expect(text).toContain("never add a parallel one");
+    expect(text).toContain("When in doubt, treat it as established.");
+    // A default data layer belongs to new games, so it lives in the data skill, not here.
+    expect(text).not.toContain("DataService (typed)");
   });
 });
 

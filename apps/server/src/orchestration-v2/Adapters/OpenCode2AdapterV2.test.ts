@@ -4871,6 +4871,36 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }),
   );
 
+  it.effect("adds Harp's instructions to the session entry and keeps them for turns without", () =>
+    Effect.gen(function* () {
+      const turn = [
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ];
+      const { runtime, thread } = yield* resumed([
+        ...turn,
+        out("session.instructions.entry.put", {
+          sessionID: SESSION,
+          key: "t3-code",
+          value: `${buildRuntimeInstructions({ harness: "OpenCode", model: bigPickle.model })}\n\nSeals rule.`,
+        }),
+        reply("session.instructions.entry.put", null),
+        ...turn,
+        ...turn,
+      ]);
+      assert.isTrue(runtime.takesHarnessInstructions);
+      for (const harnessInstructions of [undefined, "Seals rule.", undefined]) {
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn({
+          ...turnInput(thread),
+          ...(harnessInstructions === undefined ? {} : { harnessInstructions }),
+        });
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      }
+    }),
+  );
+
   it.effect("registers a long thread id's MCP server under a name OpenCode accepts", () =>
     Effect.gen(function* () {
       const child = ThreadId.make(

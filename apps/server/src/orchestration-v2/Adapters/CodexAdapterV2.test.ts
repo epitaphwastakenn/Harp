@@ -287,6 +287,18 @@ describe("CodexAdapterV2 runtime policy", () => {
         value: "Filtered to overdue",
       });
       assert.isDefined(withT3.additionalContext?.["t3_code_runtime"]);
+      const withHarness = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-app-context",
+        codexInput: [{ type: "text", text: "what's on my list?" }],
+        runtimePolicy: policy,
+        modelSelection,
+        harnessInstructions: "Seals rule.",
+      });
+      // Harp's own instructions are developer context, unlike the quoted app context.
+      assert.deepEqual(withHarness.additionalContext, {
+        harp_instructions_01: { kind: "application", value: "Seals rule." },
+      });
+      assert.deepEqual(withHarness.input, [{ type: "text", text: "what's on my list?" }]);
     }),
   );
 });

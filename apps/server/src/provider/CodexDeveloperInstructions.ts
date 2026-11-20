@@ -51,3 +51,47 @@ export function buildCodexAdditionalContext(
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
   };
 }
+
+const byteLength = (text: string) => Buffer.byteLength(text, "utf8");
+
+const splitToByteCap = (text: string, cap: number): ReadonlyArray<string> => {
+  const chunks: string[] = [];
+  let current = "";
+  const pushLongLine = (line: string) => {
+    let piece = "";
+    for (const char of line) {
+      if (byteLength(piece + char) > cap) {
+        chunks.push(piece);
+        piece = "";
+      }
+      piece += char;
+    }
+    return piece;
+  };
+  for (const line of text.split("\n")) {
+    const joined = current === "" ? line : `${current}\n${line}`;
+    if (byteLength(joined) <= cap) {
+      current = joined;
+      continue;
+    }
+    if (current !== "") chunks.push(current);
+    current = byteLength(line) <= cap ? line : pushLongLine(line);
+  }
+  if (current !== "") chunks.push(current);
+  return chunks;
+};
+
+/** Harp's standing instructions as developer context, split to fit the per-entry cap. */
+export function buildCodexHarnessContext(
+  instructions: string | undefined,
+): Record<string, V2TurnStartParams__AdditionalContextEntry> {
+  if (instructions === undefined || instructions.trim() === "") return {};
+  return Object.fromEntries(
+    splitToByteCap(instructions.trim(), CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES).map(
+      (chunk, index) => [
+        `harp_instructions_${String(index + 1).padStart(2, "0")}`,
+        { kind: "application" as const, value: chunk },
+      ],
+    ),
+  );
+}

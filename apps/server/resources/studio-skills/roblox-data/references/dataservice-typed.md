@@ -1,4 +1,4 @@
-# DataService (typed) by Leif: the Harp default for player data
+# DataService (typed) by Leif: the Harp default for player data in a new game
 
 > Harp addition, not part of the roblox-brain upstream. Checked on 2026-10-20 against the repo
 > (`wally.toml`, `docs/intro.md`, `docs/service-functions.md`, `src/*.luau`, version 1.1.0, committed
@@ -17,9 +17,11 @@ a DataStore and replicates to that player's client.
   function to update it.
 - Server writes replicate to that player's client automatically. The client has a mirror for UI.
 - Types come from the template, so `Data[player].inventory.apples()` is typed `number`.
-- The user is a professional Roblox developer who uses this on purpose. Use it for any player data or
-  DataStore need unless the user explicitly asks for something else. Never hand-roll a wrapper or
-  session lock for player data.
+- Use it for player data in a game that has no data layer yet, unless the user asks for something
+  else. Never hand-roll a wrapper or session lock for player data.
+- An established game keeps the data layer it already has, even when it is not this one: extend that
+  layer and never add DataService beside it. Moving live saves to it is a migration the user must ask
+  for and approve.
 
 It is not for global or cross-server data (leaderboards, world state). Use `roblox-server-data` for
 those.

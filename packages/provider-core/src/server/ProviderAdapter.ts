@@ -542,6 +542,8 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /** Harp's standing instructions, sent only to runtimes with `takesHarnessInstructions`. */
+  readonly harnessInstructions?: string;
 }
 
 export interface ProviderAdapterV2SteerInput {
@@ -682,6 +684,11 @@ export interface ProviderAdapterV2SessionRuntime {
    * must keep Waiting.
    */
   readonly backgroundTasksEndWithProcess?: true;
+  /**
+   * Set when the runtime delivers `harnessInstructions` through the provider's own system or
+   * developer channel; otherwise Harp puts them in the prompt text.
+   */
+  readonly takesHarnessInstructions?: true;
   readonly getModelContextWindow?: (
     modelSelection: ModelSelection,
     cwd?: string | null,

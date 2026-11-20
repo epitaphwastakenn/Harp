@@ -122,21 +122,27 @@ describe("SealTurnInput", () => {
       });
       const prepared = yield* prepare("fix the bug", []);
       expect(prepared.text).toBe("fix the bug");
-      expect(prepared.frame(prepared.text)).toBe(
+      expect(prepared.frame(prepared.text, false)).toBe(
         "<sealcode_harness_instructions>\nAlways answer in Portuguese.\n</sealcode_harness_instructions>\n\nfix the bug",
       );
+      // A provider channel carries the rules instead, so the prompt is the user's text alone.
+      expect(prepared.instructions).toBe("Always answer in Portuguese.");
+      expect(prepared.frame(prepared.text, true)).toBe("fix the bug");
     }),
   );
 
   it.effect("adds nothing when no rules are set and leaves slash commands alone", () =>
     Effect.gen(function* () {
       const none = yield* harness({ mainVision: true }).prepare("hello", []);
-      expect(none.frame("hello")).toBe("hello");
+      expect(none.frame("hello", false)).toBe("hello");
+      expect(none.instructions).toBe("");
       const command = yield* harness({ sealsInstructions: "rules", mainVision: true }).prepare(
         "/compact",
         [],
       );
-      expect(command.frame("/compact")).toBe("/compact");
+      expect(command.frame("/compact", false)).toBe("/compact");
+      // The channel keeps them through a slash command, so the provider sees no change.
+      expect(command.instructions).toBe("rules");
     }),
   );
 
@@ -377,12 +383,25 @@ describe("SealTurnInput", () => {
               text: "build a tower",
               attachments: [],
             })
-            .pipe(Effect.map((prepared) => prepared.frame(prepared.text)));
+            .pipe(Effect.map((prepared) => prepared.frame(prepared.text, false)));
 
         expect(yield* turn("conversation-1", true)).toBe(
           "<sealcode_harness_instructions>\nSeals rule.\n\n<studio_instructions>\nUse the Studio tools.\n</studio_instructions>\n</sealcode_harness_instructions>\n\nbuild a tower",
         );
         expect(yield* turn("conversation-1", false)).not.toContain("studio_instructions");
+        const channel = yield* service.prepare({
+          cwd: "/game",
+          workspaceRoot: "/game",
+          providerThreadId: "conversation-1",
+          freshConversation: false,
+          modelSelection: mainSelection,
+          text: "build a tower",
+          attachments: [],
+        });
+        expect(channel.instructions).toBe(
+          "Seals rule.\n\n<studio_instructions>\nUse the Studio tools.\n</studio_instructions>",
+        );
+        expect(channel.frame(channel.text, true)).toBe("build a tower");
         // A conversation Harp has not given them to in this process gets them once.
         expect(yield* turn("conversation-2", false)).toContain("<studio_instructions>");
         expect(yield* turn("conversation-2", false)).not.toContain("studio_instructions");
@@ -401,7 +420,7 @@ describe("SealTurnInput", () => {
           text: "/compact keep the shop work",
           attachments: [],
         });
-        expect(compacted.frame(compacted.text)).toBe("/compact keep the shop work");
+        expect(compacted.frame(compacted.text, false)).toBe("/compact keep the shop work");
         expect(loadedSkillResources("thread-1").size).toBe(0);
         expect(yield* turn("conversation-2", false)).toContain("<studio_instructions>");
       }).pipe(Effect.provide(layer));
@@ -455,10 +474,20 @@ describe("SealTurnInput", () => {
               text: "open it",
               attachments: [],
             })
-            .pipe(Effect.map((prepared) => prepared.frame(prepared.text)));
+            .pipe(Effect.map((prepared) => prepared.frame(prepared.text, false)));
         expect(yield* turn(undefined)).toContain("game.Workspace.Door");
         expect(yield* turn(true)).toContain("game.Workspace.Door");
         expect(yield* turn(false)).toBe("open it");
+        // The selection is what the user attached, so it stays in the prompt with a channel too.
+        const channel = yield* service.prepare({
+          cwd: "/game",
+          workspaceRoot: "/game",
+          modelSelection: mainSelection,
+          text: "open it",
+          attachments: [],
+        });
+        expect(channel.frame(channel.text, true)).toContain("game.Workspace.Door");
+        expect(channel.frame(channel.text, true)).not.toContain("sealcode_harness_instructions");
       }).pipe(Effect.provide(layer));
     }),
   );

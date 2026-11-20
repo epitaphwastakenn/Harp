@@ -4,8 +4,35 @@ import { describe, it } from "vite-plus/test";
 
 import {
   buildCodexAdditionalContext,
+  buildCodexHarnessContext,
   CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
 } from "./CodexDeveloperInstructions.ts";
+
+describe("buildCodexHarnessContext", () => {
+  it("splits Harp's instructions into ordered entries under the cap, losing nothing", () => {
+    const limit = CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES;
+    const lines = Array.from({ length: 300 }, (_, index) => `- rule ${String(index)} ✓ ação`);
+    const longLine = "ç".repeat(limit);
+    const text = [...lines, longLine, "last rule"].join("\n");
+    const context = buildCodexHarnessContext(text);
+    const keys = Object.keys(context);
+    NodeAssert.ok(keys.length > 2);
+    NodeAssert.deepEqual(keys, keys.toSorted());
+    for (const entry of Object.values(context)) {
+      NodeAssert.equal(entry.kind, "application");
+      NodeAssert.ok(Buffer.byteLength(entry.value, "utf8") <= limit);
+    }
+    NodeAssert.equal(
+      Object.values(context)
+        .map((entry) => entry.value)
+        .join("")
+        .replaceAll("\n", ""),
+      text.replaceAll("\n", ""),
+    );
+    NodeAssert.deepEqual(buildCodexHarnessContext("  "), {});
+    NodeAssert.deepEqual(buildCodexHarnessContext(undefined), {});
+  });
+});
 
 describe("buildCodexAdditionalContext", () => {
   describe.each([

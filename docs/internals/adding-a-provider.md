@@ -97,6 +97,11 @@ produce catches them.
   provider failure, and process exit.
 - **Usage limits are not generic failures.** Classify quota and rate-limit errors as `usage_limit`
   with a reset time when the provider gives one, so the thread shows Limited and can resume.
+- **Harp's instructions in the prompt.** The user's rules and the Studio guidance reach a runtime as
+  `harnessInstructions` only when it sets `takesHarnessInstructions`; otherwise Harp puts them in
+  the prompt text. Set the flag only with a real system or developer channel, keep the last value
+  for turns that carry none (continuations, slash commands), and never end running background work
+  just to apply a new value.
 - **Paths and environment.** Test a symlinked workspace, such as macOS `/tmp`; an agent that
   compares canonical paths fails every turn there. Drop inherited credentials the instance did not
   configure. Report unknown sign-in as unknown rather than as signed in.

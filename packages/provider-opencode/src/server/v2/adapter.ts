@@ -374,6 +374,8 @@ interface ThreadState {
     | { readonly name: string; readonly directory: string; readonly credential: string }
     | undefined;
   instructions: string | undefined;
+  /** Harp's last instructions, kept for turns that carry none, such as continuations. */
+  harnessInstructions: string | undefined;
 }
 
 type TurnTerminal =
@@ -902,6 +904,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       externalPrompts: new Map(),
       mcp: undefined,
       instructions: undefined,
+      harnessInstructions: undefined,
     });
 
     const rootOf = (state: ThreadState): ThreadState => {
@@ -4223,9 +4226,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           yield* Effect.sleep(MCP_TOOL_RELOAD_SETTLE);
         }
       }
+      if (turnInput.harnessInstructions !== undefined) {
+        state.harnessInstructions = turnInput.harnessInstructions;
+      }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
         t3OrchestrationSystemPrompt(mcpAvailable, mcpSession?.capabilities?.has("device") === true),
+        state.harnessInstructions,
       ]
         .filter((part) => part !== undefined && part.length > 0)
         .join("\n\n");
@@ -4553,6 +4560,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         return session;
       },
       events: Stream.fromQueue(events),
+      takesHarnessInstructions: true,
       // Idle release must wait for background children and held wakes after parent settlement.
       hasPendingBackgroundWork: Effect.sync(() => [...threads.values()].some(owesWork)),
       hasPendingBackgroundWorkForThread: (providerThread) =>
