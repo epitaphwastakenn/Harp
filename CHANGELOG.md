@@ -10,6 +10,16 @@ each version's section as that release's notes. Newest version first:
 - **Title** — description   (under New, titled items show as cards)
 -->
 
+## 2.21.0 · 2026-11-20
+
+> Harp's guidance no longer rides inside your messages, and agents treat an established game like one.
+
+### Improved
+
+- **Your messages stay yours** — With Claude, Codex and OpenCode, your rules and Harp's Studio instructions now reach the agent on their own, instead of being pasted above what you type, and they survive when a long conversation is compacted. Antigravity, Cursor and Grok still get them in the message for now.
+- **Live games first** — In a Roblox thread the agent first checks whether the game is established or new. In an established game it follows the game's own systems, keeps old saves loading and never adds a second data layer. DataService (typed) is now the default only for a new game.
+- **Shorter Studio instructions** — The Studio guidance every conversation starts with is less than half its old size, and the agent decides which Roblox skills a request actually needs.
+
 ## 2.20.4 · 2026-11-16
 
 > Antigravity no longer drops every other message when its model is slow to answer.
